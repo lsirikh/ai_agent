@@ -85,6 +85,9 @@ async def lifespan(app: FastAPI):
     # Start heartbeat task (Phase 17.2)
     asyncio.create_task(heartbeat_task())
 
+    # 첫 음성 요청이 모델 로드를 기다리지 않도록 시작할 때 백그라운드에서 미리 불러온다
+    asyncio.create_task(asyncio.to_thread(get_transcriber))
+
     yield
 
     # Shutdown
@@ -391,8 +394,11 @@ async def transcribe_audio(
         )
 
         # 전사 수행
-        transcriber = get_transcriber()
-        result = transcriber.transcribe(audio_data, language=language)
+        # 모델 로드·전사는 무겁고 동기라 스레드에서 돌려 /health 가 계속 응답하게 한다
+        transcriber = await asyncio.to_thread(get_transcriber)
+        result = await asyncio.to_thread(
+            transcriber.transcribe, audio_data, language=language
+        )
 
         duration_ms = int((time.time() - start_time) * 1000)
 
