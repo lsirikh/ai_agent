@@ -63,7 +63,10 @@ _current_session: Dict[str, Any] = {}  # 현재 세션 정보
 
 # Phase 36.3: 음성 타임아웃
 # Phase 50.3: 동적 설정 지원 - Orchestrator에서 브로드캐스트된 값으로 업데이트됨
-_speech_timeout_seconds: float = 3.0  # 기본값 3초, Orchestrator에서 동적으로 변경 가능
+# 말이 멈춘 뒤 답하기까지 기다리는 무음 시간.
+# 설정 화면에서 바꾸면 Orchestrator 가 전달한다
+DEFAULT_END_PAUSE_SECONDS = 2.0
+_speech_timeout_seconds: float = DEFAULT_END_PAUSE_SECONDS
 _last_speech_time: Optional[float] = None  # 마지막 음성 감지 시간
 
 # Phase 46: 녹음 진행 추적

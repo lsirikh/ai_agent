@@ -265,7 +265,7 @@ async def update_settings(request: OrchestratorSettingsRequest):
 
     if not orchestrator:
         return OrchestratorSettingsResponse(
-            end_pause_seconds=3.0,
+            end_pause_seconds=2.0,
             listening_timeout_seconds=10.0,
             status="orchestrator_not_ready"
         )
@@ -305,7 +305,7 @@ async def get_settings():
 
     if not orchestrator:
         return OrchestratorSettingsResponse(
-            end_pause_seconds=3.0,
+            end_pause_seconds=2.0,
             listening_timeout_seconds=10.0,
             status="orchestrator_not_ready"
         )

@@ -34,7 +34,10 @@
 - [x] DB 마이그레이션, compose, 요구사항(mcp·trafilatura)
 - [x] 데스크톱 채팅·설정 + 시나리오 테스트 2개
 - [x] live: ev-llm 재생성 후 `tests/integration/test_tools_live.py` 3개 통과 (j), 기존 live 통합 대화 2개 통과
-- [x] live: `tests/integration/test_knowledge_live.py` (가상 위키 업로드→RAG 답→삭제 확인) 통과
+- [x] live: 가상 위키 지식 베이스 시험 통과 → 이후 master 의 `tests/scenarios/test_knowledge_live.py` 와 중복이라 삭제(DECISIONS 12)
+- [x] 줄바꿈을 7c542df(LF)에 맞춤, ruff 가 건드린 관계없는 파일 복원(DECISIONS 10)
+- [x] master(9bd0e8d) 변경을 파일 내용으로 들여옴, 오케스트레이터 충돌 1곳 해결(음성 RAG + 도구)(DECISIONS 11)
+- [x] 실제 스택은 다시 만들지 않음 — live 는 떠 있는 vLLM 에 요청만(DECISIONS 8)
 - [x] SearXNG 설정을 임시 컨테이너로 확인(naver 결과 JSON), 실제 검색·web_fetch 왕복 확인 후 컨테이너 정리
 
 ## 발견

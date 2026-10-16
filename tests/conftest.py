@@ -20,3 +20,18 @@ def _disable_pipeline_logger_auto_connect(monkeypatch: pytest.MonkeyPatch) -> No
         return None
 
     monkeypatch.setattr(PipelineLogger, "_ensure_redis", _no_auto_connect)
+
+
+@pytest.fixture(autouse=True)
+def _disable_orchestrator_knowledge_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    """음성 턴의 지식 검색이 테스트마다 실제 rag:8006 이름 조회로
+    수 초씩 기다리지 않게."""
+    try:
+        from services.orchestrator.app.orchestrator import Orchestrator
+    except ImportError:
+        return
+
+    async def _no_results(self: Orchestrator, query: str) -> list:
+        return []
+
+    monkeypatch.setattr(Orchestrator, "_search_knowledge", _no_results)

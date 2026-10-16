@@ -5,9 +5,9 @@ TDD 방식으로 공유 PipelineLogger 클래스를 테스트합니다.
 
 Based on: docs/PRD_Phase30_Code_Cleanup.md
 """
-from unittest.mock import AsyncMock
-
 import pytest
+from unittest.mock import AsyncMock, MagicMock
+
 
 # ============================================
 # Phase 30.1.1: 공유 라이브러리 구조 생성
@@ -181,7 +181,7 @@ class TestPipelineLoggerFunctionality:
     @pytest.mark.asyncio
     async def test_redis_publish_to_correct_channel(self):
         """Redis publish가 올바른 채널로 호출되는지 확인"""
-        from shared.pipeline_logger import DEFAULT_LOG_CHANNEL, PipelineLogger
+        from shared.pipeline_logger import PipelineLogger, DEFAULT_LOG_CHANNEL
 
         mock_redis = AsyncMock()
         logger = PipelineLogger(service_name="test_service", redis_client=mock_redis)

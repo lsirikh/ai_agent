@@ -6,12 +6,16 @@ Redis 구독자는 synthesize(text) -> float32 24kHz mono 를 기대한다
 MeloTTS 는 44.1kHz 로 내보내므로 24kHz 로 바꿔 돌려준다.
 """
 
+import re
 import threading
 from typing import Any, Callable
 
 import numpy as np
 
 PIPELINE_SAMPLE_RATE = 24000
+
+# MeloTTS 한국어가 읽을 수 있는 글자만 남긴다(';' 같은 기호는 KeyError 로 합성 실패)
+UNREADABLE = re.compile(r"[^0-9A-Za-z가-힣ㄱ-ㆎ\s.,!?'\"%-]")
 
 
 def _resample(audio: np.ndarray, source_rate: int, target_rate: int) -> np.ndarray:
@@ -40,6 +44,9 @@ class MeloSynthesizer:
 
     def synthesize(self, text: str) -> np.ndarray:
         if not text or not text.strip():
+            return np.array([], dtype=np.float32)
+        text = re.sub(r"\s{2,}", " ", UNREADABLE.sub(" ", text)).strip()
+        if not text:
             return np.array([], dtype=np.float32)
         with self._lock:
             audio = self._engine.synthesize(text, speed=self._speed)

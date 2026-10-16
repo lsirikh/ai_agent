@@ -53,3 +53,20 @@
 - chosen: (b) — 두 문자열이 글자 단위로 같아 사본을 지우고 상수를 쓴다(동작 동일).
 - why: 하네스가 중복으로 지적. 한 곳만 고치면 두 경로가 같이 바뀐다.
 - effect: 채팅 시스템 프롬프트를 바꾸려면 `services/backend/app/services/llm_client.py` 의 `LANGUAGE_PROMPTS["ko"]` 를 고친다.
+
+## 10. 줄바꿈 복원 (사용자 추가 지시)
+- options: (a) 바뀐 파일을 7c542df 의 줄바꿈으로 되돌림, (b) 그대로 둠
+- chosen: (a). 7c542df 에서 바뀐 파일은 원래 모두 LF 였다 → 전부 LF 로 바꿨고(내용 그대로), 새 파일도 LF. 원인은 Windows 에서 Python 텍스트 모드 `open(..., "w")` 로 쓴 스크립트 편집(CRLF 로 저장됨).
+- 함께 고친 것: 앞선 `ruff check --fix shared/` 가 이 작업과 관계없는 `shared/__init__.py`·`shared/pipeline_logger/*`·`tests/shared/test_pipeline_logger.py` 를 고쳤었다 → 7c542df 내용으로 되돌렸다.
+- effect: 공백을 빼지 않은 diff 와 뺀 diff 가 거의 같아졌다(+3554/-106 vs +3545/-97, master 들여온 내용 포함). master 가 추가한 `.gitattributes`(소스 eol=lf)와도 맞는다.
+
+## 11. master 들여오기 방법 — git 병합 대신 파일 내용으로
+- options: (a) `git merge master` (하네스가 git 쓰기를 막음), (b) master 변경을 파일 내용으로 반영: master 만 바꾼 파일은 master 내용 그대로(LF), 양쪽이 바꾼 4개는 3-way 병합 결과, (c) 들여오지 않고 충돌 여부만 보고
+- chosen: (b). `docker-compose.dev.yml`·`routes/settings.py`·`orchestrator/main.py` 는 충돌 없이 합쳐졌다. compose 는 master 의 `--gpu-memory-utilization ${LLM_GPU_UTIL:-0.6}` 와 STT GPU 설정을 그대로 두고 도구 플래그는 한 벌만 남는다.
+- 실제 충돌 1곳: `services/orchestrator/app/orchestrator.py` 의 `_process_llm_stream` — master 의 음성 RAG(`knowledge = await self._relevant_knowledge(text)`, `rag_context=knowledge or None`)와 이 브랜치의 도구 인자(`tools=`, `confirm=`, 확인된 도구 결과)가 같은 `generate_stream(...)` 호출 줄을 고쳤다. 해결: 확인된 도구 결과가 없을 때만 도구 레지스트리를 만들고 지식 베이스 근거를 `rag_context` 로 붙인다(둘 다 유지).
+- effect: 병합 기준점이 여전히 7c542df 라서 실제 `git merge master` 를 하면 이 한 곳은 다시 충돌로 표시된다. 그때는 이 브랜치 쪽(ours)을 고르면 된다 — master 의 음성 RAG 가 이미 들어 있다. 나머지 파일은 master 와 내용이 같거나 깔끔하게 합쳐진다. master 쪽 일부 blob(compose·settings.py·orchestrator 의 main.py/orchestrator.py 등)이 CRLF 로 커밋돼 있어, `.gitattributes` 재정규화 전이라면 `git merge -X ignore-space-at-eol` 이 필요할 수 있다.
+
+## 12. 중복 지식 베이스 시험 제거
+- options: (a) 이 브랜치의 `tests/integration/test_knowledge_live.py` 유지, (b) 삭제
+- chosen: (b). master 의 `tests/scenarios/test_knowledge_live.py` 가 같은 시나리오(가상 위키 업로드 → 검색 → 채팅 답 → 삭제 → 삭제 후 미검색)를 더 넓게(가수·도시·드라마) 다룬다.
+- effect: 지식 베이스 live 시험은 master 의 시나리오 하나만 남는다(이 브랜치에 들여옴).

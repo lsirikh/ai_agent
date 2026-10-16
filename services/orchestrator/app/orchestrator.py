@@ -50,6 +50,52 @@ def strip_wake_phrase(text: str) -> str:
     return WAKE_PHRASE_PATTERN.sub("", text, count=1).strip()
 
 
+ORDINALS = [
+    "첫째", "둘째", "셋째", "넷째", "다섯째",
+    "여섯째", "일곱째", "여덟째", "아홉째", "열째",
+]
+LIST_NUMBER_AT_LINE_START = re.compile(r"^\s*(\d{1,2})[.)]\s+")
+LIST_NUMBER_AT_END = re.compile(r"\s+(\d{1,2})[.)]\s*$")
+BULLET_AT_LINE_START = re.compile(r"^\s*[-*•]\s+")
+MARKDOWN_MARKS = re.compile(r"\*\*|__|`|#+\s*")
+
+
+def _ordinal(number: int) -> str:
+    return ORDINALS[number - 1] if 1 <= number <= len(ORDINALS) else f"{number}번째"
+
+
+def to_speech(
+    sentence: str, pending_number: Optional[int]
+) -> tuple[str, Optional[int]]:
+    """
+    TTS 가 자연스럽게 읽도록 한 문장을 다듬는다.
+
+    - 줄 앞 번호 "1. " → "첫째, ", 글머리표·마크다운 기호 제거, ';' ':' → ','.
+    - 문장 나누기로 끝에 떨어진 번호("…좋겠네요: 1.")는 떼고 다음 문장 앞에 붙인다.
+    반환: (읽을 문장, 다음 문장 앞에 붙일 번호)
+    """
+    trailing = LIST_NUMBER_AT_END.search(sentence)
+    next_number = int(trailing.group(1)) if trailing else None
+    if trailing:
+        sentence = sentence[: trailing.start()]
+
+    lines = []
+    for line in sentence.splitlines():
+        line = BULLET_AT_LINE_START.sub("", line)
+        line = LIST_NUMBER_AT_LINE_START.sub(
+            lambda m: f"{_ordinal(int(m.group(1)))}, ", line
+        )
+        if line.strip():
+            lines.append(line.strip())
+    text = " ".join(lines)
+    if pending_number is not None:
+        text = f"{_ordinal(pending_number)}, {text}"
+    text = MARKDOWN_MARKS.sub("", text)
+    text = re.sub(r"\s*[;:]\s*", ", ", text)
+    text = re.sub(r",\s*$", ".", re.sub(r"\s{2,}", " ", text)).strip()
+    return text, next_number
+
+
 class Orchestrator:
     """
     음성 대화 오케스트레이터
@@ -86,6 +132,10 @@ class Orchestrator:
     # 듣기 상태에서 발화·end_pause·STT 처리를 기다리는 여유 시간
     UTTERANCE_GRACE_SECONDS = 30.0
 
+    # 지식 베이스(RAG). 실측: 관련 질문 0.53~0.70, 인사말 0.49~0.50
+    RAG_URL = os.getenv("RAG_SERVICE_URL", "http://rag:8006")
+    RAG_MIN_SCORE = float(os.getenv("RAG_MIN_SCORE", "0.52"))
+
     # 마지막 TTS 요청 후 완료 신호를 기다리는 최대 시간
     TTS_COMPLETE_TIMEOUT_SECONDS = 60.0
 
@@ -94,7 +144,7 @@ class Orchestrator:
         llm_client: Optional[LLMClient] = None,
         redis_client: Optional[Any] = None,
         listening_timeout: float = 10.0,
-        end_pause_seconds: float = 3.0,
+        end_pause_seconds: float = 2.0,
         environment: str = "development",
         backend_client: Optional[BackendClient] = None
     ):
@@ -146,6 +196,9 @@ class Orchestrator:
         # 이번 턴에 보냈지만 아직 완료되지 않은 TTS 문장 수
         self._pending_tts = 0
         self._tts_watchdog: Optional[asyncio.Task] = None
+
+        # 문장 끝에 떨어진 목록 번호(다음 문장 앞에 '첫째,' 처럼 붙인다)
+        self._pending_list_number: Optional[int] = None
         self._processing_task: Optional[asyncio.Task] = None
         self._is_running = False
 
@@ -399,6 +452,32 @@ class Orchestrator:
             # Barge-in으로 인한 취소
             pass
 
+    async def _search_knowledge(self, query: str) -> list[dict[str, Any]]:
+        """RAG 서비스 검색 결과(content·score·metadata). 실패하면 빈 목록."""
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(
+                    f"{self.RAG_URL}/retrieve", json={"query": query, "top_k": 3}
+                )
+                response.raise_for_status()
+                return response.json().get("results") or []
+        except Exception:
+            return []
+
+    async def _relevant_knowledge(self, query: str) -> list[dict[str, Any]]:
+        """기준 점수 이상인 근거만 LLM 형식({content, source})으로."""
+        results = await self._search_knowledge(query)
+        return [
+            {
+                "content": r.get("content", ""),
+                "source": (r.get("metadata") or {}).get("filename", "문서"),
+            }
+            for r in results
+            if r.get("score", 0) >= self.RAG_MIN_SCORE
+        ]
+
     async def _process_llm_stream(self, text: str) -> None:
         """
         LLM 스트리밍 응답 처리
@@ -407,6 +486,7 @@ class Orchestrator:
             text: 사용자 입력 텍스트
         """
         first_sentence_sent = False
+        self._pending_list_number = None
         full_response = ""
         llm_start_time = time.time()
         web_sources: list = []
@@ -451,7 +531,11 @@ class Orchestrator:
                 if YES_PATTERN.match(text):
                     rag_context = [await self._run_confirmed_tool(pending)]
 
-            registry = await self._build_tools() if rag_context is None else None
+            registry = None
+            if rag_context is None:
+                registry = await self._build_tools()
+                # 채팅과 같은 지식 베이스에서 근거를 찾아 이번 질문에 붙인다
+                rag_context = await self._relevant_knowledge(text) or None
             async for token in self.llm_client.generate_stream(
                 text, history=history, summary=summary, rag_context=rag_context,
                 tools=registry, confirm=self._defer_confirm
@@ -616,7 +700,11 @@ class Orchestrator:
                 data={"message": f"Skipped non-Korean sentence: {sentence[:50]}"},
             )
             return
-        await self.publish_tts_request(sentence)
+        speech, self._pending_list_number = to_speech(
+            sentence, self._pending_list_number
+        )
+        if speech:
+            await self.publish_tts_request(speech)
 
     async def publish_tts_request(self, text: str) -> None:
         """

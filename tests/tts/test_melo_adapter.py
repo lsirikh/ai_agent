@@ -58,3 +58,16 @@ def test_should_pick_engine_from_setting() -> None:
 
     assert isinstance(melo, MeloSynthesizer)
     assert default is kokoro
+
+
+def test_should_drop_symbols_melo_cannot_read() -> None:
+    from services.tts.app.melo_adapter import MeloSynthesizer
+
+    engine = FakeMeloEngine()
+    synth = MeloSynthesizer(engine=engine)
+
+    synth.synthesize("산책하세요; 비가 오면 → 영화를 보세요 ★")
+
+    text = engine.calls[0][0]
+    assert ";" not in text and "→" not in text and "★" not in text
+    assert "산책하세요" in text and "영화를 보세요" in text
