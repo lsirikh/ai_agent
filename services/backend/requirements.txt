@@ -31,3 +31,7 @@ python-multipart>=0.0.6
 
 # Docker SDK (Phase 35: LLM Loading Monitor)
 docker>=7.0.0
+
+# LLM 도구: MCP 클라이언트(stdio·streamable HTTP), web_fetch 본문 추출
+mcp>=2.3.0,<3
+trafilatura>=2.0.0

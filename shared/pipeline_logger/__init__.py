@@ -1,5 +1,5 @@
 """Pipeline Logger shared module"""
+from .constants import DEFAULT_LOG_CHANNEL, HEARTBEAT_INTERVAL
 from .logger import PipelineLogger
-from .constants import HEARTBEAT_INTERVAL, DEFAULT_LOG_CHANNEL
 
 __all__ = ["PipelineLogger", "HEARTBEAT_INTERVAL", "DEFAULT_LOG_CHANNEL"]

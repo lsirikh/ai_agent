@@ -72,6 +72,9 @@ services:
       --gpu-memory-utilization 0.7
       --trust-remote-code
       --port 11003
+      --enable-auto-tool-choice
+      --tool-call-parser hermes
+      --exclude-tools-when-tool-choice-none
     deploy:
       resources:
         reservations:
@@ -265,8 +268,20 @@ services:
       # Pipeline Logging (Phase 27.6 - LLM proxy logging)
       - BACKEND_URL=http://backend:8000
       - PIPELINE_LOGGING_ENABLED=true
+      # LLM 도구: 인터넷 도구(web_search·web_fetch)는 기본 꺼짐(설정 화면 토글이 우선).
+      # 검색 제공자 주소·키가 없으면 인터넷 도구를 노출하지 않는다.
+      # SearXNG: `docker compose --profile search up -d searxng` 후 SEARXNG_URL=http://searxng:8080
+      - INTERNET_TOOLS_ENABLED=${INTERNET_TOOLS_ENABLED:-false}
+      - SEARCH_PROVIDER=${SEARCH_PROVIDER:-searxng}
+      - SEARXNG_URL=${SEARXNG_URL:-}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - NAVER_CLIENT_ID=${NAVER_CLIENT_ID:-}
+      - NAVER_CLIENT_SECRET=${NAVER_CLIENT_SECRET:-}
+      # MCP 서버 목록(JSON, config/mcp/servers.example.json 참고). 비우면 MCP 를 쓰지 않는다
+      - MCP_CONFIG_PATH=${MCP_CONFIG_PATH:-}
     volumes:
       - ./logs/orchestrator:/app/logs
+      - ./config/mcp:/app/config/mcp:ro
       # Phase 31: shared module for pipeline logging
       - ./shared:/app/shared:ro
     ports:
@@ -372,7 +387,19 @@ services:
       - ENV_FILE_PATH=/app/.env
       # 설정 화면 LLM 목록 = 받아 둔 모델만
       - LLM_MODELS_HUB_DIR=/models/llm/hub
+      # LLM 도구: 인터넷 도구(web_search·web_fetch)는 기본 꺼짐(설정 화면 토글이 우선).
+      # 검색 제공자 주소·키가 없으면 인터넷 도구를 노출하지 않는다.
+      # SearXNG: `docker compose --profile search up -d searxng` 후 SEARXNG_URL=http://searxng:8080
+      - INTERNET_TOOLS_ENABLED=${INTERNET_TOOLS_ENABLED:-false}
+      - SEARCH_PROVIDER=${SEARCH_PROVIDER:-searxng}
+      - SEARXNG_URL=${SEARXNG_URL:-}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - NAVER_CLIENT_ID=${NAVER_CLIENT_ID:-}
+      - NAVER_CLIENT_SECRET=${NAVER_CLIENT_SECRET:-}
+      # MCP 서버 목록(JSON, config/mcp/servers.example.json 참고). 비우면 MCP 를 쓰지 않는다
+      - MCP_CONFIG_PATH=${MCP_CONFIG_PATH:-}
     volumes:
+      - ./config/mcp:/app/config/mcp:ro
       - backend-data:/data
       - ${MODEL_CACHE_PATH:-./models}/llm/hub:/models/llm/hub:ro
       - ./logs/backend:/app/logs
@@ -419,6 +446,22 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - edgevoice-net
+    restart: unless-stopped
+
+  # --- SearXNG (선택: 인터넷 검색 도구용 메타 검색) ---
+  # `docker compose --profile search up -d searxng` 로만 뜬다. 포트를 열지 않는다(내부 네트워크 전용).
+  searxng:
+    image: searxng/searxng:latest
+    container_name: ev-searxng
+    profiles: [search]
+    environment:
+      - SEARXNG_BASE_URL=http://searxng:8080/
+      - SEARXNG_SECRET=${SEARXNG_SECRET:-edgevoice-searxng-change-me}
+    volumes:
+      # format=json · language=ko · naver 엔진
+      - ./config/searxng/settings.yml:/etc/searxng/settings.yml:ro
     networks:
       - edgevoice-net
     restart: unless-stopped

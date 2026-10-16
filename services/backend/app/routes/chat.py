@@ -15,13 +15,16 @@ import time
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from shared.mcp_client import start_mcp_from_env
+from shared.tools import build_registry, load_tool_settings
+
 from ..constants.redis_channels import RedisChannels
 from ..services import conversation
-from ..services.chat_service import ChatService
+from ..services.chat_service import ChatService, resolve_confirm
 from .settings import _llm_context_settings
 
 
@@ -34,6 +37,32 @@ _llm_client = None
 _rag_service = None
 _history_store = None
 _chat_service = None
+_mcp = None
+
+
+async def start_mcp():
+    """MCP_CONFIG_PATH 에 설정한 MCP 서버에 붙는다(채팅 도구로 쓴다)."""
+    global _mcp
+    _mcp = await start_mcp_from_env()
+
+
+async def stop_mcp():
+    global _mcp
+    if _mcp is not None:
+        await _mcp.close()
+        _mcp = None
+
+
+async def get_tools():
+    """이번 턴에 쓸 도구: 설정(인터넷 토글, Redis) + MCP 허용 도구."""
+    settings = await load_tool_settings(conversation._get_redis())
+    mcp_tools = []
+    if _mcp is not None:
+        try:
+            mcp_tools = await _mcp.tools()
+        except Exception as e:
+            print(f"[Chat] MCP tools unavailable: {e}")
+    return build_registry(settings, mcp_tools)
 
 
 def reset_services():
@@ -138,7 +167,8 @@ async def get_chat_service():
             rag_service=rag_service,
             history_store=history_store,
             context_enabled=context_enabled,
-            context_window_size=context_window_size
+            context_window_size=context_window_size,
+            tool_provider=get_tools
         )
     else:
         # 이미 생성된 ChatService의 설정 업데이트 (동적 설정 반영)
@@ -156,9 +186,17 @@ class ChatRequest(BaseModel):
     use_rag: bool = True
 
 
+class ConfirmRequest(BaseModel):
+    """도구 실행 확인 (tool_confirm 이벤트의 id)"""
+    confirm_id: str
+    approved: bool
+
+
 class ChatEvent(BaseModel):
     """채팅 이벤트 모델"""
-    type: str  # "token" | "complete" | "rag_context" | "error"
+    # "token" | "complete" | "rag_context" | "error"
+    # | "tool_call" | "tool_confirm" | "tool_result"
+    type: str
     content: str
     session_id: str
     sources: list = []
@@ -208,6 +246,17 @@ async def send_message(request: ChatRequest):
         generate_response(),
         media_type="text/event-stream"
     )
+
+
+@router.post("/confirm")
+async def confirm_tool(request: ConfirmRequest):
+    """
+    채팅 중 tool_confirm 이벤트(쓰기·파괴적 MCP 도구)에 대한 사용자 답.
+    기다리는 확인이 없으면(시간 초과·이미 답함) 404.
+    """
+    if not resolve_confirm(request.confirm_id, request.approved):
+        raise HTTPException(status_code=404, detail="no pending confirmation")
+    return {"confirm_id": request.confirm_id, "approved": request.approved}
 
 
 @router.websocket("/ws/{session_id}")

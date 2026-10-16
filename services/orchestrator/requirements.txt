@@ -16,3 +16,7 @@ pydantic>=2.5.0
 # Web server
 fastapi>=0.104.0
 uvicorn>=0.24.0
+
+# LLM 도구: MCP 클라이언트(stdio·streamable HTTP), web_fetch 본문 추출
+mcp>=2.3.0,<3
+trafilatura>=2.0.0

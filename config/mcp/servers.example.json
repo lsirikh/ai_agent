@@ -1,0 +1,19 @@
+{
+  "servers": [
+    {
+      "name": "ironwall",
+      "url": "http://ironwall-monitoring:8100/mcp",
+      "allowed_tools": ["status", "restart"],
+      "trusted": true,
+      "always_confirm": ["restart"],
+      "timeout": 30
+    },
+    {
+      "name": "test",
+      "command": "python",
+      "args": ["tests/shared/mcp_test_server.py"],
+      "allowed_tools": ["status", "restart"],
+      "trusted": true
+    }
+  ]
+}

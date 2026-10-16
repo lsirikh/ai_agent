@@ -9,7 +9,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks
@@ -548,6 +548,45 @@ async def update_llm_context_settings(
         status="applied",
         estimated_tokens_per_request=estimated_tokens
     )
+
+
+# ===== 도구 설정 (인터넷 검색 토글) =====
+
+class ToolSettings(BaseModel):
+    """LLM 도구 설정. 인터넷 도구(web_search·web_fetch)는 기본 꺼짐."""
+    internet_enabled: bool = False
+    search_provider: Literal["searxng", "tavily", "naver"] = "searxng"
+
+
+class ToolSettingsResponse(ToolSettings):
+    # 지금 설정으로 LLM 에 노출되는 도구 (제공자 주소·키가 없으면 인터넷 도구는 빠진다)
+    tools: List[str] = []
+
+
+async def _tool_settings_response() -> ToolSettingsResponse:
+    from shared.tools import build_registry, load_tool_settings
+
+    from ..services.conversation import _get_redis
+
+    current = await load_tool_settings(_get_redis())
+    return ToolSettingsResponse(**current, tools=build_registry(current).names())
+
+
+@router.get("/tools", response_model=ToolSettingsResponse)
+async def get_tool_settings():
+    """도구 설정 조회 (오케스트레이터·채팅이 턴마다 같은 값을 읽는다)."""
+    return await _tool_settings_response()
+
+
+@router.put("/tools", response_model=ToolSettingsResponse)
+async def update_tool_settings(settings: ToolSettings):
+    """도구 설정 변경 — Redis 에 저장하면 다음 턴부터 음성·채팅에 바로 반영된다."""
+    from shared.tools import TOOL_SETTINGS_KEY
+
+    from ..services.conversation import _get_redis
+
+    await _get_redis().set(TOOL_SETTINGS_KEY, json.dumps(settings.model_dump()))
+    return await _tool_settings_response()
 
 
 @router.patch("/llm", response_model=LLMSettings)

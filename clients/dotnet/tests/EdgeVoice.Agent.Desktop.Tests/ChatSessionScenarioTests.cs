@@ -80,6 +80,54 @@ public class ChatSessionScenarioTests
     }
 
     [AvaloniaFact]
+    public async Task 음성_턴의_도구_결과는_말풍선이_아니라_답에_검색함과_출처로_붙는다()
+    {
+        using var s = new Scenario(setup: b =>
+        {
+            b.Json["/api/sessions/active"] = """{"session_id":"s1"}""";
+            b.Sse["/api/chat/stream"] = new[]
+            {
+                ("init", """{"session_id":"s1","messages":[]}"""),
+                ("message", """{"id":"m1","session_id":"s1","role":"user","content":"서울 날씨?","source":"voice"}"""),
+                ("message", """{"id":"m2","session_id":"s1","role":"tool","content":"1. 기상청","source":"voice","sources":[{"tool":"web_search","is_error":false},{"title":"기상청","url":"https://www.weather.go.kr"}]}"""),
+                ("message", """{"id":"m3","session_id":"s1","role":"assistant","content":"맑아요.","source":"voice","sources":[{"title":"기상청","url":"https://www.weather.go.kr"}]}"""),
+            };
+        });
+        s.Show();
+        var chat = s.Main.Chat;
+
+        await Scenario.WaitUntil(() => chat.Messages.Count == 2);
+
+        Assert.Equal(new[] { "User", "AI" }, chat.Messages.Select(m => m.Role));
+        Assert.Equal("맑아요.\n\n🔎 검색함 · 출처\n- 기상청 (https://www.weather.go.kr)", chat.Messages[1].Text);
+    }
+
+    [AvaloniaFact]
+    public async Task 텍스트_답에서_웹_검색을_쓰면_검색함과_출처_링크를_붙인다()
+    {
+        using var s = new Scenario(setup: b =>
+        {
+            ActiveSession(b);
+            b.Sse["/api/chat/message"] = new[]
+            {
+                ("message", """{"type":"tool_call","tool":"web_search","id":"c1","session_id":"s1","sources":[]}"""),
+                ("message", """{"type":"tool_result","tool":"web_search","id":"c1","session_id":"s1","sources":[{"title":"기상청","url":"https://www.weather.go.kr"}]}"""),
+                ("message", """{"type":"token","content":"맑아요."}"""),
+                ("message", """{"type":"complete"}"""),
+            };
+        });
+        s.Show();
+        var chat = s.Main.Chat;
+        await Scenario.WaitUntil(() => chat.Messages.Count == 4);
+
+        chat.Input = "서울 날씨?";
+        chat.SendCommand.Execute();
+        await Scenario.WaitUntil(() => !chat.IsBusy && chat.Messages.Count == 6);
+
+        Assert.Equal("맑아요.\n\n🔎 검색함 · 출처\n- 기상청 (https://www.weather.go.kr)", chat.Messages[^1].Text);
+    }
+
+    [AvaloniaFact]
     public async Task 채팅의_마이크_버튼은_트레이와_같은_상시_마이크를_음소거한다()
     {
         using var s = new Scenario();
