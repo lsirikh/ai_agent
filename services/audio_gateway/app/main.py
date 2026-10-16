@@ -433,6 +433,15 @@ async def tts_state_subscriber() -> None:
         await pubsub.unsubscribe(TTS_STATE_CHANNEL)
 
 
+# 정상 종료 코드: 1000 정상, 1001 떠남, 1005 상태 코드 없음(앱 종료), 1012 서비스 재시작
+NORMAL_CLOSE_CODES = {1000, 1001, 1005, 1012}
+
+
+def is_normal_close(error: Exception) -> bool:
+    """WebSocket 수신 예외가 정상적인 연결 종료인지."""
+    return isinstance(error, WebSocketDisconnect) and error.code in NORMAL_CLOSE_CODES
+
+
 # 답변 음성을 재생할 /ws/audio 클라이언트들 (게이트웨이는 컨테이너 안이라 직접 재생할 수 없다)
 _playback_clients: set = set()
 
@@ -1083,6 +1092,13 @@ async def websocket_audio_stream(websocket: WebSocket):
             try:
                 data = await websocket.receive_bytes()
             except Exception as recv_error:
+                if is_normal_close(recv_error):
+                    # 앱 종료·서비스 재시작 등 정상 종료는 오류가 아니다
+                    await _logger.info(
+                        "websocket_closed",
+                        f"WebSocket closed: {recv_error}"
+                    )
+                    break
                 print(f"[WS] Receive error: {recv_error}")
                 await _logger.error(
                     "websocket_receive_error",
