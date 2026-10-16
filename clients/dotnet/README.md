@@ -1,0 +1,45 @@
+# EdgeVoice Agent (.NET / WPF)
+
+기존 웹 대시보드(`services/backend/static/index.html`)를 .NET 8 WPF 트레이 상주 에이전트로 옮긴 클라이언트.
+
+## 구성
+
+| 프로젝트 | 내용 |
+|---|---|
+| `src/EdgeVoice.Agent.Core` (net8.0) | 백엔드 REST/SSE 클라이언트, Orchestrator 상태 모니터(`/api/status/stream`), 마이크 → audio-gateway(`/ws/audio`) 스트리머, Autofac 모듈 `EdgeVoiceCoreModule` |
+| `src/EdgeVoice.Agent.Desktop` (net8.0-windows) | 트레이 아이콘 + 파형 오버레이, 메인 창(Dashboard / Chat / Knowledge / Settings / History / Logs), Prism.Core MVVM + Autofac DI |
+
+## 실행
+
+```
+cd clients/dotnet
+dotnet run --project src/EdgeVoice.Agent.Desktop
+```
+
+접속 주소는 `src/EdgeVoice.Agent.Desktop/appsettings.json` (`BackendUrl`, `AudioGatewayWsUrl`, 기본값은 docker-compose.dev.yml 의 호스트 포트 11000 / 11008).
+
+## 트레이 파형
+
+웹을 열지 않고 트레이 아이콘과 화면 오른쪽 아래 오버레이만으로 음성 상태를 확인하고 말할 수 있다.
+
+| 상태 | 표시 |
+|---|---|
+| 듣는 중 (사용자 음성 수신, `listening` 또는 로컬 마이크 스트리밍) | 파란 좁쌀 점들이 퍼짐, 마이크 레벨에 따라 점 크기·속도 변화 |
+| 말하는 중 (TTS, `tts_processing`) | 초록 물결 원이 퍼짐 |
+| 생각 중 (`stt_processing` / `llm_processing`) | 보라 점 3개 회전 |
+| 대기 / 오류 | 회색 / 빨간 점 |
+
+- 트레이 아이콘 왼쪽 클릭 또는 오버레이 왼쪽 클릭: 말하기(마이크 스트리밍) 시작/중지
+- 오버레이 오른쪽 클릭 또는 트레이 메뉴 "EdgeVoice 창 열기": 메인 창
+- 오버레이 드래그: 위치 이동, 트레이 메뉴에서 숨김/표시
+
+## 다른 호스트 프로그램(예: Dotnet.Ironwall.Monitoring)에 붙이기
+
+Core 는 WPF 에 의존하지 않는다. 호스트의 Autofac 컨테이너에 모듈을 등록하고 서비스를 주입받아 쓴다.
+
+```csharp
+builder.RegisterModule(new EdgeVoiceCoreModule(new EdgeVoiceOptions { BackendUrl = "http://edge:11000" }));
+// EdgeVoiceApiClient.ChatAsync(...)   : 상황 설명을 보내 분석/조치 제안 받기
+// VoiceStateMonitor.StateChanged      : 음성 상태 표시
+// MicrophoneStreamer.StartAsync()/Stop(): 음성 입력
+```
