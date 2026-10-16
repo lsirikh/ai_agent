@@ -18,5 +18,7 @@ public sealed class EdgeVoiceCoreModule : Module
         builder.RegisterType<EdgeVoiceApiClient>().SingleInstance();
         builder.RegisterType<VoiceStateMonitor>().SingleInstance();
         builder.RegisterType<MicrophoneStreamer>().SingleInstance();
+        // 트레이와 채팅 화면이 같은 상시 마이크(음소거 상태)를 공유한다
+        builder.Register(c => new AlwaysOnMicrophone(c.Resolve<MicrophoneStreamer>())).SingleInstance();
     }
 }

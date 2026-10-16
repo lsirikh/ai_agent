@@ -68,7 +68,7 @@ services:
     command: >
       --model ${LLM_MODEL:-Qwen/Qwen2.5-14B-Instruct-AWQ}
       --dtype auto
-      --max-model-len 4096
+      --max-model-len ${LLM_MAX_MODEL_LEN:-16384}
       --gpu-memory-utilization 0.7
       --trust-remote-code
       --port 11003
@@ -257,6 +257,8 @@ services:
       - VLLM_BASE_URL=http://llm:11003
       # vLLM 의 --model 과 같은 값이어야 한다(다르면 vLLM 이 요청을 404 로 거절)
       - LLM_MODEL_NAME=${LLM_MODEL:-Qwen/Qwen2.5-14B-Instruct-AWQ}
+      # vLLM --max-model-len 과 같은 값(프롬프트 토큰 예산 계산)
+      - LLM_MAX_MODEL_LEN=${LLM_MAX_MODEL_LEN:-16384}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - LOG_LEVEL=INFO
@@ -354,6 +356,7 @@ services:
       - ORCHESTRATOR_URL=http://orchestrator:8007
       - RAG_SERVICE_URL=http://rag:8006
       - VLLM_BASE_URL=http://llm:11003
+      - LLM_MAX_MODEL_LEN=${LLM_MAX_MODEL_LEN:-16384}
       - TTS_SERVICE_URL=http://tts:8002
       - STT_SERVICE_URL=http://stt:8001
       - WAKE_WORD_SERVICE_URL=http://wake-word:8005
@@ -371,6 +374,8 @@ services:
       - backend-data:/data
       - ./logs/backend:/app/logs
       - ./services/backend/static:/app/static
+      # 오케스트레이터와 같은 대화 프롬프트 조립(shared/context_builder.py)
+      - ./shared:/app/shared:ro
       # Phase 16: .env 파일 마운트 (Settings-Env 동기화)
       - ./.env:/app/.env:rw
       # Phase 35: Docker socket 마운트 (LLM 로딩 모니터용)

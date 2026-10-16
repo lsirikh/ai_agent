@@ -30,10 +30,11 @@ public sealed class TrayController : IDisposable
     private VoiceState? _lastDrawn;
     private string? _lastNotice;
 
-    public TrayController(Application app, VoiceStateMonitor monitor, MicrophoneStreamer mic, Action openMainWindow, Action exit)
+    public TrayController(Application app, VoiceStateMonitor monitor, MicrophoneStreamer mic, AlwaysOnMicrophone alwaysOn,
+        Action openMainWindow, Action exit)
     {
         _mic = mic;
-        _alwaysOn = new AlwaysOnMicrophone(mic);
+        _alwaysOn = alwaysOn;
         _player = new TtsPlayer();
         _mic.AudioReceived += _player.Enqueue;
 
@@ -156,7 +157,6 @@ public sealed class TrayController : IDisposable
     public void Dispose()
     {
         _timer.Stop();
-        _alwaysOn.Dispose();
         _player.Dispose();
         _trayIcon.Dispose();
         _orb.Close();

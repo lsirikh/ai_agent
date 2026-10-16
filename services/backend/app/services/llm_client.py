@@ -5,10 +5,23 @@ HTTP 기반 vLLM 클라이언트 (Docker 환경용)
 Phase 13.2: Language 설정 연동
 Phase 15.2: Sliding Window 컨텍스트 지원
 """
+import json
 import os
 from typing import AsyncIterator, List, Optional
 
 import httpx
+
+from shared.context_builder import (
+    DEFAULT_MAX_MODEL_LEN,
+    TEXT_MAX_TOKENS,
+    build_messages,
+    fit_messages,
+    vllm_tokenize,
+)
+
+
+class LLMError(Exception):
+    """vLLM 호출 실패 (HTTP 오류·연결 실패)."""
 
 
 # ===== Language Settings (Phase 13.2, Phase 17: 강화) =====
@@ -102,6 +115,7 @@ class SimpleLLMClient:
         self.base_url = base_url or os.getenv("VLLM_BASE_URL", "http://ev-llm:11003")
         self.model_name = model_name
         self.system_prompt = system_prompt or "당신은 EdgeVoice AI 어시스턴트입니다."
+        self.max_model_len = DEFAULT_MAX_MODEL_LEN
         self._http_client = httpx.AsyncClient(timeout=60.0)
 
     async def _get_model_name(self) -> Optional[str]:
@@ -115,6 +129,7 @@ class SimpleLLMClient:
                 data = response.json()
                 if data.get("data"):
                     self.model_name = data["data"][0].get("id")
+                    self.max_model_len = int(data["data"][0].get("max_model_len") or self.max_model_len)
                     return self.model_name
         except Exception:
             pass
@@ -125,11 +140,13 @@ class SimpleLLMClient:
         prompt: str,
         system_prompt: Optional[str] = None,
         conversation_history: Optional[List[dict]] = None,
-        max_tokens: int = 512,
-        temperature: float = 0.7
+        max_tokens: int = TEXT_MAX_TOKENS,
+        temperature: float = 0.7,
+        summary: Optional[str] = None,
+        reference: Optional[str] = None
     ) -> AsyncIterator[str]:
         """
-        스트리밍 방식으로 텍스트 생성 (Sliding Window 지원)
+        스트리밍 방식으로 텍스트 생성 (토큰 예산 안에서 히스토리를 넣는다)
 
         Args:
             prompt: 사용자 프롬프트
@@ -137,26 +154,35 @@ class SimpleLLMClient:
             conversation_history: 이전 대화 컨텍스트 [{"role": "user"|"assistant", "content": str}, ...]
             max_tokens: 최대 토큰 수
             temperature: 온도 (창의성)
+            summary: 세션 요약 (시스템 메시지 끝에 고정)
+            reference: RAG 근거 (이번 질문 앞에 붙는다)
 
         Yields:
             생성된 토큰
+
+        Raises:
+            LLMError: vLLM 이 오류 상태(400·500 등)로 답하면
+                — 빈 답이 저장되지 않고 호출자가 오류를 알린다
         """
         model_name = await self._get_model_name()
         if not model_name:
             yield "죄송합니다. LLM 모델을 찾을 수 없습니다."
             return
 
-        # 메시지 구성 (Sliding Window)
-        messages = [
-            {"role": "system", "content": system_prompt or self.system_prompt}
-        ]
-
-        # 이전 대화 컨텍스트 추가
-        if conversation_history:
-            messages.extend(conversation_history)
-
-        # 현재 사용자 메시지 추가
-        messages.append({"role": "user", "content": prompt})
+        messages = await fit_messages(
+            lambda limit: build_messages(
+                system_prompt=system_prompt or self.system_prompt,
+                history=conversation_history or [],
+                user_message=prompt,
+                summary=summary,
+                reference=reference,
+                max_model_len=limit,
+                max_tokens=max_tokens,
+            ),
+            max_model_len=self.max_model_len,
+            max_tokens=max_tokens,
+            tokenize=lambda m: vllm_tokenize(self.base_url, model_name, m),
+        )
 
         payload = {
             "model": model_name,
@@ -172,13 +198,18 @@ class SimpleLLMClient:
                 f"{self.base_url}/v1/chat/completions",
                 json=payload
             ) as response:
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError:
+                    body = await response.aread()
+                    detail = body.decode("utf-8", errors="ignore")[:300]
+                    raise LLMError(f"LLM 오류 {response.status_code}: {detail}")
                 async for line in response.aiter_lines():
                     if line.startswith("data: "):
                         data_str = line[6:]
                         if data_str.strip() == "[DONE]":
                             break
                         try:
-                            import json
                             data = json.loads(data_str)
                             delta = data.get("choices", [{}])[0].get("delta", {})
                             content = delta.get("content", "")
@@ -186,8 +217,33 @@ class SimpleLLMClient:
                                 yield content
                         except Exception:
                             continue
+        except LLMError:
+            raise
         except Exception as e:
-            yield f"오류가 발생했습니다: {str(e)}"
+            raise LLMError(f"LLM 연결 오류: {e}") from e
+
+    async def complete(
+        self,
+        messages: List[dict],
+        max_tokens: int = 512,
+        temperature: float = 0.2
+    ) -> str:
+        """스트리밍 없이 한 번에 생성 (세션 요약 등 내부용)."""
+        model_name = await self._get_model_name()
+        if not model_name:
+            raise LLMError("LLM 모델을 찾을 수 없습니다")
+        response = await self._http_client.post(
+            f"{self.base_url}/v1/chat/completions",
+            json={
+                "model": model_name,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            },
+        )
+        if response.status_code >= 400:
+            raise LLMError(f"LLM 오류 {response.status_code}: {response.text[:300]}")
+        return response.json()["choices"][0]["message"]["content"] or ""
 
     async def close(self):
         """HTTP 클라이언트 종료"""

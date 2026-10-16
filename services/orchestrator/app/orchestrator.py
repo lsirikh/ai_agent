@@ -11,6 +11,7 @@ import re
 import time
 from typing import Any, Optional
 
+from .backend_client import BackendClient
 from .llm_client import LLMClient
 from .pipeline_logger import get_logger
 from .queue_manager import SentenceQueueManager
@@ -83,7 +84,8 @@ class Orchestrator:
         redis_client: Optional[Any] = None,
         listening_timeout: float = 10.0,
         end_pause_seconds: float = 3.0,
-        environment: str = "development"
+        environment: str = "development",
+        backend_client: Optional[BackendClient] = None
     ):
         """
         Orchestrator 초기화
@@ -94,7 +96,12 @@ class Orchestrator:
             listening_timeout: LISTENING 상태 타임아웃 (초)
             end_pause_seconds: 음성 종료 감지를 위한 무음 시간 (초) - Phase 50
             environment: 환경 설정
+            backend_client: 활성 세션·대화 저장용 백엔드 클라이언트
+                (기본: BACKEND_URL 이 있으면 생성, 없으면 메모리 컨텍스트만 사용)
         """
+        self.backend_client = backend_client
+        if self.backend_client is None and os.getenv("BACKEND_URL"):
+            self.backend_client = BackendClient()
         self.environment = environment
         self.listening_timeout = listening_timeout
         # Phase 50: End Pause 설정
@@ -387,6 +394,11 @@ class Orchestrator:
         full_response = ""
         llm_start_time = time.time()
 
+        # 채팅과 같은 활성 세션의 히스토리로 답한다
+        # (인식 문장은 히스토리를 읽은 뒤 저장)
+        history, summary = await self._load_session_context()
+        await self._save_voice_message("user", text)
+
         await self._logger.log(
             event="llm_processing_started",
             session_id=self._current_session_id,
@@ -394,7 +406,9 @@ class Orchestrator:
         )
 
         try:
-            async for token in self.llm_client.generate_stream(text):
+            async for token in self.llm_client.generate_stream(
+                text, history=history, summary=summary
+            ):
                 # 토큰을 큐 매니저에 추가
                 await self.queue_manager.add_token_async(token)
                 full_response += token
@@ -425,6 +439,10 @@ class Orchestrator:
             if hasattr(self.llm_client, 'add_to_context') and full_response:
                 self.llm_client.add_to_context("user", text)
                 self.llm_client.add_to_context("assistant", full_response)
+
+            # 끼어들기로 잘린 답은 여기까지 오지 않으므로 저장되지 않는다
+            if full_response:
+                await self._save_voice_message("assistant", full_response)
 
             # TTS 가 아직 말하는 중이면 마지막 문장의 tts:complete 에서 READY 로 간다.
             # 보낸 문장이 없으면(빈 응답) 바로 READY.
@@ -460,6 +478,42 @@ class Orchestrator:
             )
             # 에러 시 IDLE로 복귀
             self.state_machine.reset()
+
+    async def _load_session_context(self) -> tuple[Optional[list], Optional[str]]:
+        """
+        활성 세션의 (히스토리, 요약).
+        백엔드가 없거나 실패하면 (None, None) → LLM 메모리 컨텍스트를 쓴다.
+        """
+        if not self.backend_client:
+            return None, None
+        try:
+            self._current_session_id = await self.backend_client.get_active_session()
+            context = await self.backend_client.get_context(self._current_session_id)
+            return context.get("messages", []), context.get("summary")
+        except Exception as e:
+            await self._logger.log(
+                event="session_context_failed",
+                session_id=self._current_session_id,
+                data={"message": f"Session context unavailable: {e}", "error": str(e)},
+                level="warning"
+            )
+            return None, None
+
+    async def _save_voice_message(self, role: str, content: str) -> None:
+        """음성 턴을 활성 세션에 source='voice' 로 저장한다(채팅창에도 바로 뜬다)."""
+        if not self.backend_client or not self.backend_client.current_session_id:
+            return
+        try:
+            await self.backend_client.save_message(
+                role=role, content=content, source="voice"
+            )
+        except Exception as e:
+            await self._logger.log(
+                event="voice_message_save_failed",
+                session_id=self._current_session_id,
+                data={"message": f"Failed to save voice message: {e}", "error": str(e)},
+                level="warning"
+            )
 
     async def _speak(self, sentence: str) -> None:
         """한국어로 읽을 수 있는 문장만 TTS 로 보낸다(한자가 섞인 문장은 건너뛴다)."""
