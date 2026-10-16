@@ -5,7 +5,9 @@ const money = x => '$' + (Number(x) || 0).toFixed(2);
 const AUTONOMY = [
   'Reversible actions (reading, editing files in this worktree, running builds and tests, installing dependencies locally) need no permission.',
   'No human is available during this run, so never ask questions or wait for confirmation — decide with your best judgment and proceed; record each decision point in DECISIONS.md (see the working rules).',
-  'Irreversible actions are forbidden: no git push, no merging or resetting branches, and no deleting files you did not create in this task.',
+  // [2026-10-16 자동 보고 00b4667cbf35] "이번 작업에서 만들지 않은 파일은 지우지 말라" 가 앞 작업 파일의 이름 바꾸기를 막아 어색한 결과를 남겼다.
+  //   worktree 안의 삭제 · 이름 바꾸기는 하네스가 턴마다 커밋하므로 되돌릴 수 있다 — 되돌릴 수 없는 것은 worktree 밖(guard 가 막는다).
+  'Irreversible actions are forbidden: no git push, no merging or resetting branches, and no deleting anything outside this worktree. Deleting or renaming files inside this worktree is fine when the goal needs it (including files earlier tasks created) — the harness commits after every turn, so it can be undone.',
 ].join(' ');
 
 // 작업 언어(task.language) — 사람이 읽는 것(PLAN.md · BLOCKED.md · 마지막 말)은 그 언어로. [2026-10-08] 지시가 없어 영어로 나왔다.
