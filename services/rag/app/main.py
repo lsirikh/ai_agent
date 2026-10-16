@@ -218,10 +218,10 @@ async def list_documents_pg() -> List[Dict[str, Any]]:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, filename, chunk_count, metadata, status, indexed_at
+            SELECT id, filename, chunk_count, metadata, status, uploaded_at, indexed_at
             FROM documents
             WHERE status != 'deleted'
-            ORDER BY indexed_at DESC NULLS LAST
+            ORDER BY uploaded_at DESC NULLS LAST
             """
         )
 
@@ -232,7 +232,10 @@ async def list_documents_pg() -> List[Dict[str, Any]]:
             "chunk_count": row["chunk_count"] or 0,
             "filename": row["filename"],
             "status": row["status"],
-            "uploaded_at": row["indexed_at"].isoformat() if row["indexed_at"] else None
+            # indexed_at 은 비어 있다 — 올린 시각은 uploaded_at
+            "uploaded_at": (
+                row["uploaded_at"].isoformat() if row["uploaded_at"] else None
+            )
         }
         for row in rows
     ]
