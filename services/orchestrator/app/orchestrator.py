@@ -45,6 +45,10 @@ class Orchestrator:
         "state_change": "edgevoice:orchestrator:state"
     }
 
+    # 백엔드 StateManager 의 ORCHESTRATOR_STATE_KEY 와 같은 키
+    STATE_KEY = "orchestrator:state"
+    STATE_KEY_TTL_SECONDS = 300
+
     def __init__(
         self,
         llm_client: Optional[LLMClient] = None,
@@ -131,6 +135,17 @@ class Orchestrator:
             })
             try:
                 await self.redis.publish(self.CHANNELS["state_change"], message)
+            except Exception:
+                pass
+
+            # 백엔드 /api/status/stream 은 이 키를 읽는다 (없으면 항상 OFF 로 보인다)
+            current = json.dumps({
+                "state": new_state.name,
+                "session_id": self._current_session_id,
+                "timestamp": time.time()
+            })
+            try:
+                await self.redis.set(self.STATE_KEY, current, ex=self.STATE_KEY_TTL_SECONDS)
             except Exception:
                 pass
 
