@@ -7,6 +7,7 @@ Redis 이벤트 기반으로 STT, LLM, TTS를 조율
 import asyncio
 import json
 import os
+import re
 import time
 from typing import Any, Optional
 
@@ -14,6 +15,22 @@ from .llm_client import LLMClient
 from .pipeline_logger import get_logger
 from .queue_manager import SentenceQueueManager
 from .state_machine import OrchestratorStateMachine, State
+
+DEFAULT_VOICE_SYSTEM_PROMPT = (
+    "당신은 EdgeVoice 음성 비서입니다. 항상 한국어로 답하세요. "
+    "답은 소리 내어 읽기 좋게 2~3문장으로 짧고 자연스럽게 말하고, "
+    "목록 기호·마크다운·이모지는 쓰지 마세요."
+)
+
+# 녹음에 섞여 들어온 웨이크워드("Hey Jarvis", "헤이 자비스")를 STT 결과 앞에서 뗀다
+WAKE_PHRASE_PATTERN = re.compile(
+    r"^\s*(?:hey|hi|헤이|해이)[\s,.!~\-]*(?:jarvis|자비스|쟈비스)[\s,.!?~\-]*",
+    re.IGNORECASE,
+)
+
+
+def strip_wake_phrase(text: str) -> str:
+    return WAKE_PHRASE_PATTERN.sub("", text, count=1).strip()
 
 
 class Orchestrator:
@@ -49,6 +66,9 @@ class Orchestrator:
     STATE_KEY = "orchestrator:state"
     STATE_KEY_TTL_SECONDS = 300
 
+    # 듣기 상태에서 발화·end_pause·STT 처리를 기다리는 여유 시간
+    UTTERANCE_GRACE_SECONDS = 30.0
+
     def __init__(
         self,
         llm_client: Optional[LLMClient] = None,
@@ -77,8 +97,11 @@ class Orchestrator:
             on_state_change=self._on_state_change
         )
 
-        # LLM 클라이언트
-        self.llm_client = llm_client or LLMClient(environment=environment)
+        # LLM 클라이언트 (음성 경로는 한국어로 짧게 답하도록 시스템 프롬프트를 준다)
+        self.llm_client = llm_client or LLMClient(
+            environment=environment,
+            system_prompt=os.getenv("VOICE_SYSTEM_PROMPT", DEFAULT_VOICE_SYSTEM_PROMPT),
+        )
 
         # Redis 클라이언트 (lazy initialization)
         self.redis = redis_client
@@ -223,6 +246,13 @@ class Orchestrator:
             text: 인식된 텍스트
         """
         if self.state_machine.current_state != State.LISTENING:
+            return
+
+        text = strip_wake_phrase(text)
+        if not text:
+            # 웨이크워드만 들렸으면 LLM 을 부르지 않고 대기로 돌아간다
+            self._cancel_listening_timeout()
+            self.state_machine.transition_to(State.READY)
             return
 
         await self._logger.log(
@@ -457,7 +487,9 @@ class Orchestrator:
             self._listening_task.cancel()
 
         async def timeout_handler():
-            await asyncio.sleep(self.listening_timeout)
+            # 말 시작 대기(listening_timeout) + 말하는 시간·end_pause·STT 처리 여유.
+            # 말이 아예 없으면 게이트웨이가 먼저 듣기를 끝낸다.
+            await asyncio.sleep(self.listening_timeout + self.UTTERANCE_GRACE_SECONDS)
             if self.state_machine.current_state == State.LISTENING:
                 await self.handle_timeout()
 
