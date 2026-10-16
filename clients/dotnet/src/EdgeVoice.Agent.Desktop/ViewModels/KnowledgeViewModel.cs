@@ -3,7 +3,6 @@ using System.Collections.ObjectModel;
 using System.Net.Http;
 using System.Text.Json.Nodes;
 using EdgeVoice.Agent.Core;
-using Microsoft.Win32;
 using Prism.Commands;
 
 namespace EdgeVoice.Agent.Desktop.ViewModels;
@@ -50,13 +49,13 @@ public sealed class KnowledgeViewModel : PageViewModel
 
     private async void Upload()
     {
-        var dialog = new OpenFileDialog { Multiselect = true, Filter = "문서|*.pdf;*.txt;*.md;*.docx|모든 파일|*.*" };
-        if (dialog.ShowDialog() != true)
+        var files = await Dialogs.OpenFilesAsync();
+        if (files.Count == 0)
         {
             return;
         }
 
-        foreach (var file in dialog.FileNames)
+        foreach (var file in files)
         {
             Status = "업로드 중: " + file;
             await RunAsync(() => _api.UploadAsync("api/knowledge/upload", file), "업로드 완료");
@@ -67,8 +66,7 @@ public sealed class KnowledgeViewModel : PageViewModel
 
     private async void Delete(DocumentItem? doc)
     {
-        if (doc is null || System.Windows.MessageBox.Show($"'{doc.Filename}' 문서를 삭제할까요?", "EdgeVoice",
-                System.Windows.MessageBoxButton.YesNo) != System.Windows.MessageBoxResult.Yes)
+        if (doc is null || !await Dialogs.ConfirmAsync("EdgeVoice", $"'{doc.Filename}' 문서를 삭제할까요?"))
         {
             return;
         }

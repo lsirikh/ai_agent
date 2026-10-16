@@ -1,26 +1,23 @@
 using System;
-using System.Runtime.InteropServices;
-using System.Windows.Forms;
-using System.Windows.Threading;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Threading;
 using EdgeVoice.Agent.Core;
-using Drawing = System.Drawing;
 
 namespace EdgeVoice.Agent.Desktop.Tray;
 
 /// <summary>
-/// 시스템 트레이 아이콘. 음성 상태에 따라 아이콘 자체가 파형 애니메이션을 그리고,
+/// 시스템 트레이 아이콘(Avalonia TrayIcon). 음성 상태에 따라 아이콘 자체가 파형 애니메이션을 그리고,
 /// 웹/메인 창 없이 트레이 클릭만으로 말하기(마이크 스트리밍)를 켜고 끌 수 있다.
 /// </summary>
 public sealed class TrayController : IDisposable
 {
     private const int IconSize = 32;
 
-    private readonly VoiceStateMonitor _monitor;
     private readonly MicrophoneStreamer _mic;
-    private readonly Action _openMainWindow;
-    private readonly NotifyIcon _notifyIcon;
-    private readonly ToolStripMenuItem _talkItem;
-    private readonly ToolStripMenuItem _orbItem;
+    private readonly TrayIcon _trayIcon;
+    private readonly NativeMenuItem _talkItem;
+    private readonly NativeMenuItem _orbItem;
     private readonly VoiceOrbWindow _orb;
     private readonly DispatcherTimer _timer;
 
@@ -28,42 +25,40 @@ public sealed class TrayController : IDisposable
     private float _level;
     private double _phase;
     private VoiceState? _lastDrawn;
-    private IntPtr _iconHandle;
     private bool _toggling;
+    private string? _error;
+    private DateTime _errorUntil;
 
-    public TrayController(VoiceStateMonitor monitor, MicrophoneStreamer mic, Action openMainWindow)
+    public TrayController(Application app, VoiceStateMonitor monitor, MicrophoneStreamer mic, Action openMainWindow, Action exit)
     {
-        _monitor = monitor;
         _mic = mic;
-        _openMainWindow = openMainWindow;
 
-        _talkItem = new ToolStripMenuItem("말하기 시작", null, (_, _) => ToggleTalk());
-        _orbItem = new ToolStripMenuItem("화면 파형 표시", null, (_, _) => ToggleOrb()) { Checked = true };
-        var menu = new ContextMenuStrip();
-        menu.Items.Add(_talkItem);
-        menu.Items.Add(_orbItem);
-        menu.Items.Add("EdgeVoice 창 열기", null, (_, _) => _openMainWindow());
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("종료", null, (_, _) => System.Windows.Application.Current.Shutdown());
+        _talkItem = new NativeMenuItem("말하기 시작");
+        _talkItem.Click += (_, _) => ToggleTalk();
+        _orbItem = new NativeMenuItem("화면 파형 표시") { ToggleType = NativeMenuItemToggleType.CheckBox, IsChecked = true };
+        _orbItem.Click += (_, _) => ToggleOrb();
+        var openItem = new NativeMenuItem("EdgeVoice 창 열기");
+        openItem.Click += (_, _) => openMainWindow();
+        var exitItem = new NativeMenuItem("종료");
+        exitItem.Click += (_, _) => exit();
 
-        _notifyIcon = new NotifyIcon { Text = "EdgeVoice Agent", ContextMenuStrip = menu, Visible = true };
-        _notifyIcon.MouseClick += (_, e) =>
+        _trayIcon = new TrayIcon
         {
-            if (e.Button == MouseButtons.Left)
-            {
-                ToggleTalk();
-            }
+            ToolTipText = "EdgeVoice Agent",
+            Menu = new NativeMenu { _talkItem, _orbItem, openItem, new NativeMenuItemSeparator(), exitItem },
+            IsVisible = true,
         };
+        _trayIcon.Clicked += (_, _) => ToggleTalk();
+        TrayIcon.SetIcons(app, new TrayIcons { _trayIcon });
 
         _orb = new VoiceOrbWindow();
         _orb.TalkRequested += ToggleTalk;
-        _orb.OpenRequested += _openMainWindow;
+        _orb.OpenRequested += openMainWindow;
         _orb.Show();
 
-        var dispatcher = Dispatcher.CurrentDispatcher;
-        _monitor.StateChanged += s => dispatcher.InvokeAsync(() => _serverState = s);
+        monitor.StateChanged += s => Dispatcher.UIThread.Post(() => _serverState = s);
         _mic.LevelChanged += l => _level = l;
-        _mic.StreamingChanged += on => dispatcher.InvokeAsync(() => _talkItem.Text = on ? "말하기 중지" : "말하기 시작");
+        _mic.StreamingChanged += on => Dispatcher.UIThread.Post(() => _talkItem.Header = on ? "말하기 중지" : "말하기 시작");
 
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(60) };
         _timer.Tick += (_, _) => Animate();
@@ -78,7 +73,7 @@ public sealed class TrayController : IDisposable
     {
         var state = EffectiveState;
         var animated = state is VoiceState.Listening or VoiceState.Speaking or VoiceState.Thinking;
-        if (!animated && _lastDrawn == state)
+        if (!animated && _lastDrawn == state && _error is null)
         {
             return;
         }
@@ -86,20 +81,19 @@ public sealed class TrayController : IDisposable
         _phase = (_phase + (state == VoiceState.Listening ? 0.03 + _level * 0.05 : 0.035)) % 1.0;
         _lastDrawn = state;
 
-        using (var bmp = RippleRenderer.Render(IconSize, state, _phase, _level))
+        using (var bmp = RippleRenderer.RenderBitmap(IconSize, state, _phase, _level))
         {
-            // GetHicon 핸들은 직접 해제해야 하므로, 새 아이콘 적용 후 이전 핸들을 파기한다
-            var previous = _iconHandle;
-            _iconHandle = bmp.GetHicon();
-            _notifyIcon.Icon = Drawing.Icon.FromHandle(_iconHandle);
-            if (previous != IntPtr.Zero)
-            {
-                DestroyIcon(previous);
-            }
+            _trayIcon.Icon = new WindowIcon(bmp);
         }
 
-        _notifyIcon.Text = "EdgeVoice Agent - " + StateText(state);
-        _orb.Update(state, _phase, _level, StateText(state));
+        if (_error is not null && DateTime.Now > _errorUntil)
+        {
+            _error = null;
+        }
+
+        var text = _error ?? StateText(state);
+        _trayIcon.ToolTipText = "EdgeVoice Agent - " + text;
+        _orb.Update(state, _phase, _level, text);
     }
 
     public static string StateText(VoiceState state) => state switch
@@ -133,7 +127,10 @@ public sealed class TrayController : IDisposable
         catch (Exception ex)
         {
             _mic.Stop();
-            _notifyIcon.ShowBalloonTip(3000, "EdgeVoice", "음성 연결 실패: " + ex.Message, ToolTipIcon.Error);
+
+            // Avalonia 트레이는 풍선 알림이 없어 오버레이 라벨/툴팁에 3초간 표시한다
+            _error = "음성 연결 실패: " + ex.Message;
+            _errorUntil = DateTime.Now.AddSeconds(3);
         }
         finally
         {
@@ -143,23 +140,22 @@ public sealed class TrayController : IDisposable
 
     private void ToggleOrb()
     {
-        _orbItem.Checked = !_orbItem.Checked;
-        _orb.Visibility = _orbItem.Checked ? System.Windows.Visibility.Visible : System.Windows.Visibility.Hidden;
+        _orbItem.IsChecked = !_orbItem.IsChecked;
+        if (_orbItem.IsChecked)
+        {
+            _orb.Show();
+        }
+        else
+        {
+            _orb.Hide();
+        }
     }
 
     public void Dispose()
     {
         _timer.Stop();
         _mic.Stop();
-        _notifyIcon.Visible = false;
-        _notifyIcon.Dispose();
+        _trayIcon.Dispose();
         _orb.Close();
-        if (_iconHandle != IntPtr.Zero)
-        {
-            DestroyIcon(_iconHandle);
-        }
     }
-
-    [DllImport("user32.dll")]
-    private static extern bool DestroyIcon(IntPtr handle);
 }

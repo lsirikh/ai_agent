@@ -1,21 +1,30 @@
-using System.ComponentModel;
-using System.Windows;
+using Avalonia.Controls;
 using EdgeVoice.Agent.Desktop.ViewModels;
 
 namespace EdgeVoice.Agent.Desktop;
 
 public partial class MainWindow : Window
 {
-    public MainWindow(MainViewModel viewModel)
+    public MainWindow()
     {
         InitializeComponent();
+    }
+
+    public MainWindow(MainViewModel viewModel)
+        : this()
+    {
         DataContext = viewModel;
     }
 
-    /// <summary>트레이 상주 앱이므로 창을 닫으면 숨기기만 한다 (종료는 트레이 메뉴).</summary>
-    protected override void OnClosing(CancelEventArgs e)
+    /// <summary>트레이 상주 앱이므로 사용자가 창을 닫으면 숨기기만 한다 (종료는 트레이 메뉴).</summary>
+    protected override void OnClosing(WindowClosingEventArgs e)
     {
-        e.Cancel = true;
-        Hide();
+        if (e.CloseReason == WindowCloseReason.WindowClosing)
+        {
+            e.Cancel = true;
+            Hide();
+        }
+
+        base.OnClosing(e);
     }
 }
