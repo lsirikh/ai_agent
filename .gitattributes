@@ -1,0 +1,16 @@
+# 소스는 LF 로 저장한다. Windows 에서 편집 도구·스크립트가 CRLF 로 저장해도
+# 커밋할 때 LF 로 맞춰져, diff 가 파일 전체로 커지거나 병합이 파일째 충돌하지 않는다.
+*.py      text eol=lf
+*.cs      text eol=lf
+*.axaml   text eol=lf
+*.csproj  text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.sql     text eol=lf
+*.md      text eol=lf
+*.json    text eol=lf
+*.toml    text eol=lf
+*.sh      text eol=lf
+*.html    text eol=lf
+*.ps1     text eol=crlf
+*.sln     text eol=crlf
