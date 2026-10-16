@@ -54,8 +54,9 @@ docs/
 Doc/
 doc/
 
-# Model weights (download via scripts/, never commit)
-models/
+# Model weights (download via scripts/, never commit) — 루트 폴더만.
+# 'models/' 로 쓰면 services/backend/app/models/ 같은 코드 패키지까지 빠진다.
+/models/
 
 # Runtime / tool output
 output/
