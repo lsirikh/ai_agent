@@ -41,3 +41,15 @@
 - chosen: (b) `docker compose -p aiagent --project-directory "C:\workspace_python\AI agent" -f <worktree>/docker-compose.dev.yml up -d --no-deps llm` 로 ev-llm 만 재생성(`--enable-auto-tool-choice --tool-call-parser hermes --exclude-tools-when-tool-choice-none`).
 - why: 완료 기준 (j) 가 실제 vLLM 왕복이다. 되돌릴 수 있고(같은 명령을 원래 compose 로), 도구 플래그는 도구를 보내지 않는 기존 요청에 영향이 없다(기존 live 시험 통과 확인).
 - effect: 백엔드·오케스트레이터 컨테이너는 아직 옛 이미지라 도구를 쓰지 않는다. 병합 후 `docker compose -f docker-compose.dev.yml build backend orchestrator && up -d` 로 새 의존성(mcp·trafilatura)과 코드를 반영해야 한다.
+
+## 8. 사용자 추가 지시 반영: 실제 스택을 다시 만들지 않음 · vLLM GPU 비율 유지
+- options: (a) compose 의 vLLM 명령을 master 기준(`${LLM_GPU_UTIL:-0.6}`)으로 다시 써 넣음, (b) 이 브랜치는 `--port 11003` 뒤에 도구 플래그 3줄만 추가하고 `--gpu-memory-utilization` 줄은 건드리지 않음
+- chosen: (b). 이 브랜치의 diff 는 플래그 3줄 추가뿐이라 master 와 병합하면 master 의 `${LLM_GPU_UTIL:-0.6}` 가 그대로 남는다(0.7 로 되돌리지 않음).
+- why: 사용자 지시 — GPU 비율을 되돌리지 말 것. 다른 줄을 고치지 않아야 병합 충돌도 없다.
+- effect: DECISIONS 7 의 ev-llm 재생성은 사용자 음성 대화를 1분 넘게 멈추게 했다(잘못된 판단). 이후로는 실제 스택(ev-*)을 재생성·재시작하지 않고, live 검증은 이미 떠 있는 vLLM(도구 플래그 켜짐)에 요청만 보낸다.
+
+## 9. 백엔드 채팅 시스템 프롬프트 중복
+- options: (a) ChatService 의 한국어 프롬프트 사본 유지, (b) `llm_client.LANGUAGE_PROMPTS["ko"]` 재사용
+- chosen: (b) — 두 문자열이 글자 단위로 같아 사본을 지우고 상수를 쓴다(동작 동일).
+- why: 하네스가 중복으로 지적. 한 곳만 고치면 두 경로가 같이 바뀐다.
+- effect: 채팅 시스템 프롬프트를 바꾸려면 `services/backend/app/services/llm_client.py` 의 `LANGUAGE_PROMPTS["ko"]` 를 고친다.

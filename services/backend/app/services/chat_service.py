@@ -8,6 +8,7 @@ import asyncio
 from typing import Any, AsyncIterator, Awaitable, Callable, List, Optional, Tuple
 
 from . import conversation
+from .llm_client import LANGUAGE_PROMPTS
 
 # 채팅 도구 실행 확인: tool_confirm 이벤트의 id → 사용자의 승인 여부를 기다리는 Future
 CONFIRM_TIMEOUT_SECONDS = 120.0
@@ -228,21 +229,7 @@ class ChatService:
         Returns:
             시스템 프롬프트 문자열
         """
-        base_prompt = """당신은 한국어 AI 어시스턴트 EdgeVoice입니다.
-
-[CRITICAL - 언어 규칙]
-- 모든 응답은 100% 한국어로 작성해야 합니다.
-- 중국어(中文) 사용 절대 금지. 한자 사용 금지.
-- 영어, 일본어 등 다른 언어 사용 금지.
-- 사용자가 어떤 언어로 질문해도 반드시 한국어로만 답변하세요.
-
-[응답 규칙]
-- 친절하고 도움이 되는 답변을 제공하세요.
-- 이전 대화 내용을 기억하고 문맥에 맞게 대화하세요.
-- 모르는 것은 모른다고 솔직하게 답변하세요.
-
-IMPORTANT: You MUST respond in Korean (한국어) ONLY.
-NEVER use Chinese characters (中文/汉字). NEVER switch to any other language."""
+        base_prompt = LANGUAGE_PROMPTS["ko"]
 
         if rag_context:
             return f"""{base_prompt}
