@@ -112,6 +112,29 @@ class LLMClient:
         """모델 이름 설정 (런타임에는 vLLM 재시작 필요)"""
         self.model_name = value
 
+    async def _fetch_served_models(self) -> list[str]:
+        """vLLM 이 실제로 서비스 중인 모델 ID 목록 (/v1/models)."""
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{self.base_url}/v1/models")
+            response.raise_for_status()
+            return [m["id"] for m in response.json().get("data", [])]
+
+    async def resolve_model(self) -> str:
+        """
+        요청에 쓸 모델 이름.
+
+        설정(LLM_MODEL_NAME)만 바뀌고 vLLM 은 다른 모델을 서비스하면 404 로 빈 응답이 되므로,
+        설정 모델이 서비스 목록에 없으면 서비스 중인 첫 모델을 쓴다. 목록을 못 받으면 설정값 그대로.
+        """
+        try:
+            served = await self._fetch_served_models()
+        except Exception:
+            return self.model_name
+
+        if served and self.model_name not in served:
+            return served[0]
+        return self.model_name
+
     def add_to_context(self, role: str, content: str) -> None:
         """
         대화 컨텍스트에 메시지 추가
@@ -244,7 +267,7 @@ class LLMClient:
         params = {**self._default_params, **kwargs}
 
         payload = {
-            "model": self.model_name,
+            "model": await self.resolve_model(),
             "messages": messages,
             "stream": True,
             **params
