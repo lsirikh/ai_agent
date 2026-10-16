@@ -188,9 +188,36 @@ class PipelineLogger:
     # 표준 로깅 API 호환 메서드들
     # ============================================
 
+    async def _log_at_level(
+        self,
+        level: str,
+        first: str,
+        message: Optional[str],
+        session_id: Optional[str],
+        extra: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        info/warning/error 공통 처리.
+
+        두 호출 형식을 모두 받는다:
+        - (message)        → event 는 레벨 이름
+        - (event, message) → 서비스 코드가 쓰는 이벤트 우선 형식
+        """
+        if message is None:
+            event, text = level, first
+        else:
+            event, text = first, message
+        return await self.log(
+            event=event,
+            session_id=session_id,
+            data={"message": text, **extra},
+            level=level
+        )
+
     async def info(
         self,
         message: str,
+        detail: Optional[str] = None,
         session_id: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
@@ -198,23 +225,20 @@ class PipelineLogger:
         INFO 레벨 로깅 (표준 logging API 호환)
 
         Args:
-            message: 로그 메시지
+            message: 로그 메시지, 또는 detail 이 있으면 이벤트 이름
+            detail: 이벤트 우선 형식에서의 로그 메시지
             session_id: 세션 ID
             **kwargs: 추가 데이터
 
         Returns:
             생성된 로그 엔트리
         """
-        return await self.log(
-            event="info",
-            session_id=session_id,
-            data={"message": message, **kwargs},
-            level="info"
-        )
+        return await self._log_at_level("info", message, detail, session_id, kwargs)
 
     async def warning(
         self,
         message: str,
+        detail: Optional[str] = None,
         session_id: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
@@ -222,23 +246,20 @@ class PipelineLogger:
         WARNING 레벨 로깅 (표준 logging API 호환)
 
         Args:
-            message: 로그 메시지
+            message: 로그 메시지, 또는 detail 이 있으면 이벤트 이름
+            detail: 이벤트 우선 형식에서의 로그 메시지
             session_id: 세션 ID
             **kwargs: 추가 데이터
 
         Returns:
             생성된 로그 엔트리
         """
-        return await self.log(
-            event="warning",
-            session_id=session_id,
-            data={"message": message, **kwargs},
-            level="warning"
-        )
+        return await self._log_at_level("warning", message, detail, session_id, kwargs)
 
     async def error(
         self,
         message: str,
+        detail: Optional[str] = None,
         session_id: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
@@ -246,19 +267,15 @@ class PipelineLogger:
         ERROR 레벨 로깅 (표준 logging API 호환)
 
         Args:
-            message: 로그 메시지
+            message: 로그 메시지, 또는 detail 이 있으면 이벤트 이름
+            detail: 이벤트 우선 형식에서의 로그 메시지
             session_id: 세션 ID
             **kwargs: 추가 데이터
 
         Returns:
             생성된 로그 엔트리
         """
-        return await self.log(
-            event="error",
-            session_id=session_id,
-            data={"message": message, **kwargs},
-            level="error"
-        )
+        return await self._log_at_level("error", message, detail, session_id, kwargs)
 
     async def debug(
         self,
