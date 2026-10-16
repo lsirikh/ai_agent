@@ -13,6 +13,9 @@ import json
 
 from .base import BaseRepository
 
+# 낮은 → 높은 순서 (min_level 필터용)
+LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+
 
 class PipelineLogRepository(BaseRepository):
     """
@@ -116,7 +119,8 @@ class PipelineLogRepository(BaseRepository):
         limit: int = 100,
         offset: int = 0,
         level: Optional[str] = None,
-        service: Optional[str] = None
+        service: Optional[str] = None,
+        min_level: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         List recent logs ordered by created_at descending.
@@ -126,6 +130,7 @@ class PipelineLogRepository(BaseRepository):
             offset: Number of logs to skip (for pagination)
             level: Optional filter by log level
             service: Optional filter by service
+            min_level: Optional minimum level (예: INFO 면 INFO·WARNING·ERROR)
 
         Returns:
             List of log dicts
@@ -148,6 +153,11 @@ class PipelineLogRepository(BaseRepository):
             if service:
                 query += f" AND service = ${param_idx}"
                 params.append(service)
+                param_idx += 1
+
+            if min_level and min_level.upper() in LOG_LEVELS:
+                query += f" AND level = ANY(${param_idx})"
+                params.append(LOG_LEVELS[LOG_LEVELS.index(min_level.upper()):])
                 param_idx += 1
 
             query += f" ORDER BY created_at DESC LIMIT ${param_idx} OFFSET ${param_idx + 1}"

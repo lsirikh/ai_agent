@@ -370,8 +370,11 @@ services:
       - LOG_LEVEL=INFO
       # Phase 16: Settings-Env Sync
       - ENV_FILE_PATH=/app/.env
+      # 설정 화면 LLM 목록 = 받아 둔 모델만
+      - LLM_MODELS_HUB_DIR=/models/llm/hub
     volumes:
       - backend-data:/data
+      - ${MODEL_CACHE_PATH:-./models}/llm/hub:/models/llm/hub:ro
       - ./logs/backend:/app/logs
       - ./services/backend/static:/app/static
       # 오케스트레이터와 같은 대화 프롬프트 조립(shared/context_builder.py)

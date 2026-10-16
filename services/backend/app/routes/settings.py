@@ -5,16 +5,21 @@ Phase 5.2: Settings 관리 API
 Phase 10.3: Dynamic Model Selection API
 Phase 12: Settings 영속성 및 서비스 전파
 """
+import asyncio
 import json
+import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import httpx
 from fastapi import APIRouter, BackgroundTasks
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ..models.llm_models import LLM_MODELS, get_all_models
-from ..services.settings_repository import SettingsRepository, get_settings_repository
-from ..services.settings_propagator import SettingsPropagator, get_settings_propagator
 from ..services.settings_env_sync import sync_settings_to_env
+from ..services.settings_propagator import SERVICE_URLS, get_settings_propagator
+from ..services.settings_repository import SettingsRepository, get_settings_repository
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -178,9 +183,12 @@ def get_current_settings_as_dict() -> Dict[str, Any]:
     현재 메모리에 로드된 설정을 딕셔너리로 반환.
 
     Phase 16: Settings-Env 동기화용
+    LLM 모델은 뺀다: .env 의 LLM_MODEL 이 vLLM 의 단일 출처이고,
+    바꾸는 길은 검증을 거친 apply 뿐이다 (DB 에 남은 잘못된 모델이
+    시작 때 .env 를 덮어써 vLLM 이 기동하지 못하던 문제).
     """
     return {
-        "llm": _current_settings.llm.model_dump(),
+        "llm": _current_settings.llm.model_dump(exclude={"model"}),
         "tts": _current_settings.tts.model_dump(),
         "stt": _current_settings.stt.model_dump(),
     }
@@ -738,12 +746,127 @@ STT_MODELS = [
 ]
 
 
+# 엔진별 음성 (TTS 서비스 engines/*.py 의 AVAILABLE_VOICES 와 같게 유지).
+# 첫 항목이 엔진 기본 음성.
+TTS_VOICES: Dict[str, List[str]] = {
+    "melo": ["KR"],
+    "kokoro": [
+        "af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky", "af_alloy",
+        "af_nova",
+        "am_adam", "am_michael", "am_echo", "am_eric", "am_liam", "am_onyx",
+    ],
+    "edge_tts": ["ko-KR-SunHiNeural", "ko-KR-InJoonNeural", "ko-KR-HyunsuNeural"],
+    "gtts": ["ko"],
+}
+
+# vLLM(OpenAI 호환) 주소와 받아 둔 모델 폴더(HuggingFace 캐시 hub)
+LLM_SERVICE_URL = os.getenv("VLLM_BASE_URL", "http://llm:11003")
+LLM_HUB_DIR = os.getenv("LLM_MODELS_HUB_DIR", "/models/llm/hub")
+LLM_RECREATE_COMMAND = "docker compose up -d llm"
+
+
+def voice_for_engine(engine: Optional[str], voice: Optional[str]) -> Optional[str]:
+    """엔진에 없는 음성이면 엔진 기본 음성으로 바꾼다.
+
+    예: melo 는 음성 선택 없이 KR 만 쓴다.
+    """
+    voices = TTS_VOICES.get(engine or "")
+    if voices and voice not in voices:
+        return voices[0]
+    return voice
+
+
+def llm_option_id(served_id: str) -> str:
+    """vLLM 이 서비스 중인 모델 id(HF 경로)를 옵션 id 로 바꾼다.
+
+    대소문자·경로 접두사는 무시한다.
+    """
+    target = served_id.split("/")[-1].lower()
+    for model_id, info in LLM_MODELS.items():
+        if target in (model_id, info["hf_path"].split("/")[-1].lower()):
+            return model_id
+    return served_id
+
+
+def downloaded_llm_ids() -> Optional[set]:
+    """hub 폴더에 snapshot(config.json)까지 받아 둔 모델 id.
+
+    폴더를 볼 수 없으면 None(확인 불가).
+    """
+    hub = Path(LLM_HUB_DIR)
+    if not hub.is_dir():
+        return None
+
+    def downloaded(hf_path: str) -> bool:
+        snapshots = hub / ("models--" + hf_path.replace("/", "--")) / "snapshots"
+        # snapshot 파일은 blob 을 가리키는 심볼릭 링크라 링크 자체만 본다
+        return snapshots.is_dir() and any(
+            os.path.lexists(s / "config.json") for s in snapshots.iterdir()
+        )
+
+    return {
+        model_id
+        for model_id, info in LLM_MODELS.items()
+        if downloaded(info["hf_path"])
+    }
+
+
+def get_llm_options() -> List[Dict[str, Any]]:
+    """받아 둔 모델만 (확인할 수 없는 환경이면 카탈로그 전체)."""
+    downloaded = downloaded_llm_ids()
+    return [
+        m for m in get_all_models() if downloaded is None or m["id"] in downloaded
+    ]
+
+
+async def _get_json(
+    client: httpx.AsyncClient, url: str
+) -> Optional[Dict[str, Any]]:
+    try:
+        response = await client.get(url)
+        response.raise_for_status()
+        return response.json()
+    except Exception:
+        return None
+
+
+async def read_runtime_settings() -> Dict[str, Any]:
+    """실행 중인 서비스에서 실제 값을 읽는다. 응답하지 않는 서비스 값은 빠진다."""
+    async with httpx.AsyncClient(timeout=2.0) as client:
+        llm, stt, tts, wake = await asyncio.gather(
+            _get_json(client, f"{LLM_SERVICE_URL}/v1/models"),
+            _get_json(client, f"{SERVICE_URLS['stt']}/info"),
+            _get_json(client, f"{SERVICE_URLS['tts']}/info"),
+            _get_json(client, f"{SERVICE_URLS['wake_word']}/info"),
+        )
+
+    runtime: Dict[str, Any] = {}
+    if llm and llm.get("data"):
+        runtime["llm_model"] = llm_option_id(llm["data"][0]["id"])
+    if stt:
+        runtime["stt_model"] = (stt.get("model") or {}).get("size")
+    if tts:
+        engine = (tts.get("engine") or {}).get("name")
+        runtime["tts_engine"] = engine
+        voice = (tts.get("settings") or {}).get("voice")
+        runtime["tts_voice"] = voice_for_engine(engine, voice)
+    if wake:
+        runtime["wake_word_threshold"] = (wake.get("settings") or {}).get("threshold")
+    return {key: value for key, value in runtime.items() if value is not None}
+
+
 class SettingsOptionsResponse(BaseModel):
     """설정 옵션 응답"""
     tts_engines: List[Dict[str, Any]]
+    tts_voices: Dict[str, List[str]]
     stt_models: List[Dict[str, Any]]
     llm_models: List[Dict[str, Any]]
-    current: Dict[str, str]
+    # current = 실행 값(서비스가 응답하지 않으면 저장값)
+    # saved = 저장값
+    current: Dict[str, Any]
+    saved: Dict[str, Any]
+    # 저장값과 실행값이 다른 항목 (다시 시작해야 저장값이 적용됨)
+    pending_restart: List[str]
 
 
 @router.get("/options", response_model=SettingsOptionsResponse)
@@ -752,20 +875,26 @@ async def get_settings_options():
     사용 가능한 모델/엔진 옵션 목록 조회
 
     Returns:
-        TTS 엔진, STT 모델, LLM 모델 목록 및 현재 설정값
+        TTS 엔진, STT 모델, LLM 모델 목록, 실행 값(current)·저장값(saved)
     """
     settings = get_settings()
+    saved = {
+        "tts_engine": settings.tts.engine,
+        "tts_voice": voice_for_engine(settings.tts.engine, settings.tts.voice),
+        "stt_model": settings.stt.model_size,  # model_size 필드 사용 (Phase 17)
+        "llm_model": settings.llm.model,
+        "wake_word_threshold": _general_settings.wake_word_threshold,
+    }
+    runtime = await read_runtime_settings()
 
     return SettingsOptionsResponse(
         tts_engines=TTS_ENGINES,
+        tts_voices=TTS_VOICES,
         stt_models=STT_MODELS,
-        llm_models=get_all_models(),
-        current={
-            "tts_engine": settings.tts.engine,  # DB에서 로드된 값
-            "tts_voice": settings.tts.voice,  # TTS Voice 추가
-            "stt_model": settings.stt.model_size,  # model_size 필드 사용 (Phase 17)
-            "llm_model": settings.llm.model
-        }
+        llm_models=get_llm_options(),
+        current={**saved, **runtime},
+        saved=saved,
+        pending_restart=[k for k, v in runtime.items() if saved[k] != v],
     )
 
 
@@ -781,6 +910,7 @@ class SettingsApplyResponse(BaseModel):
     applied: Dict[str, bool]
     restart_required: List[str]
     restart_commands: Optional[Dict[str, str]] = None
+    errors: Dict[str, str] = Field(default_factory=dict)
     message: str
 
 
@@ -807,8 +937,31 @@ async def apply_settings(request: SettingsApplyRequest, background_tasks: Backgr
     applied = {}
     restart_required = []
     restart_commands = {}
+    errors = {}
 
     for settings_type, settings_data in request.changes.items():
+        # 받아 두지 않은 LLM 모델은 저장하지 않는다
+        # (vLLM 이 재생성 때 기동하지 못함)
+        model = settings_data.get("model") if settings_type == "llm" else None
+        if model is not None and model not in [m["id"] for m in get_llm_options()]:
+            applied[settings_type] = False
+            errors[settings_type] = f"받아 두지 않은 LLM 모델입니다: {model}"
+            continue
+        # 엔진을 바꾸면 음성도 그 엔진의 음성으로 맞춘다
+        if settings_type == "tts" and "engine" in settings_data:
+            settings_data = {
+                **settings_data,
+                "voice": voice_for_engine(
+                    settings_data["engine"], settings_data.get("voice")
+                ),
+            }
+        # STT 는 model 과 model_size 가 같은 값을 가리키게 한다
+        if (
+            settings_type == "stt"
+            and "model_size" in settings_data
+            and "model" not in settings_data
+        ):
+            settings_data = {**settings_data, "model": settings_data["model_size"]}
         try:
             # 설정 업데이트 (메모리)
             updated = update_settings(settings_type, settings_data)
@@ -832,14 +985,21 @@ async def apply_settings(request: SettingsApplyRequest, background_tasks: Backgr
                     if key in RESTART_REQUIRED_CHANGES[settings_type]:
                         if settings_type not in restart_required:
                             restart_required.append(settings_type)
-                            restart_commands[settings_type] = f"docker-compose restart {settings_type}"
+                            # restart 는 .env 를 다시 읽지 않아 재생성(up -d)한다
+                            restart_commands[settings_type] = (
+                                f"docker compose up -d {settings_type}"
+                            )
 
         except Exception as e:
             applied[settings_type] = False
+            errors[settings_type] = str(e)
 
     # 응답 메시지 생성
-    if len(restart_required) > 0:
-        message = f"설정이 적용되었습니다. 다음 서비스의 재시작이 필요합니다: {', '.join(restart_required)}"
+    if errors:
+        message = "일부 설정을 적용하지 못했습니다: " + "; ".join(errors.values())
+    elif len(restart_required) > 0:
+        commands = ", ".join(restart_commands.values())
+        message = f"설정을 저장했습니다. 다시 시작해야 적용됩니다: {commands}"
     else:
         message = "모든 설정이 적용되었습니다."
 
@@ -847,6 +1007,7 @@ async def apply_settings(request: SettingsApplyRequest, background_tasks: Backgr
         applied=applied,
         restart_required=restart_required,
         restart_commands=restart_commands if restart_commands else None,
+        errors=errors,
         message=message
     )
 
@@ -868,50 +1029,47 @@ async def restart_llm_service():
     """
     LLM 서비스 재시작
 
-    LLM 모델 변경 후 재시작이 필요할 때 사용
+    LLM 모델 변경 후 재생성이 필요할 때 사용.
+    모델은 vLLM 재생성(.env 다시 읽기)으로만 바뀐다.
+    재생성하지 못하면 503 으로 실패를 돌려준다 (거짓 성공 금지).
 
     Returns:
         재시작 상태
     """
+    import subprocess
+
+    # compose 프로젝트 폴더를 명시한 환경에서만 실행
+    # (엉뚱한 폴더에서 새 compose 프로젝트를 만들지 않게)
+    compose_dir = os.getenv("COMPOSE_PROJECT_DIR")
     try:
-        # Docker Compose를 통한 LLM 서비스 재시작
-        # 실제 환경에서는 docker-compose restart ev-llm 실행
-        import subprocess
-        try:
-            result = subprocess.run(
-                ["docker-compose", "restart", "ev-llm"],
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
-            if result.returncode == 0:
-                return ServiceRestartResponse(
-                    service="llm",
-                    status="restarting",
-                    message="LLM service is restarting. Please wait for it to become healthy."
-                )
-            else:
-                return ServiceRestartResponse(
-                    service="llm",
-                    status="pending",
-                    message="Restart command queued. Docker may not be available."
-                )
-        except FileNotFoundError:
-            # Docker Compose가 없는 개발 환경
-            return ServiceRestartResponse(
-                service="llm",
-                status="pending",
-                message="Restart queued. Run manually: docker-compose restart ev-llm"
-            )
-        except subprocess.TimeoutExpired:
-            return ServiceRestartResponse(
-                service="llm",
-                status="timeout",
-                message="Restart command timed out. Check Docker status."
-            )
+        if not compose_dir:
+            raise LookupError
+        result = subprocess.run(
+            LLM_RECREATE_COMMAND.split(),
+            cwd=compose_dir,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        output = (result.stderr or result.stdout).strip()
+        failure = None if result.returncode == 0 else output
+    except LookupError:
+        failure = "COMPOSE_PROJECT_DIR 가 없어 LLM 을 다시 만들 수 없습니다"
+    except FileNotFoundError:
+        failure = "이 환경에는 docker 가 없어 LLM 을 다시 만들 수 없습니다"
+    except subprocess.TimeoutExpired:
+        failure = "재생성 명령이 시간 안에 끝나지 않았습니다"
     except Exception as e:
+        failure = str(e)
+
+    if failure is None:
         return ServiceRestartResponse(
             service="llm",
-            status="error",
-            message=f"Failed to restart: {str(e)}"
+            status="restarting",
+            message="LLM 을 다시 만드는 중입니다. healthy 가 될 때까지 기다리세요."
         )
+    return JSONResponse(status_code=503, content=ServiceRestartResponse(
+        service="llm",
+        status="failed",
+        message=f"{failure}. 호스트에서 직접 실행하세요: {LLM_RECREATE_COMMAND}"
+    ).model_dump())

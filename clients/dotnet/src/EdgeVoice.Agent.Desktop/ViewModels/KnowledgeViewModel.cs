@@ -1,7 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Net.Http;
 using System.Text.Json.Nodes;
+using System.Threading.Tasks;
 using EdgeVoice.Agent.Core;
 using Prism.Commands;
 
@@ -17,11 +20,13 @@ public sealed class KnowledgeViewModel : PageViewModel
     public KnowledgeViewModel(EdgeVoiceApiClient api)
     {
         _api = api;
-        RefreshCommand = new DelegateCommand(Refresh);
+        RefreshCommand = new DelegateCommand(() => _ = Refresh());
         UploadCommand = new DelegateCommand(Upload);
         DeleteCommand = new DelegateCommand<DocumentItem>(Delete);
-        Refresh();
+        _ = Refresh();
     }
+
+    public string SupportedFormats => "지원 형식: .txt .md .pdf .docx .ppt .pptx";
 
     public ObservableCollection<DocumentItem> Documents { get; } = new();
 
@@ -31,15 +36,16 @@ public sealed class KnowledgeViewModel : PageViewModel
 
     public DelegateCommand<DocumentItem> DeleteCommand { get; }
 
-    private async void Refresh() => await RunAsync(async () =>
+    private Task Refresh() => RunAsync(async () =>
     {
         var data = await _api.GetAsync("api/knowledge/documents");
         Documents.Clear();
         foreach (var doc in data?["documents"]?.AsArray() ?? new JsonArray())
         {
-            var uploaded = DateTime.TryParse(doc?["uploaded_at"]?.ToString(), out var d) ? d.ToShortDateString() : "-";
+            var uploaded = DateTime.TryParse(doc?["uploaded_at"]?.ToString(), out var d) ? d.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "-";
             Documents.Add(new DocumentItem(
-                doc?["id"]?.ToString() ?? "",
+                // 백엔드는 doc_id 로 준다 (예전 형식 id 도 받는다)
+                (doc?["doc_id"] ?? doc?["id"])?.ToString() ?? "",
                 doc?["filename"]?.ToString() ?? "",
                 $"{doc?["chunk_count"] ?? 0} chunks | {uploaded}"));
         }
@@ -55,13 +61,24 @@ public sealed class KnowledgeViewModel : PageViewModel
             return;
         }
 
-        foreach (var file in files)
+        var results = new List<string>();
+        for (var i = 0; i < files.Count; i++)
         {
-            Status = "업로드 중: " + file;
-            await RunAsync(() => _api.UploadAsync("api/knowledge/upload", file), "업로드 완료");
+            var name = Path.GetFileName(files[i]);
+            Status = $"업로드 중 ({i + 1}/{files.Count}): {name}";
+            try
+            {
+                var res = await _api.UploadAsync("api/knowledge/upload", files[i]);
+                results.Add($"{name} 성공({res?["chunk_count"] ?? 0}개 조각)");
+            }
+            catch (Exception ex)
+            {
+                results.Add($"{name} 실패: {ex.Message}");
+            }
         }
 
-        Refresh();
+        await Refresh();
+        Status = "업로드 결과: " + string.Join(" / ", results);
     }
 
     private async void Delete(DocumentItem? doc)
@@ -72,6 +89,6 @@ public sealed class KnowledgeViewModel : PageViewModel
         }
 
         await RunAsync(() => _api.SendAsync(HttpMethod.Delete, $"api/knowledge/documents/{doc.Id}", null));
-        Refresh();
+        await Refresh();
     }
 }

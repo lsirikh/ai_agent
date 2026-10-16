@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json.Nodes;
+using System.Threading.Tasks;
 using EdgeVoice.Agent.Core;
 using Prism.Commands;
 
@@ -10,14 +11,27 @@ namespace EdgeVoice.Agent.Desktop.ViewModels;
 
 public sealed record OptionItem(string Id, string Label);
 
-/// <summary>설정: 모델 선택/적용·LLM 재시작, 일반 설정, Wake Word 등록, LLM 컨텍스트.</summary>
+/// <summary>설정: 모델 선택/적용·LLM 재시작, 일반 설정, Wake Word 바꾸기, LLM 컨텍스트. 선택값은 실행 중인 서비스 값.</summary>
 public sealed class SettingsViewModel : PageViewModel
 {
+    // 저장값과 실행값이 다를 때 배지에 보일 이름
+    private static readonly Dictionary<string, string> PendingNames = new()
+    {
+        ["llm_model"] = "언어 모델",
+        ["stt_model"] = "음성 인식 모델",
+        ["tts_engine"] = "답변 음성 엔진",
+        ["tts_voice"] = "답변 음성",
+        ["wake_word_threshold"] = "호출어 민감도",
+    };
+
     private readonly EdgeVoiceApiClient _api;
+    private Dictionary<string, List<string>> _voicesByEngine = new();
+    private double? _runtimeThreshold;
     private string? _ttsEngine;
     private string? _ttsVoice;
     private string? _sttModel;
     private string? _llmModel;
+    private string _pendingRestart = "";
     private string _wakeWord = "hey_jarvis";
     private string _language = "ko";
     private double _voiceSpeed = 1.0;
@@ -44,17 +58,15 @@ public sealed class SettingsViewModel : PageViewModel
 
     public ObservableCollection<OptionItem> LlmModels { get; } = new();
 
-    // 웹 UI 의 음성 목록과 동일 (엔진별 사용 가능 음성)
-    public IReadOnlyList<string> TtsVoices { get; } = new[]
-    {
-        "KR", "EN", "EN-US", "EN-BR", "ES", "FR", "ZH", "JP",
-        "af_heart", "af_bella", "af_nicole", "am_adam", "am_michael",
-        "ko-KR-SunHiNeural", "ko-KR-InJoonNeural", "en-US-JennyNeural", "en-US-GuyNeural",
-    };
+    // 선택된 엔진의 음성만 (melo → KR, kokoro → 영어 음성, edge → ko-KR-*)
+    public ObservableCollection<string> TtsVoices { get; } = new();
 
     public IReadOnlyList<string> WakeWords { get; } = new[] { "hey_jarvis", "alexa", "hey_mycroft" };
 
-    public IReadOnlyList<string> Languages { get; } = new[] { "ko", "en", "ja" };
+    public IReadOnlyList<OptionItem> Languages { get; } = new[]
+    {
+        new OptionItem("ko", "한국어"), new OptionItem("en", "English"), new OptionItem("ja", "日本語"),
+    };
 
     public DelegateCommand ApplyModelsCommand { get; }
 
@@ -66,17 +78,44 @@ public sealed class SettingsViewModel : PageViewModel
 
     public DelegateCommand SaveContextCommand { get; }
 
-    public string? TtsEngine { get => _ttsEngine; set => SetProperty(ref _ttsEngine, value); }
+    // 콤보박스가 항목을 다시 그리는 동안 잠깐 보내는 null 은 무시한다 (선택값 유지)
+    public string? TtsEngine
+    {
+        get => _ttsEngine;
+        set
+        {
+            var voice = TtsVoice;
+            if (value is not null && SetProperty(ref _ttsEngine, value))
+            {
+                FillVoices(voice);
+            }
+        }
+    }
 
     public string? TtsVoice { get => _ttsVoice; set => SetProperty(ref _ttsVoice, value); }
 
-    public string? SttModel { get => _sttModel; set => SetProperty(ref _sttModel, value); }
+    public string? SttModel { get => _sttModel; set { if (value is not null) SetProperty(ref _sttModel, value); } }
 
-    public string? LlmModel { get => _llmModel; set => SetProperty(ref _llmModel, value); }
+    public string? LlmModel { get => _llmModel; set { if (value is not null) SetProperty(ref _llmModel, value); } }
 
-    public string WakeWord { get => _wakeWord; set => SetProperty(ref _wakeWord, value); }
+    /// <summary>저장값이 실행값과 다른 항목 ("다시 시작 후 적용" 배지). 없으면 빈 문자열.</summary>
+    public string PendingRestart
+    {
+        get => _pendingRestart;
+        private set
+        {
+            if (SetProperty(ref _pendingRestart, value))
+            {
+                RaisePropertyChanged(nameof(HasPendingRestart));
+            }
+        }
+    }
 
-    public string Language { get => _language; set => SetProperty(ref _language, value); }
+    public bool HasPendingRestart => PendingRestart.Length > 0;
+
+    public string WakeWord { get => _wakeWord; set { if (value is not null) SetProperty(ref _wakeWord, value); } }
+
+    public string Language { get => _language; set { if (value is not null) SetProperty(ref _language, value); } }
 
     public double VoiceSpeed { get => _voiceSpeed; set => SetProperty(ref _voiceSpeed, value); }
 
@@ -105,18 +144,7 @@ public sealed class SettingsViewModel : PageViewModel
 
     private async void Load()
     {
-        await RunAsync(async () =>
-        {
-            var data = await _api.GetAsync("api/settings/options");
-            Fill(TtsEngines, data?["tts_engines"], m => $"{m["display_name"]} ({m["recommended_for"]})");
-            Fill(SttModels, data?["stt_models"], m => $"{m["display_name"]} ({m["vram_gb"]}GB VRAM, {m["korean_quality"]})");
-            Fill(LlmModels, data?["llm_models"], m => $"{m["display_name"]} ({m["vram_gb"]}GB VRAM)");
-            var current = data?["current"];
-            TtsEngine = current?["tts_engine"]?.ToString();
-            TtsVoice = current?["tts_voice"]?.ToString();
-            SttModel = current?["stt_model"]?.ToString();
-            LlmModel = current?["llm_model"]?.ToString();
-        });
+        await LoadOptions();
 
         await RunAsync(async () =>
         {
@@ -124,7 +152,8 @@ public sealed class SettingsViewModel : PageViewModel
             WakeWord = g?["wake_word"]?.ToString() ?? WakeWord;
             Language = g?["language"]?.ToString() ?? Language;
             VoiceSpeed = g?["voice_speed"]?.GetValue<double>() ?? VoiceSpeed;
-            WakeWordThreshold = g?["wake_word_threshold"]?.GetValue<double>() ?? WakeWordThreshold;
+            // 호출어 민감도는 웨이크워드 서비스가 실제로 쓰는 값
+            WakeWordThreshold = _runtimeThreshold ?? g?["wake_word_threshold"]?.GetValue<double>() ?? WakeWordThreshold;
             EndPauseSeconds = g?["end_pause_seconds"]?.GetValue<double>() ?? EndPauseSeconds;
             ListeningTimeoutSeconds = g?["listening_timeout_seconds"]?.GetValue<double>() ?? ListeningTimeoutSeconds;
         });
@@ -137,13 +166,57 @@ public sealed class SettingsViewModel : PageViewModel
         });
     }
 
-    private static void Fill(ObservableCollection<OptionItem> target, JsonNode? items, System.Func<JsonNode, string> label)
+    private Task LoadOptions() => RunAsync(async () =>
+    {
+        var data = await _api.GetAsync("api/settings/options");
+        var current = data?["current"];
+        var saved = data?["saved"];
+        _voicesByEngine = (data?["tts_voices"]?.AsObject() ?? new JsonObject())
+            .ToDictionary(p => p.Key, p => p.Value?.AsArray().Select(v => v?.ToString() ?? "").ToList() ?? new List<string>());
+        Fill(TtsEngines, data?["tts_engines"], m => $"{m["display_name"]} ({m["recommended_for"]})", current?["tts_engine"]);
+        Fill(SttModels, data?["stt_models"], m => $"{m["display_name"]} ({m["vram_gb"]}GB VRAM, {m["korean_quality"]})", current?["stt_model"]);
+        Fill(LlmModels, data?["llm_models"], m => $"{m["display_name"]} ({m["vram_gb"]}GB VRAM)", current?["llm_model"]);
+        _ttsVoice = current?["tts_voice"]?.ToString();
+        _ttsEngine = null;
+        TtsEngine = current?["tts_engine"]?.ToString();
+        SttModel = current?["stt_model"]?.ToString();
+        LlmModel = current?["llm_model"]?.ToString();
+        _runtimeThreshold = current?["wake_word_threshold"]?.GetValue<double>();
+        PendingRestart = string.Join(", ", (data?["pending_restart"]?.AsArray() ?? new JsonArray())
+            .Select(n => n?.ToString() ?? "")
+            .Select(key => $"{PendingNames.GetValueOrDefault(key, key)}(저장 {saved?[key]} · 실행 {current?[key]})"));
+    });
+
+    private static void Fill(ObservableCollection<OptionItem> target, JsonNode? items, System.Func<JsonNode, string> label, JsonNode? current)
     {
         target.Clear();
         foreach (var m in items?.AsArray().OfType<JsonNode>() ?? Enumerable.Empty<JsonNode>())
         {
             target.Add(new OptionItem(m["id"]?.ToString() ?? "", label(m)));
         }
+
+        // 실행 중인 값이 목록에 없어도 콤보박스가 비지 않게 한다
+        if (current?.ToString() is { Length: > 0 } id && target.All(o => o.Id != id))
+        {
+            target.Add(new OptionItem(id, $"{id} (실행 중)"));
+        }
+    }
+
+    private void FillVoices(string? keep)
+    {
+        var voices = TtsEngine is not null && _voicesByEngine.TryGetValue(TtsEngine, out var v) ? v : new List<string>();
+        TtsVoices.Clear();
+        foreach (var voice in voices)
+        {
+            TtsVoices.Add(voice);
+        }
+
+        if (keep is not null && TtsVoices.Count == 0)
+        {
+            TtsVoices.Add(keep);
+        }
+
+        TtsVoice = keep is not null && TtsVoices.Contains(keep) ? keep : TtsVoices.FirstOrDefault();
     }
 
     private async void ApplyModels() => await RunAsync(async () =>
@@ -156,19 +229,21 @@ public sealed class SettingsViewModel : PageViewModel
         };
         var res = await _api.SendAsync(HttpMethod.Post, "api/settings/apply", new { changes });
         var restart = res?["restart_required"]?.AsArray().Select(n => n?.ToString()).ToList();
-        Status = "설정 저장 완료";
+        await LoadOptions();
+        Status = res?["message"]?.ToString() ?? "설정 저장 완료";
         if (restart is { Count: > 0 } && await Dialogs.ConfirmAsync(
-                "Restart Required",
-                $"다음 서비스 재시작이 필요합니다: {string.Join(", ", restart)}\n" +
-                "LLM 재시작 시 진행 중인 대화가 중단됩니다. 지금 재시작할까요?"))
+                "다시 시작 필요",
+                $"다음 서비스를 다시 만들어야 적용됩니다: {string.Join(", ", restart)}\n" +
+                "LLM 을 다시 만들면 진행 중인 대화가 중단됩니다. 지금 시도할까요?"))
         {
             RestartLlm();
         }
     });
 
+    // 재생성할 수 없는 환경이면 백엔드가 503 과 직접 실행할 명령을 돌려준다 → 상태줄에 그대로 보인다
     private async void RestartLlm() => await RunAsync(async () =>
     {
-        Status = "LLM 재시작 중...";
+        Status = "LLM 다시 만드는 중...";
         var res = await _api.SendAsync(HttpMethod.Post, "api/services/llm/restart", null);
         Status = $"LLM: {res?["status"]} - {res?["message"]}";
     });
@@ -186,7 +261,7 @@ public sealed class SettingsViewModel : PageViewModel
     private async void RegisterWakeWord() => await RunAsync(async () =>
     {
         var res = await _api.SendAsync(HttpMethod.Put, "api/settings/wake-word", new { wake_word = WakeWord });
-        Status = $"Wake word 등록: {res?["wake_word"]}";
+        Status = $"호출어를 바꿨습니다: {res?["wake_word"]}";
     });
 
     private async void SaveContext() => await RunAsync(() => _api.SendAsync(HttpMethod.Put, "api/settings/llm/context", new

@@ -52,6 +52,9 @@ public sealed class FakeBackend : IDisposable
         ["/api/settings/llm/context"] = """{"context_enabled":false,"context_window_size":10}""",
     };
 
+    /// <summary>경로 → HTTP 상태 코드 (없으면 200). 실패 응답 시나리오용.</summary>
+    public ConcurrentDictionary<string, int> StatusCodes { get; } = new();
+
     /// <summary>경로 → SSE 이벤트 목록 (event, data).</summary>
     public ConcurrentDictionary<string, (string Event, string Data)[]> Sse { get; } = new()
     {
@@ -68,6 +71,9 @@ public sealed class FakeBackend : IDisposable
 
     /// <summary>받은 요청 "METHOD /path" → 본문.</summary>
     public ConcurrentQueue<(string Request, string Body)> Requests { get; } = new();
+
+    /// <summary>받은 요청의 경로+쿼리 (필터 쿼리 확인용).</summary>
+    public ConcurrentQueue<string> Queries { get; } = new();
 
     private async Task LoopAsync()
     {
@@ -92,6 +98,7 @@ public sealed class FakeBackend : IDisposable
         using var reader = new StreamReader(ctx.Request.InputStream);
         var path = ctx.Request.Url!.AbsolutePath;
         Requests.Enqueue(($"{ctx.Request.HttpMethod} {path}", reader.ReadToEnd()));
+        Queries.Enqueue(ctx.Request.Url.PathAndQuery);
 
         string body;
         if (Sse.TryGetValue(path, out var events))
@@ -102,6 +109,7 @@ public sealed class FakeBackend : IDisposable
         else if (Json.TryGetValue(path, out var json))
         {
             ctx.Response.ContentType = "application/json";
+            ctx.Response.StatusCode = StatusCodes.GetValueOrDefault(path, 200);
             body = json;
         }
         else if (ctx.Request.HttpMethod != "GET")

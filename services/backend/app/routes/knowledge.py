@@ -8,6 +8,7 @@ import io
 import uuid
 from typing import Any, Dict, List, Optional
 
+import httpx
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
@@ -22,6 +23,8 @@ class DocumentInfo(BaseModel):
     """문서 정보"""
     doc_id: str
     filename: str
+    chunk_count: int = 0
+    uploaded_at: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -35,6 +38,7 @@ class UploadResponse(BaseModel):
     """업로드 응답"""
     doc_id: str
     filename: str
+    chunk_count: int = 0
     message: str = "Document uploaded successfully"
 
 
@@ -177,12 +181,23 @@ async def upload_document(
 
     # RAG 서비스에 문서 추가 (HTTP API 호출)
     rag_client = get_rag_client()
-    result = await rag_client.add_document(content=text, metadata=metadata)
+    try:
+        result = await rag_client.add_document(content=text, metadata=metadata)
+    except httpx.HTTPStatusError as e:
+        # RAG 의 실패 사유(빈 문서·임베딩 오류 등)를 그대로 화면에 전한다
+        try:
+            detail = e.response.json().get("detail", e.response.text)
+        except ValueError:
+            detail = e.response.text
+        raise HTTPException(status_code=e.response.status_code, detail=detail)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=503, detail=f"RAG 서비스 연결 실패: {e}")
     doc_id = result.get("doc_id", str(uuid.uuid4()))
 
     return UploadResponse(
         doc_id=doc_id,
-        filename=file.filename
+        filename=file.filename,
+        chunk_count=result.get("chunk_count", 0)
     )
 
 
@@ -211,6 +226,8 @@ async def list_documents(
         DocumentInfo(
             doc_id=doc.get("doc_id", ""),
             filename=doc.get("metadata", {}).get("filename", "unknown"),
+            chunk_count=doc.get("chunk_count") or 0,
+            uploaded_at=doc.get("uploaded_at"),
             metadata=doc.get("metadata", {})
         )
         for doc in paginated
