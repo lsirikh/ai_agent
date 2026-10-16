@@ -558,12 +558,8 @@ async def handle_vad_result(
                 level="debug"
             )
 
-    # 음성 종료 감지
-    if speech_ended and _is_recording:
-        _is_recording = False
-        result = await on_speech_ended(session_id=session_id)
-        return result
-
+    # 발화 종료는 VAD 의 짧은 무음(speech_ended)이 아니라 end_pause_seconds 무음으로만 판정한다
+    # (process_speech_timeout). 웨이크워드 뒤나 문장 사이에 잠깐 쉬어도 녹음이 끊기지 않는다.
     _previous_is_speech = is_speech
     return None
 
