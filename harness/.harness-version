@@ -1,0 +1,2 @@
+harness 5
+# node harness/cli.js install 이 만든 사본이다 — 재설치가 이 폴더를 덮어쓴다. 지우면 재설치에 --force 가 필요하다.

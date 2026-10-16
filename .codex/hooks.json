@@ -1,0 +1,72 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|shell|local_shell|exec_command|unified_exec",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/harness/hooks/guard.js\" --codex",
+            "commandWindows": "node \"C:/workspace_python/AI agent/harness/hooks/guard.js\" --codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/harness/hooks/track.js\" --codex",
+            "commandWindows": "node \"C:/workspace_python/AI agent/harness/hooks/track.js\" --codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/harness/hooks/lang.js\" --codex",
+            "commandWindows": "node \"C:/workspace_python/AI agent/harness/hooks/lang.js\" --codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/harness/hooks/stop.js\" --codex",
+            "commandWindows": "node \"C:/workspace_python/AI agent/harness/hooks/stop.js\" --codex",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/harness/hooks/lang.js\" --codex",
+            "commandWindows": "node \"C:/workspace_python/AI agent/harness/hooks/lang.js\" --codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/harness/hooks/session-end.js\" --codex",
+            "commandWindows": "node \"C:/workspace_python/AI agent/harness/hooks/session-end.js\" --codex",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}
