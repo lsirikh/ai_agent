@@ -31,18 +31,7 @@ public partial class App : Application
                 ? JsonSerializer.Deserialize<EdgeVoiceOptions>(File.ReadAllText(path)) ?? new EdgeVoiceOptions()
                 : new EdgeVoiceOptions();
 
-            var builder = new ContainerBuilder();
-            builder.RegisterModule(new EdgeVoiceCoreModule(options));
-            builder.RegisterType<DashboardViewModel>().SingleInstance();
-            builder.RegisterType<ChatViewModel>().SingleInstance();
-            builder.RegisterType<KnowledgeViewModel>().SingleInstance();
-            builder.RegisterType<SettingsViewModel>().SingleInstance();
-            builder.RegisterType<HistoryViewModel>().SingleInstance();
-            builder.RegisterType<LogsViewModel>().SingleInstance();
-            builder.RegisterType<MainViewModel>().SingleInstance();
-            builder.RegisterType<MainWindow>().SingleInstance();
-            _container = builder.Build();
-
+            _container = BuildContainer(options);
             _container.Resolve<VoiceStateMonitor>().Start();
             _tray = new TrayController(
                 this,
@@ -59,6 +48,22 @@ public partial class App : Application
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    /// <summary>메인 화면 DI 구성. 헤드리스 시나리오 테스트도 같은 구성을 쓴다.</summary>
+    public static IContainer BuildContainer(EdgeVoiceOptions options)
+    {
+        var builder = new ContainerBuilder();
+        builder.RegisterModule(new EdgeVoiceCoreModule(options));
+        builder.RegisterType<DashboardViewModel>().SingleInstance();
+        builder.RegisterType<ChatViewModel>().SingleInstance();
+        builder.RegisterType<KnowledgeViewModel>().SingleInstance();
+        builder.RegisterType<SettingsViewModel>().SingleInstance();
+        builder.RegisterType<HistoryViewModel>().SingleInstance();
+        builder.RegisterType<LogsViewModel>().SingleInstance();
+        builder.RegisterType<MainViewModel>().SingleInstance();
+        builder.RegisterType<MainWindow>().SingleInstance();
+        return builder.Build();
     }
 
     private void OpenMainWindow()
