@@ -83,7 +83,7 @@ class Orchestrator:
         llm_client: Optional[LLMClient] = None,
         redis_client: Optional[Any] = None,
         listening_timeout: float = 10.0,
-        end_pause_seconds: float = 3.0,
+        end_pause_seconds: float = 2.0,
         environment: str = "development",
         backend_client: Optional[BackendClient] = None
     ):

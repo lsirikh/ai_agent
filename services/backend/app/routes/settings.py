@@ -71,7 +71,7 @@ class GeneralSettings(BaseModel):
     wake_word_threshold: float = Field(default=0.5, ge=0.1, le=0.9)
     # Phase 50: End Pause 설정 추가
     end_pause_seconds: float = Field(
-        default=3.0, ge=1.0, le=10.0,
+        default=2.0, ge=1.0, le=10.0,
         description="음성 입력 완료 판단을 위한 무음 시간 (초)"
     )
     listening_timeout_seconds: float = Field(
