@@ -23,6 +23,7 @@ from .routes.settings import (
     get_current_settings_as_dict,
 )
 from .database import get_db_manager
+from .database.connection import connect_with_retry
 from .services import conversation
 from .services.settings_env_sync import sync_settings_to_env
 from .services.log_subscriber import LogSubscriber
@@ -93,7 +94,8 @@ async def lifespan(app: FastAPI):
     # 1. Database 연결
     db_manager = get_db_manager()
     try:
-        await db_manager.connect()
+        # 재시작 직후 Postgres 가 아직 준비 중일 수 있어 준비될 때까지 재시도한다
+        await connect_with_retry(db_manager)
         _db_connected = True
         print("[Backend] Database connected")
         await conversation.ensure_schema()

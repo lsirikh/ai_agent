@@ -6,8 +6,9 @@ Phase 14.1: Database Infrastructure
 - asyncpg-based PostgreSQL connection pooling
 """
 
+import asyncio
 import os
-from typing import Optional
+from typing import Any, Awaitable, Callable, Optional
 
 try:
     import asyncpg
@@ -124,6 +125,29 @@ class DatabaseManager:
                 return result == 1
         except Exception:
             return False
+
+
+async def connect_with_retry(
+    db_manager: Any,
+    attempts: int = 30,
+    delay: float = 2.0,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> None:
+    """
+    DB 가 준비될 때까지 연결을 재시도한다.
+
+    Docker 재시작 정책으로 되살아날 때는 depends_on(healthy) 이 지켜지지 않아
+    Postgres 가 아직 "starting up" 일 수 있다.
+    마지막 시도도 실패하면 예외를 그대로 올린다.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            await db_manager.connect()
+            return
+        except Exception:
+            if attempt == attempts:
+                raise
+            await sleep(delay)
 
 
 # Global instance accessor
