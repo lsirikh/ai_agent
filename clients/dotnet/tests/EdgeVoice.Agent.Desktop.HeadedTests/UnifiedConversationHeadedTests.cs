@@ -13,6 +13,9 @@ public class UnifiedConversationHeadedTests
 {
     private static readonly HttpClient Http = new() { BaseAddress = new Uri(HeadedApp.BackendUrl.TrimEnd('/') + "/") };
 
+    // 실제 DB 를 쓰므로 실행마다 다른 문구를 써서 이전 실행이 남긴 메시지와 겹치지 않게 한다
+    private static readonly string RunTag = Guid.NewGuid().ToString("N")[..6];
+
     /// <summary>"Hey Jarvis" → STT 결과를 Redis 로 흘려 오케스트레이터가 음성 턴을 돌게 한다.</summary>
     private static async Task InjectVoiceTurn(string text)
     {
@@ -121,7 +124,7 @@ public class UnifiedConversationHeadedTests
             await HeadedApp.WaitUntil(() => chat.SessionId is not null);
             var old = chat.SessionId!;
             chat.UseRag = false;
-            chat.Input = "이전 세션에 남길 말";
+            chat.Input = $"이전 세션에 남길 말 {RunTag}";
             chat.SendCommand.Execute();
             await HeadedApp.WaitUntil(() => !chat.IsBusy, 120_000);
 
@@ -130,14 +133,15 @@ public class UnifiedConversationHeadedTests
             HeadedApp.Shot(w, "headed-new-conversation");
 
             main.History.RefreshCommand.Execute();
-            await HeadedApp.WaitUntil(() => main.History.Items.Any(i => i.Query.Contains("이전 세션에 남길 말")));
+            await HeadedApp.WaitUntil(() => main.History.Items.Any(i => i.Query.Contains($"이전 세션에 남길 말 {RunTag}")));
 
-            await InjectVoiceTurn("새 세션 음성 시험이야. 짧게 답해 줘.");
+            var voiceText = $"새 세션 음성 시험 {RunTag}";
+            await InjectVoiceTurn($"{voiceText}. 짧게 답해 줘.");
             var fresh = chat.SessionId!;
             await HeadedApp.WaitUntil(() => chat.Messages.Count >= 2, 120_000);
             var messages = await SessionMessages(fresh);
-            Assert.Contains(messages, m => m!["source"]!.ToString() == "voice" && m["content"]!.ToString().Contains("새 세션 음성"));
-            Assert.DoesNotContain(await SessionMessages(old), m => m!["content"]!.ToString().Contains("새 세션 음성"));
+            Assert.Contains(messages, m => m!["source"]!.ToString() == "voice" && m["content"]!.ToString().Contains(voiceText));
+            Assert.DoesNotContain(await SessionMessages(old), m => m!["content"]!.ToString().Contains(voiceText));
         }
         finally
         {
