@@ -130,7 +130,8 @@ services:
               count: 1
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
+      # 이 이미지(nvidia/cuda + apt)에는 python3 만 있다
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
