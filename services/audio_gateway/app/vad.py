@@ -102,7 +102,9 @@ class VoiceActivityDetector:
                     repo_or_dir='snakers4/silero-vad',
                     model='silero_vad',
                     force_reload=False,
-                    onnx=config.get("use_onnx", True)
+                    onnx=config.get("use_onnx", True),
+                    # 컨테이너에는 y/N 신뢰 프롬프트에 답할 터미널이 없다(EOF → Mock 폴백)
+                    trust_repo=True
                 )
                 logger.info("Silero VAD model loaded successfully")
                 return model
