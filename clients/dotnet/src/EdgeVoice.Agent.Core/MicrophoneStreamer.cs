@@ -11,7 +11,7 @@ namespace EdgeVoice.Agent.Core;
 /// 16kHz mono int16 PCM, 100ms=1600 샘플 단위 바이너리 프레임).
 /// 서버는 프레임마다 VAD 결과 JSON({is_speech, probability})을 돌려준다.
 /// </summary>
-public sealed class MicrophoneStreamer
+public sealed class MicrophoneStreamer : IMicrophoneStream
 {
     private readonly EdgeVoiceOptions _options;
     private WaveInEvent? _waveIn;

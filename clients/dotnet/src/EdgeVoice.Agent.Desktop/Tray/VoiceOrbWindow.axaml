@@ -5,7 +5,7 @@
         Width="232" Height="196"
         SystemDecorations="None" TransparencyLevelHint="Transparent" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" CanResize="False" ShowActivated="False"
-        ToolTip.Tip="왼쪽 클릭: 말하기 시작/중지 · 오른쪽 클릭: EdgeVoice 창 열기 · 드래그: 이동">
+        ToolTip.Tip="&quot;Hey Jarvis&quot; 로 깨우기 · 왼쪽 클릭: 마이크 음소거/해제 · 오른쪽 클릭: EdgeVoice 창 열기 · 드래그: 이동">
     <Window.Styles>
         <!-- 단계 칸: 대기는 흐림, 지나간 단계는 반투명 색, 지금 단계는 불 들어온 색 -->
         <Style Selector="Border.stage">
