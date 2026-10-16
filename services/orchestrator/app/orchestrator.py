@@ -121,6 +121,10 @@ class Orchestrator:
     # 듣기 상태에서 발화·end_pause·STT 처리를 기다리는 여유 시간
     UTTERANCE_GRACE_SECONDS = 30.0
 
+    # 지식 베이스(RAG). 실측: 관련 질문 0.53~0.70, 인사말 0.49~0.50
+    RAG_URL = os.getenv("RAG_SERVICE_URL", "http://rag:8006")
+    RAG_MIN_SCORE = float(os.getenv("RAG_MIN_SCORE", "0.52"))
+
     # 마지막 TTS 요청 후 완료 신호를 기다리는 최대 시간
     TTS_COMPLETE_TIMEOUT_SECONDS = 60.0
 
@@ -432,6 +436,32 @@ class Orchestrator:
             # Barge-in으로 인한 취소
             pass
 
+    async def _search_knowledge(self, query: str) -> list[dict[str, Any]]:
+        """RAG 서비스 검색 결과(content·score·metadata). 실패하면 빈 목록."""
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(
+                    f"{self.RAG_URL}/retrieve", json={"query": query, "top_k": 3}
+                )
+                response.raise_for_status()
+                return response.json().get("results") or []
+        except Exception:
+            return []
+
+    async def _relevant_knowledge(self, query: str) -> list[dict[str, Any]]:
+        """기준 점수 이상인 근거만 LLM 형식({content, source})으로."""
+        results = await self._search_knowledge(query)
+        return [
+            {
+                "content": r.get("content", ""),
+                "source": (r.get("metadata") or {}).get("filename", "문서"),
+            }
+            for r in results
+            if r.get("score", 0) >= self.RAG_MIN_SCORE
+        ]
+
     async def _process_llm_stream(self, text: str) -> None:
         """
         LLM 스트리밍 응답 처리
@@ -456,8 +486,10 @@ class Orchestrator:
         )
 
         try:
+            # 채팅과 같은 지식 베이스에서 근거를 찾아 이번 질문에 붙인다
+            knowledge = await self._relevant_knowledge(text)
             async for token in self.llm_client.generate_stream(
-                text, history=history, summary=summary
+                text, history=history, summary=summary, rag_context=knowledge or None
             ):
                 # 토큰을 큐 매니저에 추가
                 await self.queue_manager.add_token_async(token)
