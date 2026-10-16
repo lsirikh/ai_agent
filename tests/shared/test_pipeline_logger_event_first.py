@@ -13,7 +13,8 @@ import pytest
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "method, level", [("info", "info"), ("warning", "warning"), ("error", "error")]
+    "method, level",
+    [("info", "info"), ("warning", "warning"), ("error", "error"), ("debug", "debug")],
 )
 async def test_should_record_event_name_when_called_event_first(
     method: str, level: str

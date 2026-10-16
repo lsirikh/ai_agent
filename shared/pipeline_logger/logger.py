@@ -280,6 +280,7 @@ class PipelineLogger:
     async def debug(
         self,
         message: str,
+        detail: Optional[str] = None,
         session_id: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
@@ -287,19 +288,15 @@ class PipelineLogger:
         DEBUG 레벨 로깅 (표준 logging API 호환)
 
         Args:
-            message: 로그 메시지
+            message: 로그 메시지, 또는 detail 이 있으면 이벤트 이름
+            detail: 이벤트 우선 형식에서의 로그 메시지
             session_id: 세션 ID
             **kwargs: 추가 데이터
 
         Returns:
             생성된 로그 엔트리
         """
-        return await self.log(
-            event="debug",
-            session_id=session_id,
-            data={"message": message, **kwargs},
-            level="debug"
-        )
+        return await self._log_at_level("debug", message, detail, session_id, kwargs)
 
     async def close(self) -> None:
         """
