@@ -109,6 +109,15 @@ async function go(o) {
         const slim = { ...b, results: (b.results || []).map(r => ({ ...r, output: undefined })) };
         try { fs.mkdirSync(path.dirname(cacheFile), { recursive: true }); fs.writeFileSync(cacheFile, JSON.stringify(slim)); } catch { /* 캐시 실패는 작업을 멈추지 않는다 */ }
       }
+      // [2026-10-16 자동 이슈 #13] 저장소에서 찾은 검사가 새 worktree 에서 작업 전부터 시간 초과 — 작업과 무관하게 정체됐다.
+      //   자동으로 찾은 검사(사용자가 준 것이 아닌)는 기준선에서 시간 초과면 판정에서 빼고 알린다(남은 검사가 없으면 모델의 보고로 끝난다).
+      if (found.source !== 'user' && b.results.some(x => x.timed_out)) {
+        const keep = b.results.map(x => !x.timed_out);
+        task.checks.dropped = found.commands.filter((_, i) => !keep[i]).map(cmd => ({ command: K.display(cmd), why: 'timed out before the task (baseline)' }));
+        task.checks.commands = found.commands.filter((_, i) => keep[i]);
+        b = K.summarize(b.results.filter((_, i) => keep[i]));
+        log(`[harness] ${id} — dropped auto-detected checks that timed out before the task: ${task.checks.dropped.map(d => d.command).join(' ; ')}`);
+      }
       task.checks.baseline = K.brief(b);
       // 요약 없이 종료 코드만 빨간 기준선(M7) — 새 worktree 에 의존성(node_modules 등 무시된 파일)이 없어서일 수 있다.
       const blind = b.results.filter(x => !x.ok && !x.found);
@@ -153,7 +162,7 @@ async function resume(o) {
   let lock;
   try { lock = S.acquire(root, `task-${task.id}`); }
   catch (e) { if (e.code === 'LOCK_HELD') return refuse(`task is owned by a live process (pid ${e.owner && e.owner.pid})`); throw e; }
-  const run = getRun(o), P = S.taskPaths(root, task.id);
+  const run = getRun(o), P = S.taskPathsFor(root, task);
   task.caps = capsFrom(o, task.caps);
   if (o.model) task.model = o.model;
   if (o.effort) task.effort = o.effort;
@@ -168,7 +177,7 @@ async function resume(o) {
   try {
     if (!fs.existsSync(P.wt) || !G.worktreeRegistered(root, P.wt) || !G.isWorktreeRoot(P.wt, task.branch)) {
       const why = G.clearWorktreeSlot(root, P.wt, task.branch, o.removalWaitMs, G.slotOpts(root, task.id, P.dir, log));
-      if (why) return finish(c, 'interrupted', why);
+      if (why && !G.useAltWorktree(root, task, P, why, log)) return finish(c, 'interrupted', why);
       G.git(root, ['worktree', 'prune'], { allowFail: true });
       G.addWorktree(root, P.wt, { branch: task.branch, base: task.base_commit });   // 브랜치가 없으면(생성 전 오류) 기록된 기준에서
       task.worktree_include = G.copyWorktreeInclude(root, P.wt);
@@ -503,7 +512,7 @@ function finish(c, status, reason) {
     else {
       // 무시된 파일(git 밖)이 바뀌었으면 지우지 않는다(M4) — 지우면 보고 직후 산출물이 사라진다.
       const rm = G.removeWorktree(root, P.wt, { include: task.worktree_include || [] });
-      if (!rm.ok) task.worktree_kept = rm.error;
+      if (!rm.ok) task.worktree_kept = rm.error; else delete task.worktree_alt;
     }
   }
   if (task.owner) task.owner.heartbeat_at = S.nowIso();
@@ -533,8 +542,10 @@ function decisionLines(task, ko) {
   const d = task.decisions;
   if (!Array.isArray(d)) return [];   // 이 기능 전의 작업
   if (!d.length) return [ko ? '결정 분기점: 없음 — 지시와 저장소만으로 모든 선택이 정해졌다' : 'decision points: none — the instructions and the repository settled every choice'];
-  const out = [ko ? `결정 분기점: ${d.length}곳 — 작업자가 묻지 않고 고른 갈림길이다. 다르게 하려면 resume 으로 지시하거나 accept 뒤 고친다`
-    : `decision points: ${d.length} — forks the worker decided without asking. To change one, resume with an instruction or edit after accept`];
+  // [2026-10-16 자동 이슈 #14] "resume 으로 지시" 라고만 적어 실제로 할 수 있는 방법을 몰랐다 — 명령을 그대로 적는다.
+  const how = `node harness/cli.js resume ${task.id} --note "<바꿀 내용>"  ·  긴 지시는 파일로: node harness/cli.js note ${task.id} --file <파일> 뒤 resume ${task.id}`;
+  const out = [ko ? `결정 분기점: ${d.length}곳 — 작업자가 묻지 않고 고른 갈림길이다. 다르게 하려면(끝난 작업도 된다): ${how}`
+    : `decision points: ${d.length} — forks the worker decided without asking. To change one (done tasks too): ${how.replace('<바꿀 내용>', '<what to change>').replace('<파일>', '<file>').replace('긴 지시는 파일로', 'longer instructions')}`];
   d.forEach((x, i) => { out.push(`  ${i + 1}. ${x.title}`); for (const l of x.body) out.push(`     ${l}`); });
   return out;
 }
@@ -597,6 +608,7 @@ function summaryKo(task) {
   if ((task.tests_modified || []).length) warn.push(`기존 테스트 파일을 고쳤다(${listOf(task.tests_modified, 5)})`);
   if ((task.secrets_excluded || []).length) warn.push('비밀 파일은 커밋하지 않았다(worktree 에만 있다)');
   if (ch.baseline_warning) warn.push('작업 전 검사가 요약 없이 실패했다 — worktree 환경 문제일 수 있다');
+  if ((ch.dropped || []).length) warn.push(`작업 전부터 시간 초과라 판정에서 뺐다(${ch.dropped.map(d => d.command).join(' ; ')}) — 이 검사는 이 작업을 판정하지 않았다`);
   if ((ch.flaky || []).length) warn.push(`불안정한 검사가 있다(${ch.flaky.length}개) — 다시 돌리면 통과한다`);
   if (ch.lint && ch.lint.last && !ch.lint.last.ok) warn.push('린트가 실패한 채 끝났다(작업 전부터 빨간 저장소 전체 린트)');
   const attNotes = (task.attachments || []).filter(a => a.notes.length).map(a => `${a.name}: ${a.notes[0]}`);
@@ -659,6 +671,7 @@ function reportKo(task, P) {
     const cm = task.checks_modified || [];
     L.push(`작업이 고친 검사 정의: ${cm.length ? `${cm.join(', ')} — 확인하세요. 검사가 바뀌면 일을 하지 않고도 통과할 수 있다` : '없음'}`);
   }
+  if ((ch.dropped || []).length) L.push(`판정에서 뺀 검사(저장소에서 찾은 것 · 작업 전부터 시간 초과 — 새 worktree 의 환경 문제일 수 있다): ${ch.dropped.map(d => d.command).join(' ; ')}`);
   if (ch.lint) L.push(`린트: ${lintState(ch.lint, 'ko')}`);
   L.push(`바뀐 파일: ${task.files_changed == null ? '?' : `${task.files_changed}개`}`);
   if (task.diff) L.push(`변경 규모: +${task.diff.insertions} / -${task.diff.deletions} 줄 · 새 파일 ${task.diff.added_files}개`);
@@ -718,6 +731,7 @@ function report(task, P) {
     const cm = task.checks_modified || [];
     lines.push(`check definitions modified by the task: ${cm.length ? `${cm.join(', ')} — review these; a changed check can pass without the work being done` : 'none'}`);
   }
+  if ((ch.dropped || []).length) lines.push(`checks dropped (auto-detected, timed out before the task — likely the new worktree's environment): ${ch.dropped.map(d => d.command).join(' ; ')}`);
   if (ch.lint) lines.push(`lint: ${lintState(ch.lint, 'en')}`);
   lines.push(`changed files: ${task.files_changed == null ? '?' : task.files_changed}`);
   if (task.diff) lines.push(`diff: +${task.diff.insertions} -${task.diff.deletions} lines · ${task.diff.added_files} new files`);

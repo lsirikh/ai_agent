@@ -43,7 +43,7 @@ async function stop(o) {
   if (!S.validId(o.id)) throw usage('invalid task id');
   const task = S.readTask(root, o.id);
   if (!task) throw usage(`unknown task ${o.id}`);
-  const P = S.taskPaths(root, task.id);
+  const P = S.taskPathsFor(root, task);
   if (task.status !== 'running') return { task, ok: true, stopped: false, reason: `status is ${task.status} — nothing is running` };
   const owner = task.owner || {};
   let killed = false;

@@ -16,7 +16,12 @@ const REPO_KIND_PROGRAMS = {
   go: ['go'], rust: ['cargo'], cargo: ['cargo'], make: ['make'],
 };
 
-const READONLY_GIT = ['git status', 'git diff', 'git log', 'git show'];
+const READONLY_GIT = ['git status', 'git diff', 'git log', 'git show', 'git ls-files', 'git rev-parse', 'git grep', 'git blame'];
+// 저장소를 읽기만 하는 명령 — [2026-10-16 자동 이슈 #12] 구조를 보는 명령까지 거부돼 작업자가 우회하거나 정체됐다.
+//   find 는 넣지 않는다(-delete · -exec 로 지우거나 실행한다). SDK 정보 명령은 그 SDK 를 허용하지 않은 저장소에서도.
+const READONLY_TOOLS = ['ls', 'cat', 'pwd', 'tree', 'stat', 'realpath', 'which',
+  'Get-ChildItem', 'Get-Content', 'Get-Item', 'Test-Path', 'Resolve-Path', 'Get-Location',
+  'dotnet --list-sdks', 'dotnet --list-runtimes', 'dotnet --info'];
 // 읽기 전용 파이프 필터 — 출력을 줄이려고 붙이는 것들. Claude Code 는 파이프의 각 토막을 따로 보므로 하나라도 허용 밖이면 명령 전체가 거부된다.
 //   [2026-10-15 현장 감사] 작업자 셸 호출의 17% 가 거부 · 그 65% 가 `dotnet build … | Select-String` 같은 파이프 — 빌드 · 테스트 확인이 108번 막혔다.
 //   파일을 쓰거나 다른 명령을 실행하는 도구(sed -i · find -exec · xargs · awk · tee · ForEach-Object)는 넣지 않는다.
@@ -107,7 +112,7 @@ function checkAllowRules(list, where) {
 // extraAllow: 사용자가 준 규칙(go --allow · worker_allow) — 다시 검증해 금지 규칙은 버리고 allow 끝에 덧붙인다. deny 는 바꾸지 않는다.
 function claudeSettings(allowCommands, extraAllow) {
   const progs = [...new Set((allowCommands || []).map(String).filter(n => SAFE_NAME.test(n) && !isNeverAllowed(n)))];
-  const base = [...rules(progs), ...rules(READONLY_GIT), ...rules(READONLY_FILTERS)];
+  const base = [...rules(progs), ...rules(READONLY_GIT), ...rules(READONLY_FILTERS), ...rules(READONLY_TOOLS)];
   const extra = [...new Set((extraAllow || []).map(x => String(x).trim()).filter(x => !validateAllowRule(x) && !base.includes(x)))];
   return {
     permissions: {

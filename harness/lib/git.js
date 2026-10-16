@@ -299,7 +299,7 @@ function clearWorktreeSlot(root, wt, branch, waitMs, o) {
   git(root, ['worktree', 'prune'], { allowFail: true });
   const killed = killProcsIn(wt);
   const sv = o && o.salvageDir ? salvageLeftover(root, wt, branch, o.salvageDir) : { copied: [], unreadable: [] };
-  const until = Date.now() + (waitMs == null ? 120000 : waitMs);
+  const until = Date.now() + (waitMs == null ? 20000 : waitMs);   // 못 비우면 옆 경로로 간다(useAltWorktree) — 오래 기다리지 않는다
   for (;;) {
     git(root, ['worktree', 'prune'], { allowFail: true });
     if (!sv.unreadable.length) { try { fs.rmSync(wt, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }); } catch { /* 잠긴 파일 — 아래에서 다시 */ } }
@@ -312,6 +312,21 @@ function clearWorktreeSlot(root, wt, branch, waitMs, o) {
   }
 }
 
+// 원래 자리를 비우지 못했을 때 옆 경로(<wt>-2, -3 …)를 쓴다 — 비어 있거나 이미 그 브랜치의 worktree 인 첫 자리. 찾으면 P 를 옮기고 true.
+//   [2026-10-16 자동 이슈 #16] 편집기 언어 서버 · 빌드 서버가 남은 폴더를 잠가 accept 가 반복 거부됐다(손으로 지워도 다시 잠김).
+//   잠근 프로세스는 끝내지 않는다(사용자의 편집기일 수 있다) — 남은 폴더는 gc 가 다시 치운다.
+function useAltWorktree(root, task, P, why, log) {
+  for (let n = 2; n < 10; n++) {
+    const alt = `${P.wt.replace(/-\d+$/, '')}-${n}`;
+    if (fs.existsSync(alt) && !(worktreeRegistered(root, alt) && isWorktreeRoot(alt, task.branch))) continue;
+    S.retargetWorktree(P, alt);
+    task.worktree_alt = alt;
+    S.log(root, task.id, { event: 'worktree_alt', wt: alt, why: String(why).slice(0, 300) });
+    if (log) log(`[harness] ${task.id} — 원래 worktree 자리가 잠겨 있어 ${alt} 에서 진행한다(남은 폴더는 node harness/cli.js gc 가 다시 치운다)`);
+    return true;
+  }
+  return false;
+}
 // clearWorktreeSlot 의 o — 보관은 작업 기록 폴더(tasks/<id>/leftover-<시각>/) · 치운 일은 작업 로그와 진행 줄에 남긴다.
 function slotOpts(root, id, taskDir, log) {
   return {
@@ -468,7 +483,7 @@ function copyWorktreeInclude(root, wt) {
 }
 
 module.exports = {
-  git, identityArgs, headSha, isWorktreeRoot, removeEmptyDir, clearWorktreeSlot, slotOpts, procsIn, killProcsIn, salvageLeftover, currentBranch, branchExists, tagExists, isAncestor, ensureRepo, isRepo, statusEntries, dirtyFiles, isClean, ignoredChanges,
+  git, identityArgs, headSha, isWorktreeRoot, removeEmptyDir, clearWorktreeSlot, slotOpts, useAltWorktree, procsIn, killProcsIn, salvageLeftover, currentBranch, branchExists, tagExists, isAncestor, ensureRepo, isRepo, statusEntries, dirtyFiles, isClean, ignoredChanges,
   commitAll, unaddablePaths, isSecretPath, ensureExclude, addWorktree, worktreeList, worktreeRegistered, checkoutOf, mainWorktree, removeWorktree, samePath,
   diffNames, mergeBase, unmergedFiles, mergeInProgress, hasConflictMarkers, hasConflictMarkersText, MARKER_RE, worktreeIncludeFiles, copyWorktreeInclude, sha1, LOCK_ERR,
   gitlinks, fillSubmodules, dropSubmoduleClones, worktreeLinks,

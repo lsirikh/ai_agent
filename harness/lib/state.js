@@ -106,6 +106,16 @@ function listTasks(root) {
   let names = []; try { names = fs.readdirSync(tasksDir); } catch { return []; }
   return names.filter(validId).sort().map(id => readTask(root, id)).filter(Boolean);
 }
+// 작업의 worktree 를 다른 경로로 옮겨 쓴다(옆 경로 — 원래 자리가 잠겨 비울 수 없을 때). P 를 고쳐 돌려준다.
+function retargetWorktree(P, wt) {
+  P.wt = wt; P.workDir = path.join(wt, P.relWork); P.planFile = path.join(P.workDir, 'PLAN.md'); P.blockedFile = path.join(P.workDir, 'BLOCKED.md');
+  return P;
+}
+// 작업이 옆 경로(task.worktree_alt)를 쓰는 중이면 그 경로로 — stop · accept · resume 이 같은 곳을 본다.
+function taskPathsFor(root, task) {
+  const P = taskPaths(root, task.id);
+  return task && task.worktree_alt ? retargetWorktree(P, task.worktree_alt) : P;
+}
 // task.json 과 .bak 이 둘 다 읽히지 않는 작업 — 목록에서 조용히 빠지지 않게 따로 보인다(목표는 log.jsonl 의 created 에서).
 function listBrokenTasks(root) {
   const { tasksDir } = paths(root);
@@ -325,7 +335,7 @@ function readSessions(root) {
   }).filter(Boolean);
 }
 
-module.exports = { listBrokenTasks,
+module.exports = { retargetWorktree, taskPathsFor, listBrokenTasks,
   HOST, IS_WIN, sleepSync, nowIso, repoRoot, mainRoot, commonDir, paths, taskPaths, newId, validId, ID_RE,
   readJson, writeJsonAtomic, appendJsonl, readTask, writeTask, log, readLog, listTasks, newTask,
   pidAlive, ownerAlive, isSelf, lockDir, lockOwner, takeOver, acquire, withLock, withLockSync, listLocks, removeDeadLocks, lockStale, staleInfo, lockLive,

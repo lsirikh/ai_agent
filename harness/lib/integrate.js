@@ -23,7 +23,7 @@ function load(o) {
   const root = S.mainRoot(o.root || process.cwd());
   const task = S.readTask(root, o.id);
   if (!task) throw Object.assign(new Error(`unknown task: ${o.id}`), { code: 'UNKNOWN_TASK' });
-  return { root, task, P: S.taskPaths(root, task.id), log: o.log || (m => process.stderr.write(m + '\n')) };
+  return { root, task, P: S.taskPathsFor(root, task), log: o.log || (m => process.stderr.write(m + '\n')) };
 }
 function out(task, extra) {
   const r = { ...L.result(task), ...(extra || {}) };
@@ -42,6 +42,7 @@ const REFUSE_KO = [
   [/^target branch (\S+) is not checked out in any checkout(.*)$/s, m => `대상 브랜치 ${m[1]} 가 어느 체크아웃에도 열려 있지 않다 — 메인 체크아웃에서 열고 다시 하세요`],
   [/^checks fail after bringing (\S+) into (\S+) \((\d+) failing\)(.*)$/s, m => `${m[1]} 를 ${m[2]} 에 들인 뒤 검사가 실패한다(${m[3]}건) — 결과 브랜치에 ${m[1]} 가 들어 있다. resume 하거나 고친 뒤 다시 accept`],
   [/^lint fails on (\S+) \((.*?)\): (.*) — resume or fix it, then accept again$/s, m => `${m[1]} 에서 린트가 실패한다(${m[2]}): ${m[3]} — resume 하거나 고친 뒤 다시 accept`],
+  [/^this task is stacked on (\S+) \(task (\S+?)(?:, (\w+))?\) — (.*)$/s, m => `이 작업은 ${m[1]} 위에 쌓은 작업이다(앞 작업 ${m[2]}${m[3] ? ` · ${m[3]}` : ''}) — 앞 작업을 먼저 accept 하면(그러면 이 작업도 같은 브랜치로 따라간다) 되고, 아니면 --into <브랜치>`],
   [/^the previous worktree (\S+) is still being removed(.*)$/s, m => `이전 worktree ${m[1]} 가 아직 지워지는 중이다(다른 프로세스가 파일을 잡고 있다) — 1분쯤 뒤 다시 하세요`],
 ];
 const refuseKo = r => { for (const [re, fn] of REFUSE_KO) { const m = re.exec(String(r)); if (m) return fn(m); } return String(r); };
@@ -78,7 +79,10 @@ function locked(root, staleTask, pre, fn) {
 function ensureWorktree(root, task, P, waitMs, log) {
   if (fs.existsSync(P.wt) && G.worktreeRegistered(root, P.wt) && G.isWorktreeRoot(P.wt, task.branch)) return null;
   const why = G.clearWorktreeSlot(root, P.wt, task.branch, waitMs, G.slotOpts(root, task.id, P.dir, log));
-  if (why) return why;
+  if (why) {
+    if (!G.useAltWorktree(root, task, P, why, log)) return why;
+    if (fs.existsSync(P.wt) && G.worktreeRegistered(root, P.wt) && G.isWorktreeRoot(P.wt, task.branch)) return null;
+  }
   G.git(root, ['worktree', 'prune'], { allowFail: true });
   G.addWorktree(root, P.wt, { branch: task.branch });
   task.worktree_include = G.copyWorktreeInclude(root, P.wt);
@@ -165,7 +169,19 @@ async function resolveConflicts(root, task, P, target, o) {
 // 선행 조건. 잠금 전(빠른 거절)과 잠금 아래(다시 읽은 기록)에서 두 번 본다. 문자열이면 거절 이유.
 //   기본은 done 만 받아들인다 — 다른 상태(failed · stalled · blocked · capped · interrupted · error …)는 o.force 일 때만.
 //   거절 이유는 작업의 상태와 그 이유로 시작한다(무엇이 잘못됐는지가 먼저 보이게).
-const acceptTarget = (task, o) => (o.into || task.base_branch || '').replace(/^refs\/heads\//, '');
+//   [2026-10-16 자동 이슈 #15] go --base harness/<앞 작업> 으로 쌓은 작업은 기본 대상이 그 harness 브랜치라 거부됐다 —
+//   앞 작업이 받아들여졌으면 그 대상으로 따라간다(여러 겹도). 아직이면 acceptPre 가 무엇을 먼저 할지 알려 준다.
+const HARNESS_BRANCH_RE = /^harness\/(t-\d{8}-\d{6}-[0-9a-f]{4})$/;
+function acceptTarget(task, o, root) {
+  if (o.into) return String(o.into).replace(/^refs\/heads\//, '');
+  let t = String(task.base_branch || '').replace(/^refs\/heads\//, '');
+  for (let i = 0; i < 10; i++) {
+    const m = HARNESS_BRANCH_RE.exec(t), b = m && root ? S.readTask(root, m[1]) : null;
+    if (!b || b.status !== 'accepted' || !b.accepted_into) break;
+    t = b.accepted_into;
+  }
+  return t;
+}
 function acceptPre(root, o) {
   return task => {
     if (task.status === 'accepted') return `already accepted into ${task.accepted_into} (${String(task.merge_commit).slice(0, 10)})`;
@@ -173,8 +189,13 @@ function acceptPre(root, o) {
     if (ownerBusy(task)) return `task is still running (pid ${task.owner.pid})`;
     if (task.status !== 'done' && !o.force) return `task status is ${task.status}${task.reason ? ` (${task.reason})` : ''} — only done tasks are accepted; pass --force to merge it anyway`;
     if (!G.branchExists(root, task.branch)) return `branch ${task.branch} does not exist`;
-    const target = acceptTarget(task, o);
+    const target = acceptTarget(task, o, root);
     if (!target) return 'no target branch (the task started on a detached HEAD); pass --into <branch>';
+    const stacked = HARNESS_BRANCH_RE.exec(target);
+    if (stacked) {
+      const b = S.readTask(root, stacked[1]);
+      return `this task is stacked on ${target} (task ${stacked[1]}${b ? `, ${b.status}` : ''}) — accept ${stacked[1]} first (this task then follows it into the same branch), or pass --into <branch>`;
+    }
     if (!G.branchExists(root, target)) return `target branch ${target} does not exist`;
     return null;
   };
@@ -187,7 +208,7 @@ async function accept(o) {
   if (why0) return refused(task0, why0);
 
   return locked(root, task0, pre, async task => {
-    const target = acceptTarget(task, o);
+    const target = acceptTarget(task, o, root);
     const was = { status: task.status, reason: task.reason };
     const co = G.checkoutOf(root, target);
     if (!co) return refused(task, `target branch ${target} is not checked out in any checkout; check it out in your main checkout and run accept again`);
@@ -388,7 +409,7 @@ function cancelPre(task) {
   return null;
 }
 async function cancel(o) {
-  const { root, task: task0, P } = load(o);
+  const { root, task: task0, P, log } = load(o);
   const why0 = cancelPre(task0);
   if (why0) return refused(task0, why0);
   return locked(root, task0, cancelPre, async task => {
@@ -412,8 +433,9 @@ async function cancel(o) {
         const rm = G.removeWorktree(root, P.wt);
         if (!rm.ok) { S.writeTask(root, task); return refused(task, `could not remove the worktree ${P.wt}: ${rm.error}`); }
       } else {
-        G.git(root, ['worktree', 'prune'], { allowFail: true });
-        if (!G.removeEmptyDir(P.wt)) { S.writeTask(root, task); return refused(task, `${P.wt} is not this task's worktree any more (its registration is gone) and it is not empty — nothing was committed; inspect it and remove it by hand, then run cancel again`); }
+        // 등록이 사라진 남은 폴더 — 붙잡은 프로세스를 끝내고 브랜치와 다른 파일은 작업 기록에 보관한 뒤 치운다(자동 이슈 #11 과 같은 자리).
+        const why = G.clearWorktreeSlot(root, P.wt, task.branch, o.removalWaitMs, G.slotOpts(root, task.id, P.dir, log));
+        if (why) { S.writeTask(root, task); return refused(task, `${P.wt} is not this task's worktree any more (its registration is gone) and could not be cleared: ${why}`); }
         S.log(root, task.id, { event: 'leftover_folder_removed', path: P.wt });
       }
     }

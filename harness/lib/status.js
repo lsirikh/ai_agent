@@ -170,6 +170,12 @@ function gc(o) {
     try { h = S.acquire(root, `task-${t.id}`); }
     catch (e) { if (e.code !== 'LOCK_HELD') throw e; kept.push({ id: t.id, worktree: tp.wt, why: lockHeldWhy(`task-${t.id}`) }); continue; }
     try {
+      // 등록이 사라진 남은 폴더(잠긴 파일 때문에 git 이 파일만 남겼다) — 다시 치워 본다. [2026-10-16 자동 이슈 #16]
+      if (!G.worktreeRegistered(root, tp.wt)) {
+        const why = G.clearWorktreeSlot(root, tp.wt, t.branch, 0, G.slotOpts(root, t.id, tp.dir));
+        if (!why) removed.push({ id: t.id, worktree: tp.wt }); else kept.push({ id: t.id, worktree: tp.wt, why });
+        continue;
+      }
       const r = removeIfSafe(root, tp.wt, t.worktree_include);
       if (r.ok) removed.push({ id: t.id, worktree: tp.wt }); else kept.push({ id: t.id, worktree: tp.wt, why: r.why, ...(r.ignored ? { ignored_changed: r.ignored } : {}) });
     } finally { h.release(); }
@@ -187,7 +193,16 @@ function gc(o) {
   try {
     for (const name of extra) {
       const wt = path.join(P.worktreesDir, name);
-      if (!G.worktreeRegistered(root, wt)) { kept.push({ id: null, worktree: wt, why: 'not a registered worktree (left alone)' }); continue; }
+      if (!G.worktreeRegistered(root, wt)) {
+        // 옆 경로(<id>-2 …)에 남은 폴더 — 그 작업이 돌고 있지 않으면 같은 방법으로 치운다(#16). 작업에 속하지 않으면 그대로 둔다.
+        const m = ID_PREFIX_RE.exec(name), t = m && S.readTask(root, m[1]);
+        if (t && /^\d+$/.test(name.slice(m[1].length + 1)) && !(t.status === 'running' && S.ownerAlive(t.owner)) && !S.lockLive(root, `task-${t.id}`)) {
+          const why = G.clearWorktreeSlot(root, wt, t.branch, 0, G.slotOpts(root, t.id, S.taskPaths(root, t.id).dir));
+          if (!why) removed.push({ id: t.id, worktree: wt }); else kept.push({ id: t.id, worktree: wt, why });
+          continue;
+        }
+        kept.push({ id: null, worktree: wt, why: 'not a registered worktree (left alone)' }); continue;
+      }
       if (mergeHeld) { kept.push({ id: null, worktree: wt, why: lockHeldWhy('merge') }); continue; }
       const m = ID_PREFIX_RE.exec(name);
       if (m && S.lockLive(root, `task-${m[1]}`)) { kept.push({ id: null, worktree: wt, why: lockHeldWhy(`task-${m[1]}`) }); continue; }
