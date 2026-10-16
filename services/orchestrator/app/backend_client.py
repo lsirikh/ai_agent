@@ -14,6 +14,9 @@ import httpx
 class BackendClient:
     """Backend API 클라이언트"""
 
+    # 음성 턴을 막지 않도록 짧게 기다린다
+    TIMEOUT_SECONDS = 5.0
+
     def __init__(self, base_url: Optional[str] = None):
         """
         BackendClient 초기화
@@ -60,14 +63,14 @@ class BackendClient:
 
     async def create_session(
         self,
-        source: str = "voice",
+        source: str = "orchestrator",
         metadata: Optional[dict] = None
     ) -> dict:
         """
         Backend에 새 세션 생성 요청
 
         Args:
-            source: 세션 소스 (voice, web 등)
+            source: 세션 소스 (sessions.source 제약: web, orchestrator, api)
             metadata: 추가 메타데이터 (선택)
 
         Returns:
@@ -94,6 +97,25 @@ class BackendClient:
 
             return result
 
+    async def get_active_session(self) -> str:
+        """음성·채팅이 함께 쓰는 활성 세션 ID (없으면 백엔드가 만든다)."""
+        async with httpx.AsyncClient(timeout=self.TIMEOUT_SECONDS) as client:
+            response = await client.get(f"{self.base_url}/api/sessions/active")
+            response.raise_for_status()
+            self.current_session_id = response.json()["session_id"]
+            return self.current_session_id
+
+    async def get_context(self, session_id: str) -> dict:
+        """
+        프롬프트용 세션 컨텍스트:
+        {"summary": str|None, "messages": [{"role", "content"}, ...]}
+        """
+        url = f"{self.base_url}/api/sessions/{session_id}/context"
+        async with httpx.AsyncClient(timeout=self.TIMEOUT_SECONDS) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            return response.json()
+
     async def save_message(
         self,
         role: str,
@@ -115,7 +137,7 @@ class BackendClient:
         Returns:
             저장된 메시지 정보 (message_id 포함)
         """
-        url = f"{self.base_url}/api/messages/pipeline"
+        url = f"{self.base_url}/api/sessions/pipeline/messages"
 
         payload = {
             "session_id": self.current_session_id,
@@ -130,7 +152,7 @@ class BackendClient:
         if metadata:
             payload["metadata"] = metadata
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=self.TIMEOUT_SECONDS) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             return response.json()

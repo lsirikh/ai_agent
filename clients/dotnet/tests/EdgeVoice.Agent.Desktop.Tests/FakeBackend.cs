@@ -37,7 +37,10 @@ public sealed class FakeBackend : IDisposable
             """,
         ["/api/logs/stats"] = """{"total":12,"by_level":{"INFO":8,"WARNING":3,"ERROR":1},"by_service":{"stt":5,"llm":7}}""",
         ["/api/logs"] = """{"logs":[{"created_at":"2026-10-16T10:00:00","level":"INFO","service":"stt","stage":"transcribe","message":"ok","duration_ms":120}]}""",
-        ["/api/history"] = """{"conversations":[{"timestamp":"2026-10-16 10:00","query":"안녕","response":"반가워요"}]}""",
+        ["/api/history"] = """
+            {"messages":[{"id":"m2","session_id":"s1","role":"assistant","content":"반가워요","timestamp":"2026-10-16T10:00:05","source":"web"},
+                         {"id":"m1","session_id":"s1","role":"user","content":"안녕","timestamp":"2026-10-16T10:00:00","source":"web"}],"total":2}
+            """,
         ["/api/knowledge/documents"] = """{"documents":[{"id":"d1","filename":"manual.pdf","chunk_count":12,"uploaded_at":"2026-10-01"}]}""",
         ["/api/settings/options"] = """
             {"tts_engines":[{"id":"melo","display_name":"MeloTTS","recommended_for":"ko"}],

@@ -93,6 +93,23 @@ CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at DESC);
 
 -- ============================================
+-- SESSION_SUMMARIES TABLE
+-- ============================================
+-- Rolling summaries of old turns (original messages are kept)
+-- The backend also creates this on startup for existing databases.
+
+CREATE TABLE IF NOT EXISTS session_summaries (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    summary TEXT NOT NULL,
+    covered_until_message_id UUID NOT NULL,
+    token_count INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_summaries_session ON session_summaries(session_id, created_at DESC);
+
+-- ============================================
 -- DOCUMENTS TABLE
 -- ============================================
 -- Stores uploaded document metadata for RAG

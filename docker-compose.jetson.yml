@@ -337,6 +337,8 @@ services:
       - backend-data:/data
       - ./logs/backend:/app/logs
       - ./services/backend/static:/app/static
+      # 오케스트레이터와 같은 대화 프롬프트 조립(shared/context_builder.py)
+      - ./shared:/app/shared:ro
     ports:
       - "11000:11000"
     depends_on:

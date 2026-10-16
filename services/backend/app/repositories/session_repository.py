@@ -13,6 +13,13 @@ import json
 from .base import BaseRepository
 
 
+def _metadata(value: Any) -> Dict[str, Any]:
+    """asyncpg 는 JSONB 를 문자열로 돌려준다(코덱 미등록)."""
+    if isinstance(value, str):
+        value = json.loads(value)
+    return dict(value) if value else {}
+
+
 class SessionRepository(BaseRepository):
     """
     Repository for sessions table operations.
@@ -42,7 +49,9 @@ class SessionRepository(BaseRepository):
         self,
         user_id: Optional[str] = None,
         title: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        session_type: str = "web",
+        source: str = "web"
     ) -> UUID:
         """
         Create a new session.
@@ -51,6 +60,8 @@ class SessionRepository(BaseRepository):
             user_id: Optional user identifier
             title: Optional session title
             metadata: Optional metadata dict
+            session_type: 'web' | 'voice' | 'unified'
+            source: 'web' | 'orchestrator' | 'api'
 
         Returns:
             The generated session UUID
@@ -58,15 +69,79 @@ class SessionRepository(BaseRepository):
         async with self.connection() as conn:
             session_id = await conn.fetchval(
                 """
-                INSERT INTO sessions (user_id, title, metadata)
-                VALUES ($1, $2, $3::jsonb)
+                INSERT INTO sessions (user_id, title, metadata, session_type, source)
+                VALUES ($1, $2, $3::jsonb, $4, $5)
                 RETURNING id
                 """,
                 user_id,
                 title,
-                json.dumps(metadata or {})
+                json.dumps(metadata or {}),
+                session_type,
+                source
             )
             return session_id
+
+    async def get_active(self) -> Optional[UUID]:
+        """활성 세션 ID (settings 의 'active_session'). 지워진 세션이면 None."""
+        async with self.connection() as conn:
+            return await conn.fetchval(
+                """
+                SELECT s.id
+                FROM settings st
+                JOIN sessions s ON s.id::text = st.value->>'session_id'
+                WHERE st.key = 'active_session'
+                """
+            )
+
+    async def set_active(self, session_id: UUID) -> None:
+        """활성 세션을 바꾼다(재시작해도 유지되도록 DB 에 둔다)."""
+        async with self.connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO settings (key, value, category, description, updated_at)
+                VALUES ('active_session', $1::jsonb, 'system',
+                        'Active unified conversation session', NOW())
+                ON CONFLICT (key) DO UPDATE
+                    SET value = EXCLUDED.value, updated_at = NOW()
+                """,
+                json.dumps({"session_id": str(session_id)})
+            )
+
+    async def get_summary(self, session_id: UUID) -> Optional[Dict[str, Any]]:
+        """세션의 최신 롤링 요약."""
+        async with self.connection() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT summary, covered_until_message_id, token_count, created_at
+                FROM session_summaries
+                WHERE session_id = $1
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                session_id
+            )
+            return dict(row) if row else None
+
+    async def add_summary(
+        self,
+        session_id: UUID,
+        summary: str,
+        covered_until_message_id: UUID,
+        token_count: int
+    ) -> None:
+        """롤링 요약 추가(원문 메시지는 지우지 않는다)."""
+        async with self.connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO session_summaries
+                    (session_id, summary, covered_until_message_id, token_count)
+                VALUES ($1, $2, $3, $4)
+                """,
+                session_id,
+                summary,
+                covered_until_message_id,
+                token_count
+            )
 
     async def get_by_id(self, session_id: UUID) -> Optional[Dict[str, Any]]:
         """
@@ -97,7 +172,7 @@ class SessionRepository(BaseRepository):
                 "title": row["title"],
                 "created_at": row["created_at"],
                 "last_active_at": row["last_active_at"],
-                "metadata": dict(row["metadata"]) if row["metadata"] else {}
+                "metadata": _metadata(row["metadata"])
             }
 
     async def update_last_active(self, session_id: UUID) -> None:
@@ -182,7 +257,7 @@ class SessionRepository(BaseRepository):
                     "title": row["title"],
                     "created_at": row["created_at"],
                     "last_active_at": row["last_active_at"],
-                    "metadata": dict(row["metadata"]) if row["metadata"] else {}
+                    "metadata": _metadata(row["metadata"])
                 }
                 for row in rows
             ]

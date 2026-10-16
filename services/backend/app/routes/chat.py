@@ -19,6 +19,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from ..constants.redis_channels import RedisChannels
+from ..services import conversation
 from ..services.chat_service import ChatService
 from .settings import _llm_context_settings
 
@@ -173,7 +175,11 @@ async def send_message(request: ChatRequest):
     Returns:
         SSE 스트리밍 응답
     """
-    session_id = request.session_id or str(uuid.uuid4())
+    # 세션을 지정하지 않으면 음성과 같은 활성 세션에 이어 쓴다
+    if conversation.is_available():
+        session_id = await conversation.resolve_session_id(request.session_id)
+    else:
+        session_id = request.session_id or str(uuid.uuid4())
 
     # Phase 17: ChatService를 미리 await로 가져옴
     chat_service = await get_chat_service()
@@ -250,7 +256,7 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
 # ===== Phase 18.4: Chat SSE 스트림 =====
 
 @router.get("/stream")
-async def stream_chat(session_id: str):
+async def stream_chat(session_id: Optional[str] = None):
     """
     세션별 채팅 메시지 SSE 스트림
 
@@ -259,12 +265,12 @@ async def stream_chat(session_id: str):
     pipeline에서 생성된 메시지도 이 스트림을 통해 전달됩니다.
 
     이벤트 타입:
-    - init: 초기 연결 + 최근 히스토리
-    - message: 새 메시지 도착
+    - init: 초기 연결 + 세션 전체 히스토리
+    - message: 새 메시지 저장됨 (Redis edgevoice:chat:message)
     - heartbeat: 연결 유지용 (30초마다)
 
     Args:
-        session_id: 세션 ID
+        session_id: 세션 ID (없으면 활성 세션)
 
     Returns:
         StreamingResponse (text/event-stream)
@@ -272,44 +278,58 @@ async def stream_chat(session_id: str):
 
     async def event_generator():
         """SSE 이벤트 생성기"""
+        pubsub = None
         try:
-            # 1. 초기 연결 이벤트 (히스토리 포함)
-            history_store = await get_history_store()
+            sid = session_id
             messages = []
+            if conversation.is_available():
+                sid = await conversation.resolve_session_id(session_id)
+                # 히스토리를 읽는 사이에 저장된 메시지를 놓치지 않도록 먼저 구독한다
+                pubsub = conversation.subscribe_messages()
+                await pubsub.subscribe(RedisChannels.CHAT_MESSAGE)
+                messages = await conversation.list_messages(sid)
 
-            if history_store:
-                try:
-                    messages = await history_store.get_messages(
-                        session_id=session_id,
-                        limit=50
-                    )
-                except Exception:
-                    messages = []
-
+            # 1. 초기 연결 이벤트 (히스토리 포함)
             init_data = {
-                "session_id": session_id,
+                "session_id": sid,
                 "messages": messages,
                 "timestamp": time.time()
             }
             yield f"event: init\ndata: {json.dumps(init_data, ensure_ascii=False)}\n\n"
 
-            # 2. 주기적으로 새 메시지 확인 및 heartbeat
-            update_count = 0
+            # 2. 새 메시지 전달 및 heartbeat
+            last_heartbeat = time.time()
             while True:
-                await asyncio.sleep(1)
-                update_count += 1
+                if pubsub is None:
+                    await asyncio.sleep(1)
+                else:
+                    item = await pubsub.get_message(
+                        ignore_subscribe_messages=True, timeout=1.0
+                    )
+                    if item and item.get("type") == "message":
+                        message = json.loads(item["data"])
+                        if message.get("session_id") == sid:
+                            data = json.dumps(message, ensure_ascii=False)
+                            yield f"event: message\ndata: {data}\n\n"
 
                 # 30초마다 heartbeat
-                if update_count % 30 == 0:
-                    yield f"event: heartbeat\ndata: {json.dumps({'timestamp': time.time()})}\n\n"
-
-                # TODO: Redis Pub/Sub으로 새 메시지 수신 구현
+                if time.time() - last_heartbeat >= 30:
+                    last_heartbeat = time.time()
+                    data = json.dumps({"timestamp": last_heartbeat})
+                    yield f"event: heartbeat\ndata: {data}\n\n"
 
         except asyncio.CancelledError:
             # 클라이언트 연결 종료
             pass
         except Exception as e:
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+        finally:
+            if pubsub is not None:
+                try:
+                    await pubsub.unsubscribe()
+                    await pubsub.aclose()
+                except Exception:
+                    pass
 
     return StreamingResponse(
         event_generator(),

@@ -23,6 +23,7 @@ from .routes.settings import (
     get_current_settings_as_dict,
 )
 from .database import get_db_manager
+from .services import conversation
 from .services.settings_env_sync import sync_settings_to_env
 from .services.log_subscriber import LogSubscriber
 from .services.llm_loading_monitor import start_llm_monitor, stop_llm_monitor
@@ -95,6 +96,7 @@ async def lifespan(app: FastAPI):
         await db_manager.connect()
         _db_connected = True
         print("[Backend] Database connected")
+        await conversation.ensure_schema()
     except Exception as e:
         print(f"[Backend] Database connection failed: {e}")
         print("[Backend] Running without database (in-memory fallback)")

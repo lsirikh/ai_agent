@@ -4,7 +4,9 @@ Backend API - ChatService
 Phase 9.2: 채팅 서비스 클래스
 Phase 15.3: Sliding Window 컨텍스트 로드
 """
-from typing import Any, AsyncIterator, List, Optional
+from typing import Any, AsyncIterator, List, Optional, Tuple
+
+from . import conversation
 
 
 class ChatService:
@@ -73,11 +75,21 @@ class ChatService:
                     "sources": sources
                 }
 
-        # 2. 대화 히스토리 로드 (Sliding Window)
-        conversation_history = await self._load_conversation_history(session_id)
+        # 2. 대화 히스토리 로드
+        # (활성 세션: 요약 + 요약 이후 턴, DB 가 없으면 Sliding Window)
+        conversation_history, summary = await self._load_context(session_id)
 
         # 3. 시스템 프롬프트 생성
-        system_prompt = self._build_system_prompt(rag_context)
+        # (고정 — RAG 근거는 이번 질문에 붙여 접두사 캐시를 지킨다)
+        system_prompt = self._build_system_prompt()
+        extra = {}
+        if summary:
+            extra["summary"] = summary
+        if rag_context:
+            extra["reference"] = (
+                "다음은 관련 문서 내용입니다. 이 정보를 참고하여 답변하고, "
+                f"출처 정보가 있으면 답변에 포함해주세요:\n\n{rag_context}"
+            )
 
         # 4. LLM 스트리밍 호출
         full_response = ""
@@ -86,7 +98,8 @@ class ChatService:
             async for token in self.llm_client.generate_stream(
                 message,
                 system_prompt=system_prompt,
-                conversation_history=conversation_history
+                conversation_history=conversation_history,
+                **extra
             ):
                 full_response += token
                 yield {
@@ -114,8 +127,20 @@ class ChatService:
             "sources": sources
         }
 
-        # 6. History 저장 (history_store가 있을 때)
-        if self.history_store:
+        # 6. History 저장 (빈 답은 저장하지 않는다)
+        if not full_response.strip():
+            return
+        if conversation.is_available():
+            await conversation.save_message(session_id, "user", message, source="web")
+            await conversation.save_message(
+                session_id,
+                "assistant",
+                full_response,
+                source="web",
+                rag_sources=sources,
+            )
+            conversation.schedule_summary(session_id, self.llm_client)
+        elif self.history_store:
             await self._save_to_history(
                 session_id=session_id,
                 user_message=message,
@@ -255,6 +280,18 @@ NEVER use Chinese characters (中文/汉字). NEVER switch to any other language
 
         except Exception:
             pass  # 저장 실패 시 무시
+
+    async def _load_context(self, session_id: str) -> Tuple[List[dict], Optional[str]]:
+        """
+        (히스토리, 세션 요약).
+        길이 제한은 LLM 클라이언트의 ContextBuilder 가 토큰 예산으로 맞춘다.
+        """
+        if not self.context_enabled:
+            return [], None
+        if conversation.is_available():
+            context = await conversation.get_context(session_id)
+            return context["messages"], context["summary"]
+        return await self._load_conversation_history(session_id), None
 
     async def _load_conversation_history(self, session_id: str) -> List[dict]:
         """

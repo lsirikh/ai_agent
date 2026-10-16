@@ -13,6 +13,9 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from ..repositories import MessageRepository, SessionRepository
+from ..services import conversation
+
 router = APIRouter(prefix="/api/history", tags=["history"])
 
 
@@ -25,6 +28,7 @@ class Message(BaseModel):
     role: str  # "user" | "assistant" | "system"
     content: str
     timestamp: str
+    source: Optional[str] = None  # "web" | "voice" | "api"
 
 
 class MessageCreate(BaseModel):
@@ -162,6 +166,35 @@ def get_history_store() -> HistoryStore:
     return _history_store
 
 
+# ===== Postgres (DB 가 연결돼 있으면 이쪽, 없으면 메모리 저장소) =====
+
+def _to_history_message(message: Dict[str, Any]) -> Dict[str, Any]:
+    public = conversation.to_public(message)
+    return {
+        "id": public["id"],
+        "session_id": public["session_id"],
+        "role": public["role"],
+        "content": public["content"],
+        "timestamp": public["created_at"],
+        "source": public["source"],
+    }
+
+
+async def _db_messages(
+    session_id: Optional[str], limit: int, offset: int
+) -> List[Dict[str, Any]]:
+    """최신순 메시지."""
+    if session_id:
+        try:
+            rows = await MessageRepository().get_by_session(uuid.UUID(session_id))
+        except ValueError:
+            return []
+        rows = list(reversed(rows))[offset:offset + limit]
+    else:
+        rows = await MessageRepository().list_recent(limit=limit, offset=offset)
+    return [_to_history_message(m) for m in rows]
+
+
 # ===== API Endpoints =====
 
 @router.get("", response_model=HistoryResponse)
@@ -181,8 +214,12 @@ async def get_history(
     Returns:
         대화 기록
     """
-    store = get_history_store()
-    messages = store.get_messages(session_id=session_id, limit=limit, offset=offset)
+    if conversation.is_available():
+        messages = await _db_messages(session_id, limit, offset)
+    else:
+        messages = get_history_store().get_messages(
+            session_id=session_id, limit=limit, offset=offset
+        )
 
     return HistoryResponse(
         messages=[Message(**m) for m in messages],
@@ -198,8 +235,18 @@ async def list_sessions():
     Returns:
         세션 목록
     """
-    store = get_history_store()
-    sessions = store.list_sessions()
+    if conversation.is_available():
+        repo = MessageRepository()
+        sessions = [
+            {
+                "session_id": str(s["id"]),
+                "created_at": s["created_at"].isoformat(),
+                "message_count": await repo.count_by_session(s["id"]),
+            }
+            for s in await SessionRepository().list_recent(limit=100)
+        ]
+    else:
+        sessions = get_history_store().list_sessions()
 
     return SessionListResponse(
         sessions=[SessionInfo(**s) for s in sessions]
@@ -217,6 +264,19 @@ async def add_message(message: MessageCreate):
     Returns:
         추가된 메시지
     """
+    if conversation.is_available():
+        session_id = await conversation.resolve_session_id(message.session_id)
+        saved = await conversation.save_message(
+            session_id, message.role, message.content, source="api"
+        )
+        return MessageResponse(
+            id=saved["id"],
+            session_id=session_id,
+            role=saved["role"],
+            content=saved["content"],
+            timestamp=saved["created_at"]
+        )
+
     store = get_history_store()
     msg_id = store.add_message(
         session_id=message.session_id,
@@ -256,8 +316,10 @@ async def export_history(
     if format not in ["json", "csv"]:
         raise HTTPException(status_code=400, detail=f"지원하지 않는 형식입니다: {format}")
 
-    store = get_history_store()
-    messages = store.get_messages(session_id=session_id, limit=10000)
+    if conversation.is_available():
+        messages = await _db_messages(session_id, 10000, 0)
+    else:
+        messages = get_history_store().get_messages(session_id=session_id, limit=10000)
 
     if format == "json":
         return JSONResponse(
@@ -269,7 +331,11 @@ async def export_history(
         )
     else:  # csv
         output = io.StringIO()
-        writer = csv.DictWriter(output, fieldnames=["id", "session_id", "role", "content", "timestamp"])
+        writer = csv.DictWriter(
+            output,
+            fieldnames=["id", "session_id", "role", "content", "timestamp"],
+            extrasaction="ignore",
+        )
         writer.writeheader()
         writer.writerows(messages)
 
@@ -292,6 +358,13 @@ async def clear_session_history(session_id: str):
     Returns:
         삭제 결과
     """
+    if conversation.is_available():
+        try:
+            deleted = await SessionRepository().delete(uuid.UUID(session_id))
+            return DeleteResponse(deleted=deleted)
+        except ValueError:
+            return DeleteResponse(deleted=False)
+
     store = get_history_store()
     result = store.clear_session(session_id)
 
@@ -306,6 +379,12 @@ async def clear_all_history():
     Returns:
         삭제 결과
     """
+    if conversation.is_available():
+        repo = SessionRepository()
+        for s in await repo.list_recent(limit=100000):
+            await repo.delete(s["id"])
+        return DeleteResponse(deleted=True)
+
     store = get_history_store()
     result = store.clear_all()
 

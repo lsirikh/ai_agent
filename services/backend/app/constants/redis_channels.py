@@ -18,6 +18,9 @@ class RedisChannels:
     # 설정 브로드캐스트 채널
     SETTINGS_BROADCAST = "edgevoice:settings:broadcast"
 
+    # 대화 메시지 저장 알림 채널 (/api/chat/stream 이 구독)
+    CHAT_MESSAGE = "edgevoice:chat:message"
+
     # 대시보드 업데이트 채널
     DASHBOARD_UPDATES = "dashboard:updates"
 

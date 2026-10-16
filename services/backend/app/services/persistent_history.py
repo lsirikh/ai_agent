@@ -4,7 +4,19 @@ Backend API - Persistent History Store
 Phase 9.4: PostgreSQL 기반 대화 기록 저장소
 """
 import json
+import uuid as uuid_lib
 from typing import Optional
+
+
+def to_session_uuid(session_id: str) -> uuid_lib.UUID:
+    """
+    세션 ID → UUID. UUID 가 아닌 ID(예: "session-1a2b")는 매번 같은 UUID 로 바꾼다
+    (예전처럼 메시지마다 새 UUID 를 만들면 한 세션의 히스토리가 흩어진다).
+    """
+    try:
+        return uuid_lib.UUID(session_id)
+    except (ValueError, TypeError, AttributeError):
+        return uuid_lib.uuid5(uuid_lib.NAMESPACE_URL, f"edgevoice-session:{session_id}")
 
 
 class PersistentHistoryStore:
@@ -65,12 +77,7 @@ class PersistentHistoryStore:
 
         async with self.pool.acquire() as conn:
             # session이 없으면 먼저 생성
-            import uuid as uuid_lib
-            try:
-                session_uuid = uuid_lib.UUID(session_id)
-            except ValueError:
-                # 유효한 UUID가 아니면 새로 생성
-                session_uuid = uuid_lib.uuid4()
+            session_uuid = to_session_uuid(session_id)
 
             # Session 존재 확인 및 생성
             await conn.execute("""
@@ -111,12 +118,7 @@ class PersistentHistoryStore:
             return []
 
         async with self.pool.acquire() as conn:
-            # session_id를 UUID로 변환
-            import uuid as uuid_lib
-            try:
-                session_uuid = uuid_lib.UUID(session_id)
-            except ValueError:
-                return []
+            session_uuid = to_session_uuid(session_id)
 
             rows = await conn.fetch("""
                 SELECT id, session_id, role, content, rag_sources, created_at

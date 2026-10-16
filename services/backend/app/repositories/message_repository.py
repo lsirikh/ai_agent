@@ -56,7 +56,8 @@ class MessageRepository(BaseRepository):
         role: str,
         content: str,
         rag_context: Optional[str] = None,
-        rag_sources: Optional[List[Dict[str, Any]]] = None
+        rag_sources: Optional[List[Dict[str, Any]]] = None,
+        source: str = "web"
     ) -> UUID:
         """
         Create a new message.
@@ -67,6 +68,7 @@ class MessageRepository(BaseRepository):
             content: Message content text
             rag_context: Optional RAG context text
             rag_sources: Optional list of RAG source references
+            source: 'web' | 'voice' | 'api'
 
         Returns:
             The generated message UUID
@@ -74,15 +76,17 @@ class MessageRepository(BaseRepository):
         async with self.connection() as conn:
             message_id = await conn.fetchval(
                 """
-                INSERT INTO messages (session_id, role, content, rag_context, rag_sources)
-                VALUES ($1, $2, $3, $4, $5::jsonb)
+                INSERT INTO messages
+                    (session_id, role, content, rag_context, rag_sources, source)
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6)
                 RETURNING id
                 """,
                 session_id,
                 role,
                 content,
                 rag_context,
-                json.dumps(rag_sources or [])
+                json.dumps(rag_sources or []),
+                source
             )
             return message_id
 
@@ -130,7 +134,8 @@ class MessageRepository(BaseRepository):
             if include_system:
                 rows = await conn.fetch(
                     """
-                    SELECT id, session_id, role, content, rag_context, rag_sources, created_at
+                    SELECT id, session_id, role, content, rag_context, rag_sources,
+                           source, created_at
                     FROM messages
                     WHERE session_id = $1
                     ORDER BY created_at ASC
@@ -140,7 +145,8 @@ class MessageRepository(BaseRepository):
             else:
                 rows = await conn.fetch(
                     """
-                    SELECT id, session_id, role, content, rag_context, rag_sources, created_at
+                    SELECT id, session_id, role, content, rag_context, rag_sources,
+                           source, created_at
                     FROM messages
                     WHERE session_id = $1 AND role != 'system'
                     ORDER BY created_at ASC
@@ -181,6 +187,31 @@ class MessageRepository(BaseRepository):
                 """,
                 session_id,
                 limit
+            )
+
+            return [self._row_to_dict(row) for row in rows]
+
+    async def list_recent(
+        self, limit: int = 100, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        Get the most recent messages across all sessions (newest first).
+
+        Args:
+            limit: Maximum number of messages to return
+            offset: Number of messages to skip
+        """
+        async with self.connection() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, session_id, role, content, rag_context, rag_sources,
+                       source, created_at
+                FROM messages
+                ORDER BY created_at DESC
+                LIMIT $1 OFFSET $2
+                """,
+                limit,
+                offset
             )
 
             return [self._row_to_dict(row) for row in rows]
@@ -241,12 +272,17 @@ class MessageRepository(BaseRepository):
 
     def _row_to_dict(self, row) -> Dict[str, Any]:
         """Convert a database row to a dict."""
+        # asyncpg 는 JSONB 를 문자열로 돌려준다(코덱 미등록)
+        sources = row["rag_sources"]
+        if isinstance(sources, str):
+            sources = json.loads(sources)
         return {
             "id": row["id"],
             "session_id": row["session_id"],
             "role": row["role"],
             "content": row["content"],
             "rag_context": row["rag_context"],
-            "rag_sources": list(row["rag_sources"]) if row["rag_sources"] else [],
+            "rag_sources": list(sources) if sources else [],
+            "source": row.get("source"),
             "created_at": row["created_at"]
         }

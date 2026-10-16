@@ -89,15 +89,19 @@ public class HeadedScenarioTests
         {
             var chat = main.Chat;
             w.FindControl<TabControl>("Nav")!.SelectedIndex = 1;
+            // 채팅은 활성 세션 히스토리를 먼저 불러온다 → 그 뒤에 붙는 두 말풍선을 본다
+            await HeadedApp.WaitUntil(() => chat.SessionId is not null);
+            await Task.Delay(1000);
+            var before = chat.Messages.Count;
             chat.UseRag = false;
             chat.Input = "한 문장으로 인사해 줘.";
             chat.SendCommand.Execute();
 
-            await HeadedApp.WaitUntil(() => !chat.IsBusy && chat.Messages.Count == 2, 120_000);
+            await HeadedApp.WaitUntil(() => !chat.IsBusy && chat.Messages.Count == before + 2, 120_000);
             HeadedApp.Shot(w, "headed-chat");
 
-            Assert.False(string.IsNullOrWhiteSpace(chat.Messages[1].Text), chat.Status);
-            Assert.DoesNotContain("Error", chat.Messages[1].Text);
+            Assert.False(string.IsNullOrWhiteSpace(chat.Messages[^1].Text), chat.Status);
+            Assert.DoesNotContain("Error", chat.Messages[^1].Text);
         }
         finally
         {

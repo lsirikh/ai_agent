@@ -10,6 +10,14 @@ from typing import Any, AsyncGenerator, Optional
 
 import httpx
 
+from shared.context_builder import (
+    DEFAULT_MAX_MODEL_LEN,
+    VOICE_MAX_TOKENS,
+    build_messages,
+    fit_messages,
+    vllm_tokenize,
+)
+
 from .pipeline_logger import PipelineLogger
 
 
@@ -28,7 +36,8 @@ class LLMClient:
     MODEL_CONFIGS = {
         "development": {
             "model_name": "Qwen/Qwen2.5-14B-Instruct-AWQ",
-            "max_tokens": 2048,
+            # 음성 답은 2~3문장이라 출력 예약을 작게 두고 나머지를 대화 맥락에 쓴다
+            "max_tokens": VOICE_MAX_TOKENS,
             "temperature": 0.7
         },
         "production_jetson": {
@@ -66,8 +75,10 @@ class LLMClient:
         self.timeout = timeout
         self.system_prompt = system_prompt or ""
         self.max_context_messages = max_context_messages
+        # vLLM --max-model-len (/v1/models 응답으로 갱신)
+        self.max_model_len = DEFAULT_MAX_MODEL_LEN
 
-        # 대화 컨텍스트 저장
+        # 대화 컨텍스트 저장 (백엔드 세션 히스토리를 못 받을 때의 대체)
         self._context: list[dict[str, str]] = []
 
         # 기본 생성 파라미터
@@ -117,7 +128,10 @@ class LLMClient:
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(f"{self.base_url}/v1/models")
             response.raise_for_status()
-            return [m["id"] for m in response.json().get("data", [])]
+            models = response.json().get("data", [])
+            if models and models[0].get("max_model_len"):
+                self.max_model_len = int(models[0]["max_model_len"])
+            return [m["id"] for m in models]
 
     async def resolve_model(self) -> str:
         """
@@ -134,6 +148,10 @@ class LLMClient:
         if served and self.model_name not in served:
             return served[0]
         return self.model_name
+
+    async def _tokenize(self, messages: list[dict[str, str]]) -> Optional[tuple]:
+        """vLLM 이 센 실제 프롬프트 토큰 수와 서버 max_model_len."""
+        return await vllm_tokenize(self.base_url, await self.resolve_model(), messages)
 
     def add_to_context(self, role: str, content: str) -> None:
         """
@@ -188,39 +206,43 @@ class LLMClient:
         self,
         user_message: Optional[str] = None,
         messages: Optional[list[dict[str, str]]] = None,
-        rag_context: Optional[list[dict[str, Any]]] = None
+        rag_context: Optional[list[dict[str, Any]]] = None,
+        history: Optional[list[dict[str, str]]] = None,
+        summary: Optional[str] = None,
+        max_model_len: Optional[int] = None,
+        max_tokens: Optional[int] = None
     ) -> list[dict[str, str]]:
         """
         API 요청용 메시지 리스트 구성
 
         Args:
             user_message: 단일 사용자 메시지
-            messages: 대화 기록 리스트
-            rag_context: RAG 검색 결과
+            messages: 대화 기록 리스트 (그대로 보낸다)
+            rag_context: RAG 검색 결과 (이번 사용자 메시지에 붙는다)
+            history: 세션 히스토리 (None 이면 메모리 컨텍스트)
+            summary: 세션 요약
+            max_model_len: 토큰 예산 계산용 모델 길이 (기본: self.max_model_len)
+            max_tokens: 출력 예약 (기본: self.max_tokens)
 
         Returns:
             OpenAI 형식의 메시지 리스트
         """
-        result_messages = []
+        if messages or not user_message:
+            result_messages = []
+            if self.system_prompt:
+                result_messages.append({"role": "system", "content": self.system_prompt})
+            result_messages.extend(messages or [])
+            return result_messages
 
-        # 1. 시스템 프롬프트 추가
-        system_content = self.system_prompt
-        if rag_context:
-            rag_text = self.format_rag_context(rag_context)
-            system_content = f"{system_content}\n\n{rag_text}" if system_content else rag_text
-
-        if system_content:
-            result_messages.append({"role": "system", "content": system_content})
-
-        # 2. 대화 기록 추가
-        if messages:
-            result_messages.extend(messages)
-        elif user_message:
-            # 기존 컨텍스트 포함
-            result_messages.extend(self._context)
-            result_messages.append({"role": "user", "content": user_message})
-
-        return result_messages
+        return build_messages(
+            system_prompt=self.system_prompt,
+            history=self._context if history is None else history,
+            user_message=user_message,
+            summary=summary,
+            reference=self.format_rag_context(rag_context) if rag_context else None,
+            max_model_len=max_model_len or self.max_model_len,
+            max_tokens=max_tokens or self.max_tokens,
+        )
 
     async def _make_request(self, messages: list[dict[str, str]], **kwargs) -> dict:
         """
@@ -369,6 +391,8 @@ class LLMClient:
         messages: Optional[list[dict[str, str]]] = None,
         rag_context: Optional[list[dict[str, Any]]] = None,
         session_id: Optional[str] = None,
+        history: Optional[list[dict[str, str]]] = None,
+        summary: Optional[str] = None,
         **kwargs
     ) -> AsyncGenerator[str, None]:
         """
@@ -379,12 +403,27 @@ class LLMClient:
             messages: 대화 기록 (user_message 대신 사용)
             rag_context: RAG 검색 결과
             session_id: 세션 ID (로깅용)
+            history: 세션 히스토리 (None 이면 메모리 컨텍스트)
+            summary: 세션 요약
             **kwargs: 추가 생성 파라미터
 
         Yields:
             토큰 문자열
         """
-        built_messages = self._build_messages(user_message, messages, rag_context)
+        max_tokens = kwargs.get("max_tokens", self.max_tokens)
+        if messages or not user_message:
+            built_messages = self._build_messages(user_message, messages, rag_context)
+        else:
+            # 프롬프트 + max_tokens 가 모델 길이를 넘으면
+            # vLLM 이 400 으로 거절해 음성 답이 나오지 않는다
+            built_messages = await fit_messages(
+                lambda limit: self._build_messages(
+                    user_message, None, rag_context, history, summary, limit, max_tokens
+                ),
+                max_model_len=self.max_model_len,
+                max_tokens=max_tokens,
+                tokenize=self._tokenize,
+            )
 
         # Phase 27.6: Log stream start
         start_time = time.time()

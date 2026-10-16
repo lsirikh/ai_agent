@@ -46,8 +46,8 @@ async def test_message_saved_with_voice_source():
         mock_client.post.assert_called_once()
         call_args = mock_client.post.call_args
 
-        # URL에 /api/messages/pipeline이 포함되어야 함
-        assert "/api/messages/pipeline" in str(call_args)
+        # URL에 백엔드 실제 경로 /api/sessions/pipeline/messages 가 포함되어야 함
+        assert "/api/sessions/pipeline/messages" in str(call_args)
 
         # 요청 본문에 source가 포함되어야 함
         request_body = call_args[1]["json"]

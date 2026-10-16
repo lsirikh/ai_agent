@@ -37,6 +37,7 @@ public partial class App : Application
                 this,
                 _container.Resolve<VoiceStateMonitor>(),
                 _container.Resolve<MicrophoneStreamer>(),
+                _container.Resolve<AlwaysOnMicrophone>(),
                 OpenMainWindow,
                 () => desktop.Shutdown());
 

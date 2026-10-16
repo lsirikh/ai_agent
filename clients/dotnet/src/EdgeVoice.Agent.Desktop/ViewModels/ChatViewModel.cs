@@ -1,6 +1,10 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Net.Http;
+using System.Text.Json.Nodes;
+using System.Threading;
+using System.Threading.Tasks;
 using Avalonia.Threading;
 using EdgeVoice.Agent.Core;
 using Prism.Commands;
@@ -12,45 +16,60 @@ public sealed class ChatMessage : BindableBase
 {
     private string _text;
 
-    public ChatMessage(string role, string text)
+    public ChatMessage(string role, string text, bool isVoice = false)
     {
         Role = role;
         _text = text;
+        IsVoice = isVoice;
     }
 
     public string Role { get; }
 
+    /// <summary>음성("Hey Jarvis")으로 나눈 턴이면 true — 말풍선에 음성 표시가 붙는다.</summary>
+    public bool IsVoice { get; }
+
     public string Text { get => _text; set => SetProperty(ref _text, value); }
 }
 
-/// <summary>채팅: 스트리밍 응답(RAG 출처 표시) + 마이크 스트리밍 토글(웹의 Push-to-Talk 대응).</summary>
-public sealed class ChatViewModel : PageViewModel
+/// <summary>
+/// 채팅: 음성과 같은 활성 세션을 쓴다. 시작하면 세션 히스토리를 불러오고 /api/chat/stream 을 상시 구독해
+/// 음성 턴을 말풍선으로 보여 준다. 텍스트 질문은 스트리밍 응답(RAG 출처 표시), 마이크 버튼은 상시 마이크 음소거 토글.
+/// </summary>
+public sealed class ChatViewModel : PageViewModel, IDisposable
 {
+    private const int ReconnectDelayMs = 5000;
+
     private readonly EdgeVoiceApiClient _api;
-    private readonly MicrophoneStreamer _mic;
+    private readonly AlwaysOnMicrophone _mic;
+    private CancellationTokenSource? _stream;
     private string? _sessionId;
     private string _input = "";
     private bool _useRag = true;
     private bool _isBusy;
-    private bool _isRecording;
+    private bool _isMuted;
 
-    public ChatViewModel(EdgeVoiceApiClient api, MicrophoneStreamer mic)
+    public ChatViewModel(EdgeVoiceApiClient api, AlwaysOnMicrophone mic)
     {
         _api = api;
         _mic = mic;
         SendCommand = new DelegateCommand(Send, () => !IsBusy && !string.IsNullOrWhiteSpace(Input))
             .ObservesProperty(() => IsBusy)
             .ObservesProperty(() => Input);
-        ToggleMicCommand = new DelegateCommand(ToggleMic);
+        ToggleMuteCommand = new DelegateCommand(() => _mic.IsMuted = !_mic.IsMuted);
+        NewConversationCommand = new DelegateCommand(NewConversation, () => !IsBusy).ObservesProperty(() => IsBusy);
 
-        mic.StreamingChanged += on => Dispatcher.UIThread.Post(() => IsRecording = on);
+        _isMuted = mic.IsMuted;
+        mic.MutedChanged += muted => Dispatcher.UIThread.Post(() => IsMuted = muted);
+        Connect();
     }
 
     public ObservableCollection<ChatMessage> Messages { get; } = new();
 
     public DelegateCommand SendCommand { get; }
 
-    public DelegateCommand ToggleMicCommand { get; }
+    public DelegateCommand ToggleMuteCommand { get; }
+
+    public DelegateCommand NewConversationCommand { get; }
 
     public string Input { get => _input; set => SetProperty(ref _input, value); }
 
@@ -58,7 +77,10 @@ public sealed class ChatViewModel : PageViewModel
 
     public bool IsBusy { get => _isBusy; set => SetProperty(ref _isBusy, value); }
 
-    public bool IsRecording { get => _isRecording; set => SetProperty(ref _isRecording, value); }
+    public bool IsMuted { get => _isMuted; set => SetProperty(ref _isMuted, value); }
+
+    /// <summary>지금 이어 쓰는 세션 ID(백엔드의 활성 세션).</summary>
+    public string? SessionId => _sessionId;
 
     private async void Send()
     {
@@ -97,15 +119,85 @@ public sealed class ChatViewModel : PageViewModel
         IsBusy = false;
     }
 
-    private async void ToggleMic() => await RunAsync(async () =>
+    private async void NewConversation() => await RunAsync(async () =>
     {
-        if (_mic.IsStreaming)
+        await _api.SendAsync(HttpMethod.Post, "api/sessions", null);
+        Messages.Clear();
+        Connect();
+    }, "새 대화를 시작했습니다.");
+
+    /// <summary>활성 세션의 대화 스트림에 붙는다(끊기면 잠시 뒤 다시 붙고, 그때마다 히스토리를 새로 받는다).</summary>
+    private async void Connect()
+    {
+        _stream?.Cancel();
+        var cts = _stream = new CancellationTokenSource();
+        while (!cts.IsCancellationRequested)
         {
-            _mic.Stop();
+            try
+            {
+                _sessionId = (await _api.GetAsync("api/sessions/active", cts.Token))?["session_id"]?.ToString();
+                await foreach (var ev in _api.StreamAsync("api/chat/stream?session_id=" + _sessionId, cts.Token))
+                {
+                    if (ev.Type == "init")
+                    {
+                        LoadHistory(ev.Json?["messages"]?.AsArray());
+                    }
+                    else if (ev.Type == "message")
+                    {
+                        OnStoredMessage(ev.Json);
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (cts.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                Status = $"대화 연결 오류({ReconnectDelayMs / 1000}초 후 재연결): " + ex.Message;
+            }
+
+            try
+            {
+                await Task.Delay(ReconnectDelayMs, cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
         }
-        else
+    }
+
+    private void LoadHistory(JsonArray? messages)
+    {
+        // 보내는 중인 답 말풍선을 지우지 않는다(끝나면 다음 연결 때 히스토리에 들어 있다)
+        if (IsBusy || messages is null)
         {
-            await _mic.StartAsync();
+            return;
         }
-    });
+
+        Messages.Clear();
+        foreach (var m in messages)
+        {
+            Messages.Add(ToChatMessage(m));
+        }
+    }
+
+    /// <summary>
+    /// 저장 알림. 텍스트 턴은 보낸 화면이 이미 그리고 있으므로 음성 턴만 추가한다.
+    /// </summary>
+    private void OnStoredMessage(JsonNode? message)
+    {
+        if (message?["source"]?.ToString() == "voice")
+        {
+            Messages.Add(ToChatMessage(message));
+        }
+    }
+
+    private static ChatMessage ToChatMessage(JsonNode? m) => new(
+        m?["role"]?.ToString() == "user" ? "User" : "AI",
+        m?["content"]?.ToString() ?? "",
+        m?["source"]?.ToString() == "voice");
+
+    public void Dispose() => _stream?.Cancel();
 }

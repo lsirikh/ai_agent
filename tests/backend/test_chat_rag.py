@@ -71,10 +71,12 @@ class TestChatWithRAGContext:
 
         mock_llm = MagicMock()
 
-        async def mock_stream(text, system_prompt=None, **kwargs):
-            # 시스템 프롬프트에 RAG 컨텍스트가 포함되어야 함
-            assert "첫 번째 문서 내용" in system_prompt
-            assert "두 번째 문서 내용" in system_prompt
+        async def mock_stream(text, system_prompt=None, reference=None, **kwargs):
+            # RAG 컨텍스트는 이번 질문에 붙는 참고 자료로 전달되고
+            # 시스템 프롬프트는 고정(접두사 캐시)
+            assert "첫 번째 문서 내용" in reference
+            assert "두 번째 문서 내용" in reference
+            assert "첫 번째 문서 내용" not in system_prompt
             yield "응답"
 
         mock_llm.generate_stream = mock_stream
