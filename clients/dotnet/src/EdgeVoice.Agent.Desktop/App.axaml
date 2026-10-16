@@ -2,8 +2,45 @@
              xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              RequestedThemeVariant="Default">
+    <!-- Microsoft 365(Office, Fluent 2) 디자인: 브랜드 파랑 강조색, 회색 캔버스 위 흰 카드, 라이트/다크 테마 -->
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="OfficeHeaderBrush" Color="#0F6CBD" />
+                    <SolidColorBrush x:Key="OfficeHeaderForegroundBrush" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="OfficeCanvasBrush" Color="#F5F5F5" />
+                    <SolidColorBrush x:Key="OfficeNavBrush" Color="#FAFAFA" />
+                    <SolidColorBrush x:Key="OfficeCardBrush" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="OfficeStrokeBrush" Color="#E0E0E0" />
+                    <SolidColorBrush x:Key="OfficeSubtleTextBrush" Color="#616161" />
+                    <SolidColorBrush x:Key="OfficeAccentTextBrush" Color="#0F6CBD" />
+                    <SolidColorBrush x:Key="OfficeHoverBrush" Color="#EBEBEB" />
+                    <SolidColorBrush x:Key="OfficeSelectedBrush" Color="#EBF3FC" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="OfficeHeaderBrush" Color="#292929" />
+                    <SolidColorBrush x:Key="OfficeHeaderForegroundBrush" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="OfficeCanvasBrush" Color="#1F1F1F" />
+                    <SolidColorBrush x:Key="OfficeNavBrush" Color="#242424" />
+                    <SolidColorBrush x:Key="OfficeCardBrush" Color="#2E2E2E" />
+                    <SolidColorBrush x:Key="OfficeStrokeBrush" Color="#3D3D3D" />
+                    <SolidColorBrush x:Key="OfficeSubtleTextBrush" Color="#ADADAD" />
+                    <SolidColorBrush x:Key="OfficeAccentTextBrush" Color="#479EF5" />
+                    <SolidColorBrush x:Key="OfficeHoverBrush" Color="#333333" />
+                    <SolidColorBrush x:Key="OfficeSelectedBrush" Color="#0C3B5E" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+
     <Application.Styles>
-        <FluentTheme />
+        <FluentTheme>
+            <FluentTheme.Palettes>
+                <ColorPaletteResources x:Key="Light" Accent="#0F6CBD" RegionColor="#FFFFFF" />
+                <ColorPaletteResources x:Key="Dark" Accent="#479EF5" RegionColor="#292929" />
+            </FluentTheme.Palettes>
+        </FluentTheme>
         <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
     </Application.Styles>
 </Application>

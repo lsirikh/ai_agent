@@ -1,186 +1,371 @@
 <Window x:Class="EdgeVoice.Agent.Desktop.MainWindow"
         xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="EdgeVoice Agent" Width="1000" Height="720">
+        xmlns:lvc="using:LiveChartsCore.SkiaSharpView.Avalonia"
+        Title="EdgeVoice Agent" Width="1200" Height="800" MinWidth="900" MinHeight="600"
+        Background="{DynamicResource OfficeCanvasBrush}"
+        FontFamily="Segoe UI Variable Text, Segoe UI, Malgun Gothic, Noto Sans KR, sans-serif">
     <Window.Styles>
         <Style Selector="Button">
-            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="Padding" Value="12,5" />
             <Setter Property="Margin" Value="0,0,6,0" />
+            <Setter Property="CornerRadius" Value="4" />
         </Style>
         <Style Selector="TextBlock.label">
-            <Setter Property="Margin" Value="0,6,0,2" />
+            <Setter Property="Margin" Value="0,8,0,3" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
         <Style Selector="TextBlock.status">
-            <Setter Property="Foreground" Value="Gray" />
+            <Setter Property="Foreground" Value="{DynamicResource OfficeSubtleTextBrush}" />
+            <Setter Property="Margin" Value="0,8,0,0" />
+        </Style>
+        <Style Selector="TextBlock.title">
+            <Setter Property="FontSize" Value="20" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,12" />
+        </Style>
+        <Style Selector="TextBlock.section">
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,12,0,0" />
+        </Style>
+        <Style Selector="TextBlock.cardTitle">
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
+        <Style Selector="TextBlock.kpiLabel">
+            <Setter Property="Foreground" Value="{DynamicResource OfficeSubtleTextBrush}" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+        <Style Selector="TextBlock.kpiValue">
+            <Setter Property="FontSize" Value="24" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,4,0,0" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+
+        <!-- Office 카드: 회색 캔버스 위 흰(다크: 짙은 회색) 카드, 8px 모서리, 얕은 그림자 -->
+        <Style Selector="Border.card">
+            <Setter Property="Background" Value="{DynamicResource OfficeCardBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource OfficeStrokeBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="16" />
+            <Setter Property="Margin" Value="0,0,12,12" />
+            <Setter Property="BoxShadow" Value="0 1 3 0 #22000000" />
+        </Style>
+
+        <!-- 왼쪽 탐색 창(Office Backstage / Outlook 내비게이션 형태) -->
+        <Style Selector="TabControl.nav">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="{DynamicResource OfficeNavBrush}" />
+        </Style>
+        <Style Selector="TabControl.nav > TabItem">
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="MinHeight" Value="40" />
+            <Setter Property="MinWidth" Value="170" />
+            <Setter Property="Padding" Value="16,0" />
+            <Setter Property="Margin" Value="6,2" />
+            <Setter Property="CornerRadius" Value="4" />
+        </Style>
+        <Style Selector="TabControl.nav > TabItem:pointerover /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="{DynamicResource OfficeHoverBrush}" />
+        </Style>
+        <Style Selector="TabControl.nav > TabItem:selected /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="{DynamicResource OfficeSelectedBrush}" />
+        </Style>
+        <Style Selector="TabControl.nav > TabItem:selected">
+            <Setter Property="Foreground" Value="{DynamicResource OfficeAccentTextBrush}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style Selector="Border.page">
+            <Setter Property="Background" Value="{DynamicResource OfficeCanvasBrush}" />
+            <Setter Property="Padding" Value="24,20,12,12" />
+        </Style>
+
+        <!-- 상단 앱 바 버튼 -->
+        <Style Selector="Button.appBar">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource OfficeHeaderForegroundBrush}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Margin" Value="0" />
+        </Style>
+        <Style Selector="Button.appBar:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#33FFFFFF" />
+            <Setter Property="Foreground" Value="{DynamicResource OfficeHeaderForegroundBrush}" />
         </Style>
     </Window.Styles>
 
-    <TabControl Margin="6">
-        <!-- 대시보드 -->
-        <TabItem Header="Dashboard">
-            <DockPanel Margin="10" DataContext="{Binding Dashboard}">
-                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
-                    <Button Content="새로고침" Command="{Binding RefreshCommand}" />
-                    <TextBlock VerticalAlignment="Center" Text="{Binding SystemStatus}" FontWeight="Bold" />
+    <DockPanel>
+        <!-- 앱 바 (Microsoft 365 머리글) -->
+        <Border DockPanel.Dock="Top" Height="48" Background="{DynamicResource OfficeHeaderBrush}" Padding="16,0,8,0">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center" Spacing="10">
+                    <Border Width="24" Height="24" CornerRadius="5" Background="#FFFFFF">
+                        <TextBlock Text="EV" FontSize="11" FontWeight="Bold" Foreground="#0F6CBD"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <TextBlock Text="EdgeVoice Agent" FontSize="16" FontWeight="SemiBold"
+                               Foreground="{DynamicResource OfficeHeaderForegroundBrush}" VerticalAlignment="Center" />
                 </StackPanel>
-                <UniformGrid DockPanel.Dock="Top" Columns="4" Margin="0,0,0,10">
-                    <StackPanel><TextBlock Text="Orchestrator" Classes="label" /><TextBlock Text="{Binding OrchestratorState}" FontSize="18" /></StackPanel>
-                    <StackPanel><TextBlock Text="GPU" Classes="label" /><TextBlock Text="{Binding Gpu}" FontSize="18" /></StackPanel>
-                    <StackPanel><TextBlock Text="Active Sessions" Classes="label" /><TextBlock Text="{Binding Sessions}" FontSize="18" /></StackPanel>
-                    <StackPanel><TextBlock Text="Documents" Classes="label" /><TextBlock Text="{Binding Documents}" FontSize="18" /></StackPanel>
-                </UniformGrid>
-                <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="status" />
-                <DataGrid ItemsSource="{Binding Services}" AutoGenerateColumns="False" IsReadOnly="True">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="Service" Binding="{Binding Name}" Width="200" />
-                        <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="*" />
-                    </DataGrid.Columns>
-                </DataGrid>
-            </DockPanel>
-        </TabItem>
-
-        <!-- 채팅 -->
-        <TabItem Header="Chat">
-            <DockPanel Margin="10" DataContext="{Binding Chat}">
-                <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="status" />
-                <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,4">
-                    <ToggleButton DockPanel.Dock="Left" Width="44" Margin="0,0,6,0" FontSize="16" Content="🎤"
-                                  IsChecked="{Binding IsRecording, Mode=OneWay}" Command="{Binding ToggleMicCommand}"
-                                  ToolTip.Tip="마이크 스트리밍 시작/중지" />
-                    <CheckBox DockPanel.Dock="Right" Content="RAG" IsChecked="{Binding UseRag}" VerticalAlignment="Center" Margin="6,0,0,0" />
-                    <Button DockPanel.Dock="Right" Content="전송" Command="{Binding SendCommand}" IsDefault="True" Margin="6,0,0,0" />
-                    <TextBox Text="{Binding Input}" VerticalContentAlignment="Center" />
-                </DockPanel>
-                <ListBox ItemsSource="{Binding Messages}" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <StackPanel Margin="0,4">
-                                <TextBlock Text="{Binding Role}" FontWeight="Bold" />
-                                <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
-            </DockPanel>
-        </TabItem>
-
-        <!-- 지식 베이스 -->
-        <TabItem Header="Knowledge">
-            <DockPanel Margin="10" DataContext="{Binding Knowledge}">
-                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
-                    <Button Content="문서 업로드..." Command="{Binding UploadCommand}" />
-                    <Button Content="새로고침" Command="{Binding RefreshCommand}" />
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Spacing="12">
+                    <TextBlock Text="{Binding Dashboard.SystemStatus}" VerticalAlignment="Center"
+                               Foreground="{DynamicResource OfficeHeaderForegroundBrush}" Opacity="0.85" />
+                    <Button x:Name="ThemeButton" Classes="appBar" Content="{Binding ThemeLabel}"
+                            Command="{Binding ToggleThemeCommand}" ToolTip.Tip="라이트/다크 테마 전환" />
                 </StackPanel>
-                <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="status" />
-                <DataGrid ItemsSource="{Binding Documents}" AutoGenerateColumns="False" IsReadOnly="True">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="파일" Binding="{Binding Filename}" Width="*" />
-                        <DataGridTextColumn Header="정보" Binding="{Binding Meta}" Width="220" />
-                        <DataGridTemplateColumn Width="80">
-                            <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate>
-                                    <Button Content="삭제" CommandParameter="{Binding}"
-                                            Command="{Binding $parent[DataGrid].DataContext.DeleteCommand}" />
-                                </DataTemplate>
-                            </DataGridTemplateColumn.CellTemplate>
-                        </DataGridTemplateColumn>
-                    </DataGrid.Columns>
-                </DataGrid>
+                <Panel />
             </DockPanel>
-        </TabItem>
+        </Border>
 
-        <!-- 설정 -->
-        <TabItem Header="Settings">
-            <DockPanel Margin="10" DataContext="{Binding Settings}">
-                <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="status" />
-                <ScrollViewer>
-                    <StackPanel MaxWidth="640" HorizontalAlignment="Left">
-                        <TextBlock Text="모델" FontSize="16" FontWeight="Bold" />
-                        <TextBlock Text="TTS Engine" Classes="label" />
-                        <ComboBox ItemsSource="{Binding TtsEngines}" DisplayMemberBinding="{Binding Label}"
-                                  SelectedValueBinding="{Binding Id}" SelectedValue="{Binding TtsEngine}" HorizontalAlignment="Stretch" />
-                        <TextBlock Text="TTS Voice" Classes="label" />
-                        <ComboBox ItemsSource="{Binding TtsVoices}" SelectedItem="{Binding TtsVoice}" HorizontalAlignment="Stretch" />
-                        <TextBlock Text="STT Model" Classes="label" />
-                        <ComboBox ItemsSource="{Binding SttModels}" DisplayMemberBinding="{Binding Label}"
-                                  SelectedValueBinding="{Binding Id}" SelectedValue="{Binding SttModel}" HorizontalAlignment="Stretch" />
-                        <TextBlock Text="LLM Model" Classes="label" />
-                        <ComboBox ItemsSource="{Binding LlmModels}" DisplayMemberBinding="{Binding Label}"
-                                  SelectedValueBinding="{Binding Id}" SelectedValue="{Binding LlmModel}" HorizontalAlignment="Stretch" />
-                        <StackPanel Orientation="Horizontal" Margin="0,8,0,16">
-                            <Button Content="모델 적용" Command="{Binding ApplyModelsCommand}" />
-                            <Button Content="LLM 재시작" Command="{Binding RestartLlmCommand}" />
-                        </StackPanel>
-
-                        <TextBlock Text="일반" FontSize="16" FontWeight="Bold" />
-                        <TextBlock Text="Wake Word" Classes="label" />
-                        <DockPanel>
-                            <Button DockPanel.Dock="Right" Content="등록" Command="{Binding RegisterWakeWordCommand}" Margin="6,0,0,0" />
-                            <ComboBox ItemsSource="{Binding WakeWords}" SelectedItem="{Binding WakeWord}" HorizontalAlignment="Stretch" />
+        <TabControl x:Name="Nav" Classes="nav" TabStripPlacement="Left">
+            <!-- 대시보드 -->
+            <TabItem Header="Dashboard">
+                <Border Classes="page" DataContext="{Binding Dashboard}">
+                    <DockPanel>
+                        <DockPanel DockPanel.Dock="Top">
+                            <Button DockPanel.Dock="Right" Classes="accent" Content="새로고침" Command="{Binding RefreshCommand}"
+                                    VerticalAlignment="Top" Margin="0,0,12,0" />
+                            <TextBlock Text="대시보드" Classes="title" />
                         </DockPanel>
-                        <TextBlock Text="Language" Classes="label" />
-                        <ComboBox ItemsSource="{Binding Languages}" SelectedItem="{Binding Language}" HorizontalAlignment="Stretch" />
-                        <TextBlock Classes="label" Text="{Binding VoiceSpeed, StringFormat='Voice Speed: {0:0.0}x'}" />
-                        <Slider Minimum="0.5" Maximum="2.0" TickFrequency="0.1" IsSnapToTickEnabled="True" Value="{Binding VoiceSpeed}" />
-                        <TextBlock Classes="label" Text="{Binding WakeWordThreshold, StringFormat='Wake Word Threshold: {0:0.00}'}" />
-                        <Slider Minimum="0.1" Maximum="0.9" TickFrequency="0.05" IsSnapToTickEnabled="True" Value="{Binding WakeWordThreshold}" />
-                        <TextBlock Classes="label" Text="{Binding EndPauseSeconds, StringFormat='End Pause: {0:0.0}s'}" />
-                        <Slider Minimum="1" Maximum="10" TickFrequency="0.5" IsSnapToTickEnabled="True" Value="{Binding EndPauseSeconds}" />
-                        <TextBlock Classes="label" Text="{Binding ListeningTimeoutSeconds, StringFormat='Listening Timeout: {0:0}s'}" />
-                        <Slider Minimum="5" Maximum="60" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding ListeningTimeoutSeconds}" />
-                        <Button Content="일반 설정 저장" Command="{Binding SaveGeneralCommand}" HorizontalAlignment="Left" Margin="0,8,0,16" />
+                        <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="status" />
+                        <ScrollViewer>
+                            <Grid ColumnDefinitions="2*,*" RowDefinitions="Auto,280,280,260">
+                                <UniformGrid Grid.ColumnSpan="2" Columns="4">
+                                    <Border Classes="card">
+                                        <StackPanel><TextBlock Text="Orchestrator" Classes="kpiLabel" /><TextBlock Text="{Binding OrchestratorState}" Classes="kpiValue" /></StackPanel>
+                                    </Border>
+                                    <Border Classes="card">
+                                        <StackPanel><TextBlock Text="GPU" Classes="kpiLabel" /><TextBlock Text="{Binding Gpu}" Classes="kpiValue" /></StackPanel>
+                                    </Border>
+                                    <Border Classes="card">
+                                        <StackPanel><TextBlock Text="Active Sessions" Classes="kpiLabel" /><TextBlock Text="{Binding Sessions}" Classes="kpiValue" /></StackPanel>
+                                    </Border>
+                                    <Border Classes="card">
+                                        <StackPanel><TextBlock Text="Documents" Classes="kpiLabel" /><TextBlock Text="{Binding Documents}" Classes="kpiValue" /></StackPanel>
+                                    </Border>
+                                </UniformGrid>
 
-                        <TextBlock Text="LLM 컨텍스트" FontSize="16" FontWeight="Bold" />
-                        <CheckBox Content="대화 컨텍스트 사용" IsChecked="{Binding ContextEnabled}" Margin="0,6,0,0" />
-                        <TextBlock Classes="label" Text="{Binding ContextWindowSize, StringFormat='Context Window: {0} messages'}" />
-                        <Slider Minimum="5" Maximum="50" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding ContextWindowSize}" />
-                        <TextBlock Text="{Binding EstimatedTokens}" Classes="status" />
-                        <Button Content="컨텍스트 설정 저장" Command="{Binding SaveContextCommand}" HorizontalAlignment="Left" Margin="0,8,0,0" />
-                    </StackPanel>
-                </ScrollViewer>
-            </DockPanel>
-        </TabItem>
+                                <Border Grid.Row="1" Classes="card">
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Top" Text="GPU 사용률 추이 (%)" Classes="cardTitle" />
+                                        <lvc:CartesianChart x:Name="GpuChart" Series="{Binding GpuSeries}"
+                                                            XAxes="{Binding GpuXAxes}" YAxes="{Binding GpuYAxes}" />
+                                    </DockPanel>
+                                </Border>
+                                <Border Grid.Row="1" Grid.Column="1" Classes="card">
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Top" Text="서비스 상태" Classes="cardTitle" />
+                                        <lvc:PieChart x:Name="ServiceChart" Series="{Binding ServiceHealthSeries}"
+                                                      LegendPosition="Bottom" LegendTextPaint="{Binding LegendTextPaint}" />
+                                    </DockPanel>
+                                </Border>
+                                <Border Grid.Row="2" Classes="card">
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Top" Text="로그 레벨별 건수" Classes="cardTitle" />
+                                        <lvc:CartesianChart x:Name="LogLevelChart" Series="{Binding LogLevelSeries}"
+                                                            XAxes="{Binding LogLevelXAxes}" YAxes="{Binding LogLevelYAxes}" />
+                                    </DockPanel>
+                                </Border>
+                                <Border Grid.Row="2" Grid.Column="1" Classes="card">
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Top" Text="서비스별 로그 건수" Classes="cardTitle" />
+                                        <lvc:CartesianChart x:Name="LogServiceChart" Series="{Binding LogServiceSeries}"
+                                                            XAxes="{Binding LogServiceXAxes}" YAxes="{Binding LogServiceYAxes}" />
+                                    </DockPanel>
+                                </Border>
 
-        <!-- 히스토리 -->
-        <TabItem Header="History">
-            <DockPanel Margin="10" DataContext="{Binding History}">
-                <Button DockPanel.Dock="Top" Content="새로고침" Command="{Binding RefreshCommand}" HorizontalAlignment="Left" Margin="0,0,0,10" />
-                <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="status" />
-                <DataGrid ItemsSource="{Binding Items}" AutoGenerateColumns="False" IsReadOnly="True">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="시간" Binding="{Binding Time}" Width="160" />
-                        <DataGridTextColumn Header="질문" Binding="{Binding Query}" Width="*" />
-                        <DataGridTextColumn Header="응답" Binding="{Binding Response}" Width="2*" />
-                    </DataGrid.Columns>
-                </DataGrid>
-            </DockPanel>
-        </TabItem>
+                                <Border Grid.Row="3" Grid.ColumnSpan="2" Classes="card">
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Top" Text="서비스" Classes="cardTitle" />
+                                        <DataGrid ItemsSource="{Binding Services}" AutoGenerateColumns="False" IsReadOnly="True">
+                                            <DataGrid.Columns>
+                                                <DataGridTextColumn Header="Service" Binding="{Binding Name}" Width="200" />
+                                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="*" />
+                                            </DataGrid.Columns>
+                                        </DataGrid>
+                                    </DockPanel>
+                                </Border>
+                            </Grid>
+                        </ScrollViewer>
+                    </DockPanel>
+                </Border>
+            </TabItem>
 
-        <!-- 로그 -->
-        <TabItem Header="Logs">
-            <DockPanel Margin="10" DataContext="{Binding Logs}">
-                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">
-                    <ComboBox ItemsSource="{Binding Services}" SelectedItem="{Binding ServiceFilter}" Width="130" Margin="0,0,6,0" />
-                    <ComboBox ItemsSource="{Binding Levels}" SelectedItem="{Binding LevelFilter}" Width="110" Margin="0,0,6,0" />
-                    <Button Content="조회" Command="{Binding RefreshCommand}" />
-                    <ToggleButton Content="Live" IsChecked="{Binding IsLive, Mode=OneWay}" Command="{Binding ToggleLiveCommand}" Padding="10,4" Margin="0,0,6,0" />
-                    <Button Content="지우기" Command="{Binding ClearCommand}" />
-                    <Button Content="통계 새로고침" Command="{Binding RefreshStatsCommand}" />
-                </StackPanel>
-                <TextBlock DockPanel.Dock="Top" Text="{Binding Stats}" Margin="0,0,0,6" />
-                <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="status" />
-                <DataGrid ItemsSource="{Binding Logs}" AutoGenerateColumns="False" IsReadOnly="True" FontFamily="Consolas, DejaVu Sans Mono, monospace">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="Time" Binding="{Binding Time}" Width="100" />
-                        <DataGridTextColumn Header="Level" Binding="{Binding Level}" Width="70" />
-                        <DataGridTextColumn Header="Service" Binding="{Binding Service}" Width="100" />
-                        <DataGridTextColumn Header="Stage" Binding="{Binding Stage}" Width="150" />
-                        <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="*" />
-                        <DataGridTextColumn Header="Duration" Binding="{Binding Duration}" Width="70" />
-                    </DataGrid.Columns>
-                </DataGrid>
-            </DockPanel>
-        </TabItem>
-    </TabControl>
+            <!-- 채팅 -->
+            <TabItem Header="Chat">
+                <Border Classes="page" DataContext="{Binding Chat}">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="채팅" Classes="title" />
+                        <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="status" />
+                        <Border DockPanel.Dock="Bottom" Classes="card" Padding="8" Margin="0,0,12,0">
+                            <DockPanel>
+                                <ToggleButton DockPanel.Dock="Left" Width="44" Margin="0,0,6,0" FontSize="16" Content="🎤"
+                                              IsChecked="{Binding IsRecording, Mode=OneWay}" Command="{Binding ToggleMicCommand}"
+                                              ToolTip.Tip="마이크 스트리밍 시작/중지" />
+                                <CheckBox DockPanel.Dock="Right" Content="RAG" IsChecked="{Binding UseRag}" VerticalAlignment="Center" Margin="6,0,0,0" />
+                                <Button DockPanel.Dock="Right" Classes="accent" Content="전송" Command="{Binding SendCommand}" IsDefault="True" Margin="6,0,0,0" />
+                                <TextBox x:Name="ChatInput" Text="{Binding Input}" VerticalContentAlignment="Center" Watermark="메시지를 입력하세요" />
+                            </DockPanel>
+                        </Border>
+                        <Border Classes="card">
+                            <ListBox x:Name="ChatMessages" ItemsSource="{Binding Messages}" Background="Transparent"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="0,4">
+                                            <TextBlock Text="{Binding Role}" FontWeight="SemiBold" Foreground="{DynamicResource OfficeAccentTextBrush}" />
+                                            <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Border>
+                    </DockPanel>
+                </Border>
+            </TabItem>
+
+            <!-- 지식 베이스 -->
+            <TabItem Header="Knowledge">
+                <Border Classes="page" DataContext="{Binding Knowledge}">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="지식 베이스" Classes="title" />
+                        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,12">
+                            <Button Classes="accent" Content="문서 업로드..." Command="{Binding UploadCommand}" />
+                            <Button Content="새로고침" Command="{Binding RefreshCommand}" />
+                        </StackPanel>
+                        <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="status" />
+                        <Border Classes="card">
+                            <DataGrid ItemsSource="{Binding Documents}" AutoGenerateColumns="False" IsReadOnly="True">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="파일" Binding="{Binding Filename}" Width="*" />
+                                    <DataGridTextColumn Header="정보" Binding="{Binding Meta}" Width="220" />
+                                    <DataGridTemplateColumn Width="80">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <Button Content="삭제" CommandParameter="{Binding}"
+                                                        Command="{Binding $parent[DataGrid].DataContext.DeleteCommand}" />
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Border>
+                    </DockPanel>
+                </Border>
+            </TabItem>
+
+            <!-- 설정 -->
+            <TabItem Header="Settings">
+                <Border Classes="page" DataContext="{Binding Settings}">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="설정" Classes="title" />
+                        <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="status" />
+                        <ScrollViewer>
+                            <Border Classes="card" MaxWidth="680" HorizontalAlignment="Left" VerticalAlignment="Top">
+                                <StackPanel>
+                                    <TextBlock Text="모델" Classes="section" Margin="0" />
+                                    <TextBlock Text="TTS Engine" Classes="label" />
+                                    <ComboBox ItemsSource="{Binding TtsEngines}" DisplayMemberBinding="{Binding Label}"
+                                              SelectedValueBinding="{Binding Id}" SelectedValue="{Binding TtsEngine}" HorizontalAlignment="Stretch" />
+                                    <TextBlock Text="TTS Voice" Classes="label" />
+                                    <ComboBox ItemsSource="{Binding TtsVoices}" SelectedItem="{Binding TtsVoice}" HorizontalAlignment="Stretch" />
+                                    <TextBlock Text="STT Model" Classes="label" />
+                                    <ComboBox ItemsSource="{Binding SttModels}" DisplayMemberBinding="{Binding Label}"
+                                              SelectedValueBinding="{Binding Id}" SelectedValue="{Binding SttModel}" HorizontalAlignment="Stretch" />
+                                    <TextBlock Text="LLM Model" Classes="label" />
+                                    <ComboBox ItemsSource="{Binding LlmModels}" DisplayMemberBinding="{Binding Label}"
+                                              SelectedValueBinding="{Binding Id}" SelectedValue="{Binding LlmModel}" HorizontalAlignment="Stretch" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,10,0,8">
+                                        <Button Classes="accent" Content="모델 적용" Command="{Binding ApplyModelsCommand}" />
+                                        <Button Content="LLM 재시작" Command="{Binding RestartLlmCommand}" />
+                                    </StackPanel>
+
+                                    <TextBlock Text="일반" Classes="section" />
+                                    <TextBlock Text="Wake Word" Classes="label" />
+                                    <DockPanel>
+                                        <Button DockPanel.Dock="Right" Content="등록" Command="{Binding RegisterWakeWordCommand}" Margin="6,0,0,0" />
+                                        <ComboBox ItemsSource="{Binding WakeWords}" SelectedItem="{Binding WakeWord}" HorizontalAlignment="Stretch" />
+                                    </DockPanel>
+                                    <TextBlock Text="Language" Classes="label" />
+                                    <ComboBox ItemsSource="{Binding Languages}" SelectedItem="{Binding Language}" HorizontalAlignment="Stretch" />
+                                    <TextBlock Classes="label" Text="{Binding VoiceSpeed, StringFormat='Voice Speed: {0:0.0}x'}" />
+                                    <Slider Minimum="0.5" Maximum="2.0" TickFrequency="0.1" IsSnapToTickEnabled="True" Value="{Binding VoiceSpeed}" />
+                                    <TextBlock Classes="label" Text="{Binding WakeWordThreshold, StringFormat='Wake Word Threshold: {0:0.00}'}" />
+                                    <Slider Minimum="0.1" Maximum="0.9" TickFrequency="0.05" IsSnapToTickEnabled="True" Value="{Binding WakeWordThreshold}" />
+                                    <TextBlock Classes="label" Text="{Binding EndPauseSeconds, StringFormat='End Pause: {0:0.0}s'}" />
+                                    <Slider Minimum="1" Maximum="10" TickFrequency="0.5" IsSnapToTickEnabled="True" Value="{Binding EndPauseSeconds}" />
+                                    <TextBlock Classes="label" Text="{Binding ListeningTimeoutSeconds, StringFormat='Listening Timeout: {0:0}s'}" />
+                                    <Slider Minimum="5" Maximum="60" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding ListeningTimeoutSeconds}" />
+                                    <Button Classes="accent" Content="일반 설정 저장" Command="{Binding SaveGeneralCommand}" HorizontalAlignment="Left" Margin="0,8,0,8" />
+
+                                    <TextBlock Text="LLM 컨텍스트" Classes="section" />
+                                    <CheckBox Content="대화 컨텍스트 사용" IsChecked="{Binding ContextEnabled}" Margin="0,6,0,0" />
+                                    <TextBlock Classes="label" Text="{Binding ContextWindowSize, StringFormat='Context Window: {0} messages'}" />
+                                    <Slider Minimum="5" Maximum="50" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding ContextWindowSize}" />
+                                    <TextBlock Text="{Binding EstimatedTokens}" Classes="status" Margin="0" />
+                                    <Button Classes="accent" Content="컨텍스트 설정 저장" Command="{Binding SaveContextCommand}" HorizontalAlignment="Left" Margin="0,8,0,0" />
+                                </StackPanel>
+                            </Border>
+                        </ScrollViewer>
+                    </DockPanel>
+                </Border>
+            </TabItem>
+
+            <!-- 히스토리 -->
+            <TabItem Header="History">
+                <Border Classes="page" DataContext="{Binding History}">
+                    <DockPanel>
+                        <DockPanel DockPanel.Dock="Top">
+                            <Button DockPanel.Dock="Right" Classes="accent" Content="새로고침" Command="{Binding RefreshCommand}"
+                                    VerticalAlignment="Top" Margin="0,0,12,0" />
+                            <TextBlock Text="히스토리" Classes="title" />
+                        </DockPanel>
+                        <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="status" />
+                        <Border Classes="card">
+                            <DataGrid ItemsSource="{Binding Items}" AutoGenerateColumns="False" IsReadOnly="True">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="시간" Binding="{Binding Time}" Width="160" />
+                                    <DataGridTextColumn Header="질문" Binding="{Binding Query}" Width="*" />
+                                    <DataGridTextColumn Header="응답" Binding="{Binding Response}" Width="2*" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Border>
+                    </DockPanel>
+                </Border>
+            </TabItem>
+
+            <!-- 로그 -->
+            <TabItem Header="Logs">
+                <Border Classes="page" DataContext="{Binding Logs}">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="로그" Classes="title" />
+                        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+                            <ComboBox ItemsSource="{Binding Services}" SelectedItem="{Binding ServiceFilter}" Width="130" Margin="0,0,6,0" />
+                            <ComboBox ItemsSource="{Binding Levels}" SelectedItem="{Binding LevelFilter}" Width="110" Margin="0,0,6,0" />
+                            <Button Classes="accent" Content="조회" Command="{Binding RefreshCommand}" />
+                            <ToggleButton Content="Live" IsChecked="{Binding IsLive, Mode=OneWay}" Command="{Binding ToggleLiveCommand}" Padding="12,5" Margin="0,0,6,0" />
+                            <Button Content="지우기" Command="{Binding ClearCommand}" />
+                            <Button Content="통계 새로고침" Command="{Binding RefreshStatsCommand}" />
+                        </StackPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="{Binding Stats}" Classes="kpiLabel" Margin="0,0,0,8" />
+                        <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="status" />
+                        <Border Classes="card">
+                            <DataGrid ItemsSource="{Binding Logs}" AutoGenerateColumns="False" IsReadOnly="True" FontFamily="Cascadia Mono, Consolas, DejaVu Sans Mono, monospace">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Time" Binding="{Binding Time}" Width="100" />
+                                    <DataGridTextColumn Header="Level" Binding="{Binding Level}" Width="70" />
+                                    <DataGridTextColumn Header="Service" Binding="{Binding Service}" Width="100" />
+                                    <DataGridTextColumn Header="Stage" Binding="{Binding Stage}" Width="150" />
+                                    <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="*" />
+                                    <DataGridTextColumn Header="Duration" Binding="{Binding Duration}" Width="70" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Border>
+                    </DockPanel>
+                </Border>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
 </Window>

@@ -10,6 +10,14 @@
 | `src/EdgeVoice.Agent.Core` (net8.0) | 백엔드 REST/SSE 클라이언트, Orchestrator 상태 모니터(`/api/status/stream`), 마이크 → audio-gateway(`/ws/audio`) 스트리머, Autofac 모듈 `EdgeVoiceCoreModule` |
 | `src/EdgeVoice.Agent.Desktop` (net8.0, Avalonia 11) | 트레이 아이콘 + 파형 오버레이, 메인 창(Dashboard / Chat / Knowledge / Settings / History / Logs), Prism.Core MVVM + Autofac DI. Windows / Linux / macOS |
 | `tests/EdgeVoice.Agent.Core.Tests` | Core 단위 테스트 (`dotnet test EdgeVoice.Agent.sln`) |
+| `tests/EdgeVoice.Agent.Desktop.Tests` | [헤드리스] Avalonia.Headless + 가짜 백엔드(HttpListener) 시나리오 테스트: 테마·대시보드 차트·6개 페이지·채팅·설정·로그·트레이 파형, 라이트/다크 스크린샷(`bin/.../screenshots`) |
+| `tests/EdgeVoice.Agent.Desktop.HeadedTests` | [헤디드] 실제 창 + 실행 중인 docker 백엔드 시나리오. 기본은 건너뜀, `dotnet test tests/EdgeVoice.Agent.Desktop.HeadedTests -e EDGEVOICE_HEADED=1` 로 실행 (`EDGEVOICE_BACKEND_URL` 로 주소 변경) |
+
+## 디자인
+
+- Microsoft 365(Office, Fluent 2) 형태: 파란 앱 바(`#0F6CBD`), 왼쪽 탐색 창, 회색 캔버스 위 카드. 색은 `App.axaml` 의 `Office*Brush` 테마 리소스(Light/Dark)에 모여 있다.
+- 앱 바 오른쪽 버튼으로 라이트/다크 전환 (처음에는 OS 테마를 따름).
+- 대시보드 차트(LiveCharts2): GPU 사용률 추이(최근 30회), 서비스 상태 도넛, 로그 레벨별/서비스별 건수.
 
 > 마이크 입력(`MicrophoneStreamer`)은 NAudio(WinMM)를 쓰므로 현재 Windows 에서만 동작한다. Linux/Jetson 에서는 화면·채팅·트레이 상태 표시는 되지만 "말하기"는 연결 실패로 표시된다.
 
