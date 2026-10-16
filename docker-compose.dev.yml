@@ -250,6 +250,8 @@ services:
       - RAG_SERVICE_URL=http://rag:8006
       # Phase 52: VLLM_BASE_URL for llm_client.py
       - VLLM_BASE_URL=http://llm:11003
+      # vLLM 의 --model 과 같은 값이어야 한다(다르면 vLLM 이 요청을 404 로 거절)
+      - LLM_MODEL_NAME=${LLM_MODEL:-Qwen/Qwen2.5-14B-Instruct-AWQ}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - LOG_LEVEL=INFO
