@@ -14,10 +14,11 @@ services:
     runtime: nvidia
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
-      - MODEL_SIZE=small
+      # GPU 의 large-v3-turbo (약 1.6GB VRAM) — CPU small 보다 한국어 인식이 정확하고 빠르다
+      - MODEL_SIZE=${STT_MODEL:-large-v3-turbo}
       - STT_ENVIRONMENT=cpu
-      - DEVICE=cpu
-      - COMPUTE_TYPE=int8
+      - DEVICE=${STT_DEVICE:-cuda}
+      - COMPUTE_TYPE=${STT_COMPUTE:-float16}
       - LOG_LEVEL=INFO
       # Pipeline Logging (Phase 17.1)
       - BACKEND_URL=http://backend:8000
@@ -26,6 +27,8 @@ services:
       - REDIS_PORT=6379
     volumes:
       - ${MODEL_CACHE_PATH:-./models}/stt:/models
+      # Whisper 모델을 컨테이너를 다시 만들 때마다 받지 않도록 캐시 유지
+      - stt-hf-cache:/root/.cache/huggingface
       - ./logs/stt:/app/logs
       # Phase 31: shared module for pipeline logging
       - ./shared:/app/shared:ro
@@ -69,9 +72,12 @@ services:
       --model ${LLM_MODEL:-Qwen/Qwen2.5-14B-Instruct-AWQ}
       --dtype auto
       --max-model-len ${LLM_MAX_MODEL_LEN:-16384}
-      --gpu-memory-utilization 0.7
+      --gpu-memory-utilization ${LLM_GPU_UTIL:-0.6}
       --trust-remote-code
       --port 11003
+      --enable-auto-tool-choice
+      --tool-call-parser hermes
+      --exclude-tools-when-tool-choice-none
     deploy:
       resources:
         reservations:
@@ -457,3 +463,5 @@ volumes:
     name: edgevoice-backend-data
   tts-hf-cache:
     name: edgevoice-tts-hf-cache
+  stt-hf-cache:
+    name: edgevoice-stt-hf-cache
