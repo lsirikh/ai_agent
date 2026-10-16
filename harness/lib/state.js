@@ -71,7 +71,11 @@ function readJson(file, fallback) { try { return JSON.parse(fs.readFileSync(file
 function writeJsonAtomic(file, obj, opts) {
   if (!(opts && opts.noMkdir)) fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${crypto.randomBytes(3).toString('hex')}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n');
+  // 디스크에 확실히 쓴 뒤 바꿔 끼운다(fsync). opts.backup: 바꾸기 전의 읽을 수 있는 판을 <file>.bak 으로 남긴다.
+  //   [2026-10-15 자동 이슈 #6] 세션이 끊긴 뒤 task.json 이 공백만 남아 작업이 목록에서 사라졌다.
+  const fd = fs.openSync(tmp, 'w');
+  try { fs.writeSync(fd, JSON.stringify(obj, null, 2) + '\n'); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  if (opts && opts.backup) { try { const cur = fs.readFileSync(file, 'utf8'); JSON.parse(cur); fs.writeFileSync(`${file}.bak`, cur); } catch { /* 처음이거나 이미 깨졌다 — 좋은 .bak 을 덮지 않는다 */ } }
   for (let i = 0; ; i++) {
     try { fs.renameSync(tmp, file); return; }
     catch (e) {
@@ -86,10 +90,10 @@ function appendJsonl(file, obj) {
 }
 
 // ── 작업 기록 ─────────────────────────────────────────────────────────
-function readTask(root, id) { return readJson(taskPaths(root, id).taskFile, null); }
+function readTask(root, id) { const f = taskPaths(root, id).taskFile; return readJson(f, null) || readJson(`${f}.bak`, null); }   // 깨졌으면 직전 판
 function writeTask(root, task) {
   task.updated_at = nowIso();
-  writeJsonAtomic(taskPaths(root, task.id).taskFile, task);
+  writeJsonAtomic(taskPaths(root, task.id).taskFile, task, { backup: true });
   return task;
 }
 function log(root, id, event) { appendJsonl(taskPaths(root, id).logFile, event); }
@@ -101,6 +105,15 @@ function listTasks(root) {
   const { tasksDir } = paths(root);
   let names = []; try { names = fs.readdirSync(tasksDir); } catch { return []; }
   return names.filter(validId).sort().map(id => readTask(root, id)).filter(Boolean);
+}
+// task.json 과 .bak 이 둘 다 읽히지 않는 작업 — 목록에서 조용히 빠지지 않게 따로 보인다(목표는 log.jsonl 의 created 에서).
+function listBrokenTasks(root) {
+  const { tasksDir } = paths(root);
+  let names = []; try { names = fs.readdirSync(tasksDir); } catch { return []; }
+  return names.filter(validId).sort().filter(id => !readTask(root, id)).map(id => {
+    const P = taskPaths(root, id), created = readLog(root, id).find(e => e.event === 'created');
+    return { id, goal: created ? String(created.goal || '').split(/\r?\n/)[0].slice(0, 100) : '', log: P.logFile, task_file: P.taskFile };
+  });
 }
 function newTask(fields) {
   const at = nowIso();
@@ -312,7 +325,7 @@ function readSessions(root) {
   }).filter(Boolean);
 }
 
-module.exports = {
+module.exports = { listBrokenTasks,
   HOST, IS_WIN, sleepSync, nowIso, repoRoot, mainRoot, commonDir, paths, taskPaths, newId, validId, ID_RE,
   readJson, writeJsonAtomic, appendJsonl, readTask, writeTask, log, readLog, listTasks, newTask,
   pidAlive, ownerAlive, isSelf, lockDir, lockOwner, takeOver, acquire, withLock, withLockSync, listLocks, removeDeadLocks, lockStale, staleInfo, lockLive,

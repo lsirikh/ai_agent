@@ -51,7 +51,7 @@ function status(o) {
   // 출력 언어 — 저장소 블록 reply_language(부른 체크아웃 · 메인), 없으면 지정 없음(영어). [2026-10-13] 결과가 영어로 나온다는 보고.
   let language = null; try { const K = require('./checks'); language = K.yamlString(main, 'reply_language') || K.yamlString(root, 'reply_language'); } catch { /* 블록 없음 */ }
   const cost_total = Math.round(tasks.reduce((a, t) => a + (Number(t.cost_usd) || 0), 0) * 100) / 100;
-  return { root, checkout: main, branch: G.currentBranch(main), language, cost_total, tasks: tasks.map(({ files, ...t }) => t), overlaps, uncommitted: { by_session: bySession, unowned } };
+  return { root, checkout: main, branch: G.currentBranch(main), language, cost_total, tasks: tasks.map(({ files, ...t }) => t), broken: S.listBrokenTasks(root), overlaps, uncommitted: { by_session: bySession, unowned } };
 }
 
 function formatStatusKo(s) {
@@ -65,6 +65,7 @@ function formatStatusKo(s) {
     }
     L.push(`누적 비용: 작업 ${s.tasks.length}개 · $${Number(s.cost_total || 0).toFixed(2)}`);
   }
+  for (const b of s.broken || []) L.push(`  ${b.id}  손상 — task.json 을 읽을 수 없다(${b.task_file}) · 기록: ${b.log} — ${b.goal}`);
   if (s.overlaps.length) {
     L.push('겹침(열린 작업 둘 이상이 같은 파일을 바꿨다 — 두 번째를 들일 때 충돌한다):');
     for (const o of s.overlaps) L.push(`  ! ${o.file} — ${o.tasks.join(', ')}`);
@@ -90,6 +91,7 @@ function formatStatus(s) {
     }
     L.push(`spent across ${s.tasks.length} tasks: $${Number(s.cost_total || 0).toFixed(2)}`);
   }
+  for (const b of s.broken || []) L.push(`  ${b.id}  BROKEN — task.json cannot be read (${b.task_file}) · its log: ${b.log} — ${b.goal}`);
   if (s.overlaps.length) {
     L.push('overlaps (the same file changed by more than one open task — integrating the second will conflict):');
     for (const o of s.overlaps) L.push(`  ! ${o.file} — ${o.tasks.join(', ')}`);

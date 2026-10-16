@@ -289,17 +289,82 @@ function removeEmptyDir(dir) {
 //   [2026-10-14~15 자동 이슈 #1 · #2 · #5] Windows 에서 다른 프로세스가 파일을 잡고 있으면 worktree 삭제가 늦게 끝난다 —
 //   등록은 남거나 사라졌고 .git 파일은 지워졌고 파일이 남은 폴더에 accept 가 커밋하려다, resume 이 worktree add 를 하려다 죽었다.
 //   남은 파일이 사라질 때까지 기다린다(지우지 않는다 — 깨끗할 때만 지우기 시작한 폴더라 내용은 브랜치에 있다).
-function clearWorktreeSlot(root, wt, branch, waitMs) {
+//   [2026-10-15 자동 이슈 #8 · #10 · #11] 기다려도 사라지지 않았다 — 끝난 작업의 폴더를 붙잡은 프로세스(고아 testhost 등)가 끝나지 않고,
+//   잠긴 파일 때문에 git 이 등록만 지우고 파일을 남긴 경우다. 사람이 지워야 했다. 이제: 붙잡은 프로세스를 끝내고, 브랜치와 다른 파일은
+//   o.salvageDir 에 보관한 뒤(읽지 못한 파일이 있으면 지우지 않는다) 폴더를 지운다. o.onCleared({ killed, salvaged, dir }) 로 알린다.
+function clearWorktreeSlot(root, wt, branch, waitMs, o) {
   if (!fs.existsSync(wt)) return null;
   if (worktreeRegistered(root, wt) && isWorktreeRoot(wt, branch)) return null;
   if (fs.existsSync(path.join(wt, '.git'))) return `${wt} exists but is not a working tree of ${branch} — inspect it`;
+  git(root, ['worktree', 'prune'], { allowFail: true });
+  const killed = killProcsIn(wt);
+  const sv = o && o.salvageDir ? salvageLeftover(root, wt, branch, o.salvageDir) : { copied: [], unreadable: [] };
   const until = Date.now() + (waitMs == null ? 120000 : waitMs);
   for (;;) {
     git(root, ['worktree', 'prune'], { allowFail: true });
-    if (removeEmptyDir(wt)) return null;
-    if (Date.now() >= until) return `the previous worktree ${wt} is still being removed (another process still holds files in it) — wait a minute and try again`;
+    if (!sv.unreadable.length) { try { fs.rmSync(wt, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }); } catch { /* 잠긴 파일 — 아래에서 다시 */ } }
+    if (removeEmptyDir(wt)) { if (o && o.onCleared) o.onCleared({ killed, salvaged: sv.copied, dir: o.salvageDir }); return null; }
+    if (Date.now() >= until) {
+      const holders = procsIn(wt).map(p => `${p.name}(${p.pid})`);
+      return `the previous worktree ${wt} is still being removed (another process still holds files in it${holders.length ? `: ${holders.join(', ')}` : ''}${sv.unreadable.length ? `; could not read ${sv.unreadable.length} file(s) to check them against the branch` : ''}) — wait a minute and try again`;
+    }
     S.sleepSync(1000);
   }
+}
+
+// clearWorktreeSlot 의 o — 보관은 작업 기록 폴더(tasks/<id>/leftover-<시각>/) · 치운 일은 작업 로그와 진행 줄에 남긴다.
+function slotOpts(root, id, taskDir, log) {
+  return {
+    salvageDir: path.join(taskDir, `leftover-${new Date().toISOString().replace(/[:.]/g, '-')}`),
+    onCleared: x => {
+      S.log(root, id, { event: 'leftover_cleared', killed: x.killed.map(k => `${k.name}(${k.pid})`), salvaged: x.salvaged.length, dir: x.salvaged.length ? x.dir : null });
+      if (log) log(`[harness] ${id} — 남은 worktree 폴더를 치웠다${x.killed.length ? ` · 붙잡던 프로세스 ${x.killed.map(k => k.name).join(', ')} 를 끝냄` : ''}${x.salvaged.length ? ` · 브랜치와 다른 파일 ${x.salvaged.length}개를 ${x.dir} 에 보관` : ''}`);
+    },
+  };
+}
+// 이 폴더 안의 실행 파일이거나 명령줄이 이 폴더를 가리키는 프로세스 — 이 프로세스와 부모는 빼고. [{ pid, name }]
+function procsIn(dir) {
+  const self = new Set([process.pid, process.ppid]);
+  const variants = [...new Set([path.resolve(dir), path.resolve(dir).replace(/\\/g, '/')])].map(s => s.toLowerCase());
+  let rows = [];
+  if (process.platform === 'win32') {
+    const ps = "Get-CimInstance Win32_Process | ForEach-Object { '{0}\t{1}\t{2}\t{3}' -f $_.ProcessId, $_.Name, $_.ExecutablePath, ($_.CommandLine -replace '[\\r\\n\\t]', ' ') }";
+    const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8', windowsHide: true, timeout: 30000, maxBuffer: 32 << 20 });
+    rows = String(r.stdout || '').split(/\r?\n/).map(l => l.split('\t')).filter(c => c.length >= 4).map(([pid, name, exe, cmd]) => ({ pid: Number(pid), name, text: `${exe} ${cmd}` }));
+  } else {
+    const r = spawnSync('ps', ['-eo', 'pid=,comm=,args='], { encoding: 'utf8', timeout: 15000, maxBuffer: 32 << 20 });
+    rows = String(r.stdout || '').split('\n').map(l => /^\s*(\d+)\s+(\S+)\s+(.*)$/.exec(l)).filter(Boolean).map(m => ({ pid: Number(m[1]), name: m[2], text: m[3] }));
+  }
+  return rows.filter(x => x.pid && !self.has(x.pid) && variants.some(v => x.text.toLowerCase().includes(v))).map(({ pid, name }) => ({ pid, name }));
+}
+function killProcsIn(dir) {
+  const found = procsIn(dir);
+  for (const p of found) require('./proc').killTree(p.pid);
+  return found;
+}
+// 남은 폴더의 파일 중 브랜치 내용과 다른 것(캐시 제외)을 dest 로 복사 → { copied: [상대 경로], unreadable: [...] }
+function salvageLeftover(root, wt, branch, dest) {
+  const tree = new Map();
+  const ls = git(root, ['ls-tree', '-r', '-z', branch], { allowFail: true });
+  for (const ent of ls.ok ? ls.out.split('\0') : []) { const tab = ent.indexOf('\t'); if (tab > 0) tree.set(ent.slice(tab + 1), ent.slice(0, tab).split(' ')[2]); }
+  const copied = [], unreadable = [];
+  const walk = rel => {
+    let ents = []; try { ents = fs.readdirSync(path.join(wt, rel), { withFileTypes: true }); } catch { unreadable.push(rel || '.'); return; }
+    for (const e of ents) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (CACHE_RE.test(r)) continue;
+      if (e.isDirectory()) { walk(r); continue; }
+      if (!e.isFile()) continue;
+      let buf; try { buf = fs.readFileSync(path.join(wt, r)); } catch { unreadable.push(r); continue; }
+      const sha = crypto.createHash('sha1').update(`blob ${buf.length}\0`).update(buf).digest('hex');
+      if (tree.get(r) === sha) continue;
+      fs.mkdirSync(path.dirname(path.join(dest, r)), { recursive: true });
+      fs.writeFileSync(path.join(dest, r), buf);
+      copied.push(r);
+    }
+  };
+  walk('');
+  return { copied, unreadable };
 }
 
 function diffNames(cwd, from, to, extra) {
@@ -403,7 +468,7 @@ function copyWorktreeInclude(root, wt) {
 }
 
 module.exports = {
-  git, identityArgs, headSha, isWorktreeRoot, removeEmptyDir, clearWorktreeSlot, currentBranch, branchExists, tagExists, isAncestor, ensureRepo, isRepo, statusEntries, dirtyFiles, isClean, ignoredChanges,
+  git, identityArgs, headSha, isWorktreeRoot, removeEmptyDir, clearWorktreeSlot, slotOpts, procsIn, killProcsIn, salvageLeftover, currentBranch, branchExists, tagExists, isAncestor, ensureRepo, isRepo, statusEntries, dirtyFiles, isClean, ignoredChanges,
   commitAll, unaddablePaths, isSecretPath, ensureExclude, addWorktree, worktreeList, worktreeRegistered, checkoutOf, mainWorktree, removeWorktree, samePath,
   diffNames, mergeBase, unmergedFiles, mergeInProgress, hasConflictMarkers, hasConflictMarkersText, MARKER_RE, worktreeIncludeFiles, copyWorktreeInclude, sha1, LOCK_ERR,
   gitlinks, fillSubmodules, dropSubmoduleClones, worktreeLinks,

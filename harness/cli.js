@@ -17,6 +17,8 @@ const USAGE = `usage:
   node harness/cli.js resume <id> [--allow "<rule>"]... [--budget-usd N] [--token-budget N] [--wall-min N] [--max-continuations N] [--model M] [--effort E]
       caps are totals for the whole task (not additions): pass the new total, e.g. --budget-usd 40 after $20 was spent
       a blocked task resumes in the same session: its BLOCKED.md is kept as BLOCKED.<n>.md and the worker is told what you allowed
+      --note "<text>" | --note-file <path>: also hand the worker these additional instructions (a done task with new notes can be resumed)
+  node harness/cli.js note <id> ("<text>" | --file <path>)   (additional instructions: a running task gets them at its next turn; a stopped or done task when resumed)
       go · resume always run the task in a process detached from this shell and wait for it here — if this shell ends (agent shells have
       time limits), the task keeps going: node harness/cli.js wait <id> prints its report
       --detach (go · resume): return the id at once instead of waiting · --foreground: run in this process (the old way)
@@ -42,7 +44,7 @@ const USAGE = `usage:
 defaults: runtime claude · model opus · budget $20 · wall 120 min · max continuations 8 (with --runtime codex and no --model: Codex's own default model)`;
 
 const VALUE = new Set(['--check', '--runtime', '--model', '--effort', '--budget-usd', '--token-budget', '--wall-min', '--max-continuations', '--root', '--into', '--base', '--target', '--check-timeout-min', '--goal-file',
-  '--doc', '--with', '--direction', '--from-file', '--status', '--by', '--allow', '--attach', '--sent', '--repo', '--kind', '--title', '--body', '--body-file', '--tag', '--timeout-min']);
+  '--doc', '--with', '--direction', '--from-file', '--status', '--by', '--allow', '--attach', '--sent', '--repo', '--kind', '--title', '--body', '--body-file', '--tag', '--timeout-min', '--file', '--note', '--note-file']);
 const FLAGS = new Set(['--auto', '--open', '--json', '--help', '-h', '--uninstall', '--dry-run', '--force', '--init', '--skip-checks', '--fresh-baseline', '--apply', '--salvage', '--track-docs', '--detach', '--foreground']);
 
 function parse(argv) {
@@ -174,6 +176,22 @@ async function main(argv, io) {
   }
 
   if (cmd === 'wait') return waitFor(rest[0], o, root, out, err);
+  // note <id> ("<지시>" | --file <파일>) — 작업에 사용자 추가 지시를 넣는다. 도는 작업은 다음 턴에, 멈춘 · 끝난 작업은 resume 때 전달된다.
+  if (cmd === 'note') {
+    const S = require('./lib/state'), L = require('./lib/loop');
+    try {
+      const id = rest[0];
+      if (!S.validId(id)) throw Object.assign(new Error('note needs a task id'), { code: 'USAGE' });
+      const text = o.file != null ? fs.readFileSync(path.resolve(o.file), 'utf8') : rest.slice(1).join(' ');
+      const main = S.mainRoot(root), t = S.readTask(main, id);
+      if (t && ['accepted', 'cancelled', 'restored'].includes(t.status)) throw Object.assign(new Error(`task ${id} is ${t.status} — send the new instructions as a new task (go)`), { code: 'USAGE' });
+      L.addNote(main, id, text);
+      const live = t && t.status === 'running' && t.owner && S.ownerAlive(t.owner);
+      out(live ? `harness ${id} — 추가 지시를 쌓았다 · 다음 턴에 작업자에게 전달된다(끝나려던 참이면 그것을 반영하는 턴을 한 번 더 돈다)`
+        : `harness ${id} — 추가 지시를 쌓았다 · 작업이 ${t ? t.status : '?'} 이라 이어 갈 때 전달된다: node harness/cli.js resume ${id}`);
+      return 0;
+    } catch (e) { err(`harness note: ${e.message}${e.code === 'USAGE' ? `\n${USAGE}` : ''}`); return e.code === 'USAGE' ? 2 : 1; }
+  }
   // [2026-10-16 실측] 갱신 전에 시작한 세션은 옛 안내대로 go 를 셸 안에서 돌려 셸의 시간 상한에 작업이 함께 죽었다 — 안내에 기대지 않는다:
   //   go · resume 은 늘 분리된 프로세스에서 돌고(detach), 부른 쪽은 끝날 때까지 기다려 보고를 낸다. 그 프로세스 자신은 이 표시로 안다(손자에게 물려주지 않는다).
   //   이 프로세스에서 도는 경우: 이미 분리된 프로세스 · 테스트가 러너를 주입함(io.run) · --foreground · 저장소가 아직 없음(go --init).
@@ -223,6 +241,11 @@ async function main(argv, io) {
       r = await require('./lib/loop').go({ ...common, ...caps, id: presetId, goal, checks: o.checks, runtime: o.runtime, base: o.base, init: !!o.init, docs: o.docs.map(p => path.resolve(p)), allow: o.allow, attach: o.attach.map(p => path.resolve(p)) });
     } else if (cmd === 'resume') {
       const id = needId();
+      // resume --note "<지시>" | --note-file <파일> — 이어 가며 전달할 추가 지시(분리된 프로세스를 띄우기 전에 쌓는다).
+      if (!detachedChild && (o.note != null || o['note-file'] != null)) {
+        const S = require('./lib/state');
+        require('./lib/loop').addNote(S.mainRoot(root), id, o['note-file'] != null ? fs.readFileSync(path.resolve(o['note-file']), 'utf8') : o.note);
+      }
       if (canDetach()) return detach(cmd, argv, id, null, root, out, err, !o.detach);
       r = await require('./lib/loop').resume({ ...common, ...caps, id, allow: o.allow });
     }

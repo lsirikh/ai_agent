@@ -48,7 +48,8 @@ function repoInfo(cwd) {
   lines = f.stdout.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
   if (lines.length < 2) return null;
   const info = { root: path.resolve(cwd, lines[0]), common: path.resolve(cwd, lines[1]) };
-  if (!oldGitLogged) {
+  // [2026-10-15 자동 이슈 #7] 시간 초과 · 실행 실패(status -1)는 옛 git 이 아니라 일시적 부하다 — 대체 경로로 찾되 기록하지 않는다.
+  if (!oldGitLogged && r.status !== -1 && !/ETIMEDOUT|ENOENT|EAGAIN/.test(r.stderr)) {
     oldGitLogged = true;                         // logError 가 repoInfo 를 다시 부른다 — 먼저 표시해 재귀를 끊는다
     logError('common', `git rev-parse --path-format=absolute 미지원(git < 2.31?) — 대체 경로 사용: ${(r.stderr || lines[0] || '').trim().slice(0, 200)}`, cwd);
   }

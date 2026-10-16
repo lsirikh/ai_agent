@@ -18,7 +18,7 @@
 ### 큰 작업 · 여러 세션
 - 여러 파일에 걸친 기능 추가 · 수정 요청은 `node harness/cli.js go "<요청 원문>"` 으로 보낸다(`--detach` 로 띄우고 `wait <id>` 로 보고를 받는다 — 셸 안에서 돌리면 셸의 시간 상한에 함께 죽는다). 자기 worktree · 브랜치(`harness/<id>`)에서 끝까지 돌고 보고서를 낸다.
 - 사용자가 이미지 · 영상 · 음성 · 문서를 함께 줬으면(붙여 넣은 이미지는 `[Image: source: <경로>]` 로 보인다) 각 파일을 `--attach <경로>` 로 넘긴다 — 영상은 장면 이미지와 전사로, 음성은 전사로 바뀌어 작업자에게 간다.
-- 실행 중인 작업을 멈출 때는 `node harness/cli.js stop <id>`(셸을 죽이지 않는다) — 진행분을 커밋하고 interrupted 로 바꾼다. 그 뒤 `resume` 또는 `cancel`.
+- 도는 · 끝난 작업에 요구를 덧붙일 때는 `node harness/cli.js note <id> --file <파일>`(다음 턴에 · 끝난 작업은 resume 때 전달). 실행 중인 작업을 멈출 때는 `node harness/cli.js stop <id>`(셸을 죽이지 않는다) — 진행분을 커밋하고 interrupted 로 바꾼다. 그 뒤 `resume` 또는 `cancel`.
 - 현황 `node harness/cli.js status` · 받아들이기 `accept <id>`(사용자가 말한 뒤) · 취소 `cancel <id>` · 되살리기 `restore <id>` · 정리 `gc`(끝난 작업) · `cleanup-legacy`(이전 하네스 잔여물 — `--apply` 는 사용자가 말한 뒤).
 - 무인 작업자는 허용 목록 밖 명령(`docker build` 등)이 자동 거부된다 — 필요하면 사용자가 `go`/`resume` 에 `--allow "Bash(docker build:*)"` 를 주거나 프로젝트 yaml 블록에 `worker_allow: ["…"]` 를 둔다(git 쓰기 · 셸은 거부된다). BLOCKED 작업은 `resume <id> [--allow …]` 로 같은 세션이 이어 간다.
 - 한두 줄 수정 · 질문 · 조사는 그 자리에서 하고, 고친 파일만 커밋한다.

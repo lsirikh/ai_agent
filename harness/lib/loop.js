@@ -146,7 +146,9 @@ async function resume(o) {
   if (!task) throw Object.assign(new Error(`unknown task: ${o.id}`), { code: 'UNKNOWN_TASK' });
   const added = Po.checkAllowRules(o.allow, '--allow').filter(r => !(task.allow || []).includes(r));
   const refuse = reason => ({ ...result(task), refused: true, reason, report: `harness ${task.id} — not resumed: ${reason}` });
-  if (!RESUMABLE.has(task.status)) return refuse(`status is ${task.status}; only ${[...RESUMABLE].join('/')} tasks can be resumed`);
+  // done 이라도 전달하지 않은 추가 지시(note)가 있으면 이어 간다 — 그 지시를 반영하는 턴(자동 이슈 #9).
+  const wasDoneWithNotes = task.status === 'done' && pendingNotes(root, task.id).length > 0;
+  if (!RESUMABLE.has(task.status) && !wasDoneWithNotes) return refuse(`status is ${task.status}; only ${[...RESUMABLE].join('/')} tasks can be resumed`);
   if (task.status === 'running' && task.owner && !S.isSelf(task.owner) && S.ownerAlive(task.owner)) return refuse(`task is being run by pid ${task.owner.pid}@${task.owner.host}`);
   let lock;
   try { lock = S.acquire(root, `task-${task.id}`); }
@@ -165,7 +167,7 @@ async function resume(o) {
   const c = { root, P, task, run, lock, log, t0, spentBefore: task.spent.wall_ms || 0, o, added };
   try {
     if (!fs.existsSync(P.wt) || !G.worktreeRegistered(root, P.wt) || !G.isWorktreeRoot(P.wt, task.branch)) {
-      const why = G.clearWorktreeSlot(root, P.wt, task.branch, o.removalWaitMs);
+      const why = G.clearWorktreeSlot(root, P.wt, task.branch, o.removalWaitMs, G.slotOpts(root, task.id, P.dir, log));
       if (why) return finish(c, 'interrupted', why);
       G.git(root, ['worktree', 'prune'], { allowFail: true });
       G.addWorktree(root, P.wt, { branch: task.branch, base: task.base_commit });   // 브랜치가 없으면(생성 전 오류) 기록된 기준에서
@@ -178,6 +180,7 @@ async function resume(o) {
       if (movedTo) S.log(root, task.id, { event: 'blocked_moved', to: movedTo });
       if (task.session_id) c.firstMessage = deadline => Pr.unblockMessage(task, added, movedTo, deadline);
     }
+    if (wasDoneWithNotes && task.session_id) c.firstMessage = deadline => Pr.notesTurnMessage(task, deadline);
     return await loop(c, task.session_id ? 'resume' : 'initial');
   } catch (e) {
     // 작업 중 예기치 못한 예외 — 하네스 결함일 수 있다(가려서 기록 · 보고에 안내).
@@ -301,6 +304,31 @@ function changedOutsideHarness(c) {
   return G.diffNames(c.P.wt, c.task.base_commit, 'HEAD').filter(f => !f.startsWith('.harness/'));
 }
 
+// ── 추가 지시(note) ── [2026-10-15 자동 이슈 #9] 진행 중에 요구를 덧붙일 길이 없어 stop → cancel → 다시 go 를 되풀이했다.
+//   tasks/<id>/notes.jsonl 에 쌓고, 작업 루프가 다음 턴에 전달한다(task.notes_delivered = 전달한 개수).
+function notesFile(root, id) { return path.join(S.taskPaths(root, id).dir, 'notes.jsonl'); }
+function allNotes(root, id) {
+  let text = ''; try { text = fs.readFileSync(notesFile(root, id), 'utf8'); } catch { return []; }
+  return text.split(/\r?\n/).filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(n => n && n.text);
+}
+function addNote(root, id, text) {
+  const t = String(text || '').replace(/^﻿/, '').trim();
+  if (!t) throw Object.assign(new Error('note needs text'), { code: 'USAGE' });
+  if (!S.readTask(root, id)) throw Object.assign(new Error(`unknown task: ${id}`), { code: 'UNKNOWN_TASK' });
+  fs.mkdirSync(path.dirname(notesFile(root, id)), { recursive: true });
+  fs.appendFileSync(notesFile(root, id), JSON.stringify({ at: S.nowIso(), text: t }) + '\n');
+}
+function pendingNotes(root, id) { const t = S.readTask(root, id); return allNotes(root, id).slice((t && t.notes_delivered) || 0); }
+function takeNotes(c) {
+  const all = allNotes(c.root, c.task.id), fresh = all.slice(c.task.notes_delivered || 0);
+  if (!fresh.length) return null;
+  c.task.notes_delivered = all.length;
+  S.writeTask(c.root, c.task);
+  S.log(c.root, c.task.id, { event: 'notes_delivered', count: fresh.length });
+  c.log(`[harness] ${c.task.id} — 사용자 추가 지시 ${fresh.length}건을 전달한다`);
+  return fresh;
+}
+
 async function loop(c, kind) {
   const { root, P, task, log } = c;
   const deadline = c.t0 + task.caps.wall_min * 60000 - c.spentBefore;
@@ -314,6 +342,8 @@ async function loop(c, kind) {
     const continuing = kind === 'continue';
     const cap = capHit(task, deadline, continuing);
     if (cap) return finish(c, 'capped', cap);
+    const notes = takeNotes(c);
+    if (notes) message = `${Pr.notesBlock(notes)}\n\n${message}`;
     task.turns = (task.turns || 0) + 1;
     log(`[harness] ${task.id} — turn ${task.turns} (${kind})`);
     const { r, newSessionId } = await callRunner(c, message, deadline);
@@ -336,6 +366,12 @@ async function loop(c, kind) {
     if (ek === 'auth') return finish(c, 'interrupted', `authentication failed: ${String(r.error_message || '').slice(0, 300)}`);
     if (ek === 'sandbox') return finish(c, 'error', String(r.error_message || 'sandbox refused tool execution').slice(0, 500));
     if (ek === 'timeout' || ek === 'aborted') return finish(c, 'capped', `wall clock ${task.caps.wall_min} min reached (the session was stopped)`);
+    // 막혔다고 썼지만 그사이 사용자가 지시를 더했다 — 그 지시가 답일 수 있으니 BLOCKED.md 를 옮기고 한 턴 더 준다.
+    if (fs.existsSync(P.blockedFile) && pendingNotes(root, task.id).length) {
+      moveBlocked(P);
+      message = Pr.notesTurnMessage(task, deadline); kind = 'continue';
+      continue;
+    }
     if (fs.existsSync(P.blockedFile)) {
       let why = ''; try { why = fs.readFileSync(P.blockedFile, 'utf8').trim(); } catch { /* 없음 */ }
       return finish(c, 'blocked', `the model reported the task cannot be done: ${why.replace(/\s+/g, ' ').slice(0, 400)}`);
@@ -404,6 +440,8 @@ async function loop(c, kind) {
       }
       S.writeTask(root, task);
     }
+    // 끝나려던 참에 전달하지 않은 추가 지시가 있으면 그것을 반영하는 턴을 한 번 더(지시는 다음 턴 머리에 붙는다).
+    if (pendingNotes(root, task.id).length) { message = Pr.notesTurnMessage(task, deadline); kind = 'continue'; continue; }
     // done 은 무언가를 했을 때만(H2): 기준 대비 .harness/ 밖 변경이 0 이거나 마지막 말이 질문이면 — 검사가 초록이어도 — 1회 넛지.
     const changed = changedOutsideHarness(c);
     const asked = Pr.isQuestion(r.final_text);
@@ -717,4 +755,4 @@ function report(task, P) {
   return lines.join('\n');
 }
 
-module.exports = { go, resume, finish, result, report, capsFrom, isTestFile, getRun, DEFAULTS, RESUMABLE };
+module.exports = { addNote, pendingNotes, go, resume, finish, result, report, capsFrom, isTestFile, getRun, DEFAULTS, RESUMABLE };

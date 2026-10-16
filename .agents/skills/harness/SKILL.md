@@ -17,6 +17,7 @@ description: 무언가를 만들거나 고쳐 달라는 요청을 하네스 CLI(
 ## 받아들이기 · 취소 · 되살리기
 - 사용자가 결과를 받아들인다고 **명시적으로** 말했을 때만: `node harness/cli.js accept <id>`
 - 사용자가 취소를 원하면: `node harness/cli.js cancel <id>` · 취소한 병합을 되살리려면: `node harness/cli.js restore <id>`
+- 작업이 도는 중이거나 끝난 뒤 사용자가 요구를 **덧붙이면**: 그 말을 원문 그대로 파일에 쓰고 `node harness/cli.js note <id> --file "<파일>"`. 도는 작업은 다음 턴에 받고, 멈춘 · 끝난(done) 작업은 `resume <id>` 로 이어 갈 때 받는다. stop → cancel → 다시 go 하지 않는다.
 - 실행 중인 작업을 멈추려면: `node harness/cli.js stop <id>`(go 를 띄운 셸을 죽이지 않는다).
 - 사용자가 push 를 **명시적으로** 요청하면: `node harness/cli.js push [<remote>] [<branch>]` — 빨리감기만, 강제 없음, 결과 브랜치는 먼저 accept.
 - 중단된 작업 이어 가기: `node harness/cli.js resume <id> --detach` 뒤 `wait <id>`(위와 같이) — 상한을 늘릴 때는 **새 총액**을 준다(`--budget-usd 40` = 작업 전체 $40, 추가분 아님).

@@ -122,6 +122,17 @@ function failMessage(t, judged, excerpt, deadlineMs) {
     `Fix the implementation (not the checks), keep .harness/${t.id}/PLAN.md current, and end your turn when the checks pass. If it cannot be done, write .harness/${t.id}/BLOCKED.md with the reason.`].filter(Boolean).join('\n\n');
 }
 
+// 사용자가 작업 도중 더한 지시(note) — 다음 턴 메시지 머리에 붙는다. [2026-10-15 자동 이슈 #9]
+function notesBlock(notes) {
+  return ['# Additional instructions from the user (added while this task was running)', ...notes.map(n => `- ${String(n.text).replace(/\r?\n/g, '\n  ')}`),
+    'They are part of the specification from now on and take precedence over earlier instructions where they conflict. Do not ask about them — apply them, and record any fork they create in DECISIONS.md.'].join('\n');
+}
+// 끝나려던 참에(또는 BLOCKED 뒤에) 추가 지시가 와서 한 턴 더 도는 메시지 — 지시 자체는 notesBlock 이 앞에 붙는다.
+function notesTurnMessage(t, deadlineMs) {
+  return [`Apply the additional instructions above to the work in this worktree, keep .harness/${t.id}/PLAN.md and DECISIONS.md current, and end your turn when they are done. The harness runs the checks again after your turn.`,
+    remainingLine(t, deadlineMs)].join('\n\n');
+}
+
 function nudgeMessage(t) {
   return `No human is available to answer. Use your best judgment, record the decision point in .harness/${t.id}/DECISIONS.md, and continue until the goal is complete. If it truly cannot be done, write .harness/${t.id}/BLOCKED.md with the reason.`;
 }
@@ -168,4 +179,4 @@ function isQuestion(text) {
   return /할까요|하시겠|원하시면|괜찮을까요|진행할까|\bshould I\b|\bwould you like\b|\bshall I\b|\bdo you want\b|\blet me know if\b/i.test(s.slice(-400));
 }
 
-module.exports = { lintLines, lintFailMessage, AUTONOMY, systemAppend, languageLine, attachmentLines, taskPrompt, failMessage, nudgeMessage, noChangeMessage, errorMessage, resumeMessage, unblockMessage, conflictMessage, isQuestion, remainingLine, money };
+module.exports = { notesBlock, notesTurnMessage, lintLines, lintFailMessage, AUTONOMY, systemAppend, languageLine, attachmentLines, taskPrompt, failMessage, nudgeMessage, noChangeMessage, errorMessage, resumeMessage, unblockMessage, conflictMessage, isQuestion, remainingLine, money };
