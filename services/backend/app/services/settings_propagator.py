@@ -24,7 +24,12 @@ SERVICE_URLS = {
     "stt": os.getenv("STT_SERVICE_URL", "http://stt:11001"),
     "audio": os.getenv("AUDIO_GATEWAY_URL", "http://audio-gateway:11008"),
     "wake_word": os.getenv("WAKE_WORD_SERVICE_URL", "http://wake-word:11005"),
-    "orchestrator": os.getenv("ORCHESTRATOR_SERVICE_URL", "http://orchestrator:11007"),
+    # compose 는 ORCHESTRATOR_URL 을 넣는다.
+    # 컨테이너 안에서는 호스트 포트(11007)가 아닌 8007
+    "orchestrator": os.getenv(
+        "ORCHESTRATOR_SERVICE_URL",
+        os.getenv("ORCHESTRATOR_URL", "http://orchestrator:8007"),
+    ),
 }
 
 # LLM 서비스는 별도 처리 (vLLM은 런타임 설정 변경 불가)
