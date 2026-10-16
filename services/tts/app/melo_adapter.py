@@ -34,7 +34,8 @@ class MeloSynthesizer:
             engine = MeloTTSEngine()
         self._engine = engine
         self._speed = speed
-        # 워밍업 스레드와 요청 스레드가 동시에 모델을 불러오거나 GPU 를 함께 쓰지 않게 한다
+        # 워밍업 스레드와 요청 스레드가 동시에 모델을 불러오거나
+        # GPU 를 함께 쓰지 않게 한다
         self._lock = threading.Lock()
 
     def synthesize(self, text: str) -> np.ndarray:
