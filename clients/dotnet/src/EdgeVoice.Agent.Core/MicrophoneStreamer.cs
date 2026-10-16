@@ -30,6 +30,9 @@ public sealed class MicrophoneStreamer : IMicrophoneStream
 
     public event Action<bool>? StreamingChanged;
 
+    /// <summary>게이트웨이가 보낸 답변 음성(float32 24kHz mono) 조각.</summary>
+    public event Action<byte[]>? AudioReceived;
+
     public async Task StartAsync()
     {
         if (IsStreaming)
@@ -112,6 +115,7 @@ public sealed class MicrophoneStreamer : IMicrophoneStream
     {
         var buffer = new byte[8192];
         var text = new StringBuilder();
+        var audio = new MemoryStream();
         try
         {
             while (socket.State == WebSocketState.Open && !ct.IsCancellationRequested)
@@ -120,6 +124,19 @@ public sealed class MicrophoneStreamer : IMicrophoneStream
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
                     break;
+                }
+
+                // 바이너리 프레임 = 재생할 답변 음성, 텍스트 프레임 = VAD 결과 JSON
+                if (result.MessageType == WebSocketMessageType.Binary)
+                {
+                    audio.Write(buffer, 0, result.Count);
+                    if (result.EndOfMessage)
+                    {
+                        AudioReceived?.Invoke(audio.ToArray());
+                        audio.SetLength(0);
+                    }
+
+                    continue;
                 }
 
                 text.Append(Encoding.UTF8.GetString(buffer, 0, result.Count));

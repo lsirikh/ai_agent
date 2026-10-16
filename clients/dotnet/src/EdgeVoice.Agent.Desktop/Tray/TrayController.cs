@@ -17,6 +17,7 @@ public sealed class TrayController : IDisposable
 
     private readonly MicrophoneStreamer _mic;
     private readonly AlwaysOnMicrophone _alwaysOn;
+    private readonly TtsPlayer _player;
     private readonly TrayIcon _trayIcon;
     private readonly NativeMenuItem _muteItem;
     private readonly NativeMenuItem _orbItem;
@@ -33,6 +34,8 @@ public sealed class TrayController : IDisposable
     {
         _mic = mic;
         _alwaysOn = new AlwaysOnMicrophone(mic);
+        _player = new TtsPlayer();
+        _mic.AudioReceived += _player.Enqueue;
 
         _muteItem = new NativeMenuItem("마이크 음소거");
         _muteItem.Click += (_, _) => ToggleMute();
@@ -57,7 +60,16 @@ public sealed class TrayController : IDisposable
         _orb.OpenRequested += openMainWindow;
         _orb.Show();
 
-        monitor.StateChanged += s => Dispatcher.UIThread.Post(() => _serverState = s);
+        monitor.StateChanged += s => Dispatcher.UIThread.Post(() =>
+        {
+            // 다시 듣기 시작하면(새 질문·끼어들기) 남은 답변 음성은 버린다
+            if (s == VoiceState.Listening)
+            {
+                _player.Stop();
+            }
+
+            _serverState = s;
+        });
         monitor.StageChanged += st => Dispatcher.UIThread.Post(() => _orb.SetStage(st));
         _mic.LevelChanged += l => _level = l;
         _alwaysOn.MutedChanged += muted => Dispatcher.UIThread.Post(
@@ -145,6 +157,7 @@ public sealed class TrayController : IDisposable
     {
         _timer.Stop();
         _alwaysOn.Dispose();
+        _player.Dispose();
         _trayIcon.Dispose();
         _orb.Close();
     }
