@@ -162,7 +162,8 @@ class TTSRedisSubscriber:
                 await self.redis_client.publish(TTS_STATE_CHANNEL, started_message)
 
             # KokoroTTS.synthesize 는 text 만 받고 float32 배열을 돌려준다
-            audio = self.synthesizer.synthesize(text)
+            # 합성은 무겁고 동기라 스레드로 넘겨 이벤트 루프(다른 요청·헬스체크)를 막지 않는다
+            audio = await asyncio.to_thread(self.synthesizer.synthesize, text)
             if isinstance(audio, np.ndarray):
                 audio_data = audio.astype(np.float32, copy=False).tobytes()
             else:

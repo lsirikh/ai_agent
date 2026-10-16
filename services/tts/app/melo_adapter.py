@@ -6,6 +6,7 @@ Redis 구독자는 synthesize(text) -> float32 24kHz mono 를 기대한다
 MeloTTS 는 44.1kHz 로 내보내므로 24kHz 로 바꿔 돌려준다.
 """
 
+import threading
 from typing import Any, Callable
 
 import numpy as np
@@ -33,16 +34,29 @@ class MeloSynthesizer:
             engine = MeloTTSEngine()
         self._engine = engine
         self._speed = speed
+        # 워밍업 스레드와 요청 스레드가 동시에 모델을 불러오거나 GPU 를 함께 쓰지 않게 한다
+        self._lock = threading.Lock()
 
     def synthesize(self, text: str) -> np.ndarray:
         if not text or not text.strip():
             return np.array([], dtype=np.float32)
-        audio = self._engine.synthesize(text, speed=self._speed)
+        with self._lock:
+            audio = self._engine.synthesize(text, speed=self._speed)
         return _resample(
             np.asarray(audio, dtype=np.float32),
             self._engine.sample_rate,
             PIPELINE_SAMPLE_RATE,
         )
+
+
+def warm_up(synthesizer: Any) -> None:
+    """
+    첫 합성 준비를 미리 끝낸다.
+
+    MeloTTS 는 프로세스마다 첫 합성에서 한국어 BERT 를 준비하느라 약 60초가 걸린다.
+    서비스 시작 시 한 번 합성해 두면 첫 음성 답변이 바로 나온다.
+    """
+    synthesizer.synthesize("안녕하세요.")
 
 
 def create_voice_synthesizer(
