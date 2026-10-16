@@ -113,13 +113,15 @@ class AcousticEchoCanceller:
                     self._playback_buffer[i:],
                     self._playback_reference[:i] if self._playback_reference is not None and i > 0 else np.array([])
                 ])
-                if len(x) < self.filter_length:
-                    x = np.pad(x, (self.filter_length - len(x), 0))
             else:
                 if self._playback_reference is not None:
                     x = self._playback_reference[i-self.filter_length:i]
                 else:
                     x = np.zeros(self.filter_length, dtype=np.float32)
+
+            # 참조가 마이크 청크보다 짧으면 창이 짧아지므로 앞을 0 으로 채운다
+            if len(x) < self.filter_length:
+                x = np.pad(x, (self.filter_length - len(x), 0))
 
             x = x.astype(np.float32)
 
