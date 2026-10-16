@@ -94,6 +94,10 @@ async function go(o) {
     const lintCmd = K.yamlString(here, 'lint_command') || K.yamlString(P.wt, 'lint_command');
     if (/^(off|false|no)$/i.test(K.yamlString(here, 'rerun_failed') || K.yamlString(P.wt, 'rerun_failed') || '')) task.checks.rerun = false;
     if (/^(on|true|yes)$/i.test(K.yamlString(here, 'serial_checks') || K.yamlString(P.wt, 'serial_checks') || '')) task.checks.serial = true;
+    // 작업자 권한 — 기본 open(명령을 막지 않고 git 쓰기 · worktree 밖 삭제만 막는다). worker_permissions: strict 면 예전 허용 목록. [2026-10-16 사용자 지시]
+    // 중복 코드 검사 — 기본 켬 · dup_check: off 로 끈다 · dup_min_lines 로 블록 크기(기본 8).
+    task.checks.dup = { on: !/^(off|false|no)$/i.test(K.yamlString(here, 'dup_check') || K.yamlString(P.wt, 'dup_check') || ''), min_lines: K.yamlNumber(here, 'dup_min_lines') || K.yamlNumber(P.wt, 'dup_min_lines') || 8 };
+    task.worker_permissions = /^strict$/i.test(K.yamlString(here, 'worker_permissions') || K.yamlString(P.wt, 'worker_permissions') || '') ? 'strict' : 'open';
     if (lintCmd) task.checks.lint = { command: lintCmd, files: /{files}/.test(lintCmd), baseline_ok: null, last: null };
     S.writeTask(root, task);
     log(`[harness] ${id} — worktree ${P.wt} · checks: ${found.source}${found.commands.length ? ' — ' + found.commands.map(K.display).join(' ; ') : ''}`);
@@ -245,7 +249,7 @@ async function callRunner(c, message, deadline) {
   const newSessionId = !task.session_id && task.runtime === 'claude' ? crypto.randomUUID() : undefined;
   const args = { runtime: task.runtime, cwd: P.wt, prompt: message, sessionId: task.session_id || null, newSessionId, model: task.model, effort: task.effort,
     budgetUsd: Math.max(0, task.caps.budget_usd - task.spent.cost_usd), tokenBudget: task.caps.token_budget ? Math.max(0, task.caps.token_budget - task.spent.tokens) : null,
-    timeoutMs: left, signal: ctrl.signal, allowCommands: c.allow, allowRules: task.allow || [], systemAppend: Pr.systemAppend(task),
+    timeoutMs: left, signal: ctrl.signal, allowCommands: c.allow, allowRules: task.allow || [], workerPermissions: task.worker_permissions || 'open', systemAppend: Pr.systemAppend(task),
     images: !task.session_id ? M.imagesOf(task.attachments) : [],   // Codex -i — 첫 호출에만
     // --doc 명세는 메인 체크아웃에 있다(gitignore 된 docs/ 일 수 있다) — worktree 밖이라 Claude 워커가 못 읽을 수 있어 그 폴더를 열어 준다.
     addDirs: [...new Set([...(task.docs || []).map(d => path.dirname(path.resolve(P.root || c.root, d))), ...((task.attachments || []).length ? [path.join(S.taskPaths(c.root, task.id).dir, 'attachments')] : [])])],
@@ -449,6 +453,22 @@ async function loop(c, kind) {
       }
       S.writeTask(root, task);
     }
+    // 중복 코드 — 새로 더한 코드가 있는 코드를 블록째 베꼈으면 위치를 알려 한 번 돌려보낸다(그 뒤로는 보고만 — 막지 않는다).
+    //   [2026-10-16 사용자 지시 · 영상 「쓰레기 코드 없애는 법」] 명령을 막는 대신 결과의 군더더기를 잡는다. 끄기: dup_check: off.
+    if (!task.checks.dup || task.checks.dup.on !== false) {
+      let found = [];
+      try { found = require('./dup').find(P.wt, task.base_commit, { minLines: task.checks.dup && task.checks.dup.min_lines }); } catch (e) { found = []; }
+      task.checks.dup = { ...(task.checks.dup || { on: true }), last: found, sent: !!(task.checks.dup && task.checks.dup.sent) };
+      S.log(root, task.id, { event: 'dup', blocks: found.length });
+      if (found.length && !task.checks.dup.sent) {
+        task.checks.dup.sent = true;
+        S.writeTask(root, task);
+        log(`[harness] ${task.id} — duplicate code: ${found.length} block(s) — sending back once`);
+        message = Pr.dupMessage(task, found, deadline); kind = 'continue';
+        continue;
+      }
+      S.writeTask(root, task);
+    }
     // 끝나려던 참에 전달하지 않은 추가 지시가 있으면 그것을 반영하는 턴을 한 번 더(지시는 다음 턴 머리에 붙는다).
     if (pendingNotes(root, task.id).length) { message = Pr.notesTurnMessage(task, deadline); kind = 'continue'; continue; }
     // done 은 무언가를 했을 때만(H2): 기준 대비 .harness/ 밖 변경이 0 이거나 마지막 말이 질문이면 — 검사가 초록이어도 — 1회 넛지.
@@ -608,6 +628,8 @@ function summaryKo(task) {
   if ((task.tests_modified || []).length) warn.push(`기존 테스트 파일을 고쳤다(${listOf(task.tests_modified, 5)})`);
   if ((task.secrets_excluded || []).length) warn.push('비밀 파일은 커밋하지 않았다(worktree 에만 있다)');
   if (ch.baseline_warning) warn.push('작업 전 검사가 요약 없이 실패했다 — worktree 환경 문제일 수 있다');
+  const dupLeft = ch.dup && ch.dup.on !== false ? (ch.dup.last || []) : [];
+  if (dupLeft.length) warn.push(`새 코드에 중복 ${dupLeft.length}곳이 남았다(한 번 돌려보냈다) — ${dupLeft.slice(0, 3).map(b => `${b.file}:${b.start}-${b.end} ↔ ${b.other}`).join(' · ')}`);
   if ((ch.dropped || []).length) warn.push(`작업 전부터 시간 초과라 판정에서 뺐다(${ch.dropped.map(d => d.command).join(' ; ')}) — 이 검사는 이 작업을 판정하지 않았다`);
   if ((ch.flaky || []).length) warn.push(`불안정한 검사가 있다(${ch.flaky.length}개) — 다시 돌리면 통과한다`);
   if (ch.lint && ch.lint.last && !ch.lint.last.ok) warn.push('린트가 실패한 채 끝났다(작업 전부터 빨간 저장소 전체 린트)');
@@ -673,6 +695,7 @@ function reportKo(task, P) {
   }
   if ((ch.dropped || []).length) L.push(`판정에서 뺀 검사(저장소에서 찾은 것 · 작업 전부터 시간 초과 — 새 worktree 의 환경 문제일 수 있다): ${ch.dropped.map(d => d.command).join(' ; ')}`);
   if (ch.lint) L.push(`린트: ${lintState(ch.lint, 'ko')}`);
+  if (ch.dup && ch.dup.on !== false) L.push(`중복 코드: ${(ch.dup.last || []).length ? (ch.dup.last || []).map(b => `${b.file}:${b.start}-${b.end}(${b.lines}줄) ↔ ${b.other}`).join(' · ') : '없음'}${ch.dup.sent ? ' (작업자에게 한 번 돌려보냈다)' : ''}`);
   L.push(`바뀐 파일: ${task.files_changed == null ? '?' : `${task.files_changed}개`}`);
   if (task.diff) L.push(`변경 규모: +${task.diff.insertions} / -${task.diff.deletions} 줄 · 새 파일 ${task.diff.added_files}개`);
   if ((ch.flaky || []).length) L.push(`불안정한 검사(실패했다가 다시 돌리니 통과 — 작업자에게 돌려보내지 않았다): ${ch.flaky.join(' ; ')}`);
@@ -733,6 +756,7 @@ function report(task, P) {
   }
   if ((ch.dropped || []).length) lines.push(`checks dropped (auto-detected, timed out before the task — likely the new worktree's environment): ${ch.dropped.map(d => d.command).join(' ; ')}`);
   if (ch.lint) lines.push(`lint: ${lintState(ch.lint, 'en')}`);
+  if (ch.dup && ch.dup.on !== false) lines.push(`duplicate code: ${(ch.dup.last || []).length ? (ch.dup.last || []).map(b => `${b.file}:${b.start}-${b.end} (${b.lines} lines) duplicates ${b.other}`).join(' · ') : 'none'}${ch.dup.sent ? ' (sent back to the worker once)' : ''}`);
   lines.push(`changed files: ${task.files_changed == null ? '?' : task.files_changed}`);
   if (task.diff) lines.push(`diff: +${task.diff.insertions} -${task.diff.deletions} lines · ${task.diff.added_files} new files`);
   if ((ch.flaky || []).length) lines.push(`flaky checks (failed, then passed on rerun — not sent back to the worker): ${ch.flaky.join(' ; ')}`);

@@ -59,6 +59,10 @@ function permissionLines(t) {
   const rel = `.harness/${t.id}`;
   const allow = t.allow || [];
   const out = [];
+  // open(기본): 막지 않는다 — 하네스가 막는 것은 git 쓰기 · push · worktree 밖 삭제뿐이다. [2026-10-16 사용자 지시]
+  if ((t.worker_permissions || 'open') === 'open' && t.runtime !== 'codex') {
+    return [`- You may run any command you need — builds, tests, scripts, package installs inside this worktree, pipes and loops. The harness blocks only git writes and pushes (it commits your work after each turn) and deleting files outside this worktree. Do not work around a block; if the goal truly needs one of those, write \`${rel}/BLOCKED.md\` with the exact command and why, then stop.`];
+  }
   if (allow.length) {
     out.push(`- The user pre-approved these commands for this task (in addition to the defaults)${t.runtime === 'codex' ? ' — the sandbox still applies' : ''}:`, ...allow.map(r => `  - \`${r}\``));
   }
@@ -122,6 +126,13 @@ function failMessage(t, judged, excerpt, deadlineMs) {
     `Fix the implementation (not the checks), keep .harness/${t.id}/PLAN.md current, and end your turn when the checks pass. If it cannot be done, write .harness/${t.id}/BLOCKED.md with the reason.`].filter(Boolean).join('\n\n');
 }
 
+// 중복 코드(dup.js) — 테스트 · 린트는 통과했지만 새로 쓴 코드가 있는 코드를 블록째 베꼈다. 한 번만 돌려보낸다.
+function dupMessage(t, blocks, deadlineMs) {
+  return ['The checks pass, but your change duplicates code that already exists (blocks of identical lines, whitespace ignored):',
+    ...blocks.map(b => `- ${b.file}:${b.start}-${b.end} (${b.lines} lines) duplicates ${b.other}`),
+    `Reuse the existing code instead — call it, or move it into one shared function both places use — and delete the copy. If the duplication is truly intended, keep it and say why in .harness/${t.id}/DECISIONS.md. Then end your turn.`,
+    remainingLine(t, deadlineMs)].join('\n');
+}
 // 사용자가 작업 도중 더한 지시(note) — 다음 턴 메시지 머리에 붙는다. [2026-10-15 자동 이슈 #9]
 function notesBlock(notes) {
   return ['# Additional instructions from the user (added while this task was running)', ...notes.map(n => `- ${String(n.text).replace(/\r?\n/g, '\n  ')}`),
@@ -179,4 +190,4 @@ function isQuestion(text) {
   return /할까요|하시겠|원하시면|괜찮을까요|진행할까|\bshould I\b|\bwould you like\b|\bshall I\b|\bdo you want\b|\blet me know if\b/i.test(s.slice(-400));
 }
 
-module.exports = { notesBlock, notesTurnMessage, lintLines, lintFailMessage, AUTONOMY, systemAppend, languageLine, attachmentLines, taskPrompt, failMessage, nudgeMessage, noChangeMessage, errorMessage, resumeMessage, unblockMessage, conflictMessage, isQuestion, remainingLine, money };
+module.exports = { dupMessage, notesBlock, notesTurnMessage, lintLines, lintFailMessage, AUTONOMY, systemAppend, languageLine, attachmentLines, taskPrompt, failMessage, nudgeMessage, noChangeMessage, errorMessage, resumeMessage, unblockMessage, conflictMessage, isQuestion, remainingLine, money };
