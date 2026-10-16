@@ -397,6 +397,14 @@
                                     </Border>
                                     <Border Classes="card">
                                         <StackPanel>
+                                            <TextBlock Text="도구 (인터넷 검색)" Classes="cardTitle" />
+                                            <CheckBox Content="인터넷 검색·웹 페이지 읽기 허용" IsChecked="{Binding InternetToolsEnabled}" />
+                                            <TextBlock Text="{Binding AvailableTools}" Classes="help" />
+                                            <Button Classes="accent" Content="도구 설정 저장" Command="{Binding SaveToolsCommand}" HorizontalAlignment="Left" Margin="0,10,0,0" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Classes="card">
+                                        <StackPanel>
                                             <TextBlock Text="일반" Classes="cardTitle" />
                                             <TextBlock Text="언어" Classes="label" />
                                             <ComboBox x:Name="LanguageCombo" ItemsSource="{Binding Languages}" DisplayMemberBinding="{Binding Label}"

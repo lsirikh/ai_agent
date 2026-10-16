@@ -7,7 +7,7 @@ Phase 15.2: Sliding Window 컨텍스트 지원
 """
 import json
 import os
-from typing import AsyncIterator, List, Optional
+from typing import Any, AsyncIterator, List, Optional
 
 import httpx
 
@@ -16,12 +16,19 @@ from shared.context_builder import (
     TEXT_MAX_TOKENS,
     build_messages,
     fit_messages,
+    input_budget,
     vllm_tokenize,
 )
+from shared.tool_calling import Confirm, schema_tokens, stream_with_tools
+from shared.tools import ToolRegistry, tool_parser_for
 
 
 class LLMError(Exception):
     """vLLM 호출 실패 (HTTP 오류·연결 실패)."""
+
+    def __init__(self, message: str, status_code: Optional[int] = None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 # ===== Language Settings (Phase 13.2, Phase 17: 강화) =====
@@ -116,6 +123,8 @@ class SimpleLLMClient:
         self.model_name = model_name
         self.system_prompt = system_prompt or "당신은 EdgeVoice AI 어시스턴트입니다."
         self.max_model_len = DEFAULT_MAX_MODEL_LEN
+        # vLLM 이 도구 요청을 400 으로 거절하면 False (도구 파서 없이 떠 있음)
+        self.tools_supported = True
         self._http_client = httpx.AsyncClient(timeout=60.0)
 
     async def _get_model_name(self) -> Optional[str]:
@@ -143,8 +152,10 @@ class SimpleLLMClient:
         max_tokens: int = TEXT_MAX_TOKENS,
         temperature: float = 0.7,
         summary: Optional[str] = None,
-        reference: Optional[str] = None
-    ) -> AsyncIterator[str]:
+        reference: Optional[str] = None,
+        tools: Optional[ToolRegistry] = None,
+        confirm: Optional[Confirm] = None
+    ) -> AsyncIterator[Any]:
         """
         스트리밍 방식으로 텍스트 생성 (토큰 예산 안에서 히스토리를 넣는다)
 
@@ -156,9 +167,12 @@ class SimpleLLMClient:
             temperature: 온도 (창의성)
             summary: 세션 요약 (시스템 메시지 끝에 고정)
             reference: RAG 근거 (이번 질문 앞에 붙는다)
+            tools: 이번 턴에 쓸 도구 (모델에 맞는 tool parser 가 없으면 쓰지 않는다)
+            confirm: 확인이 필요한 도구를 실행해도 되는지 묻는 콜백
 
         Yields:
-            생성된 토큰
+            생성된 토큰. 도구를 쓰면 도구 이벤트(dict)도 섞여 나온다
+            (shared.tool_calling.stream_with_tools 참고)
 
         Raises:
             LLMError: vLLM 이 오류 상태(400·500 등)로 답하면
@@ -169,6 +183,9 @@ class SimpleLLMClient:
             yield "죄송합니다. LLM 모델을 찾을 수 없습니다."
             return
 
+        if tools and (not self.tools_supported or not tool_parser_for(model_name)):
+            tools = None
+        reserve = schema_tokens(tools.schemas()) if tools else 0
         messages = await fit_messages(
             lambda limit: build_messages(
                 system_prompt=system_prompt or self.system_prompt,
@@ -176,7 +193,7 @@ class SimpleLLMClient:
                 user_message=prompt,
                 summary=summary,
                 reference=reference,
-                max_model_len=limit,
+                max_model_len=limit - reserve,
                 max_tokens=max_tokens,
             ),
             max_model_len=self.max_model_len,
@@ -184,14 +201,42 @@ class SimpleLLMClient:
             tokenize=lambda m: vllm_tokenize(self.base_url, model_name, m),
         )
 
-        payload = {
-            "model": model_name,
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "stream": True
-        }
+        async def request(request_messages: list, schemas: Optional[list]):
+            payload = {
+                "model": model_name,
+                "messages": request_messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "stream": True
+            }
+            if not schemas:
+                async for chunk in self._stream_chunks(payload):
+                    yield chunk
+                return
+            try:
+                async for chunk in self._stream_chunks(
+                    {**payload, "tools": schemas, "tool_choice": "auto"}
+                ):
+                    yield chunk
+            except LLMError as e:
+                # vLLM 에 --enable-auto-tool-choice 가 없으면 400 → 도구를 끄고 다시
+                if e.status_code != 400:
+                    raise
+                self.tools_supported = False
+                async for chunk in self._stream_chunks(payload):
+                    yield chunk
 
+        async for item in stream_with_tools(
+            request,
+            messages,
+            tools,
+            input_budget=input_budget(self.max_model_len, max_tokens),
+            confirm=confirm,
+        ):
+            yield item
+
+    async def _stream_chunks(self, payload: dict) -> AsyncIterator[dict]:
+        """vLLM 스트리밍 요청 → 청크(dict). 오류 상태·연결 실패는 LLMError."""
         try:
             async with self._http_client.stream(
                 "POST",
@@ -203,7 +248,10 @@ class SimpleLLMClient:
                 except httpx.HTTPStatusError:
                     body = await response.aread()
                     detail = body.decode("utf-8", errors="ignore")[:300]
-                    raise LLMError(f"LLM 오류 {response.status_code}: {detail}")
+                    raise LLMError(
+                        f"LLM 오류 {response.status_code}: {detail}",
+                        status_code=response.status_code,
+                    )
                 async for line in response.aiter_lines():
                     if line.startswith("data: "):
                         data_str = line[6:]
@@ -211,12 +259,9 @@ class SimpleLLMClient:
                             break
                         try:
                             data = json.loads(data_str)
-                            delta = data.get("choices", [{}])[0].get("delta", {})
-                            content = delta.get("content", "")
-                            if content:
-                                yield content
                         except Exception:
                             continue
+                        yield data
         except LLMError:
             raise
         except Exception as e:

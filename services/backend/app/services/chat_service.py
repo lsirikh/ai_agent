@@ -4,9 +4,36 @@ Backend API - ChatService
 Phase 9.2: 채팅 서비스 클래스
 Phase 15.3: Sliding Window 컨텍스트 로드
 """
-from typing import Any, AsyncIterator, List, Optional, Tuple
+import asyncio
+from typing import Any, AsyncIterator, Awaitable, Callable, List, Optional, Tuple
 
 from . import conversation
+from .llm_client import LANGUAGE_PROMPTS
+
+# 채팅 도구 실행 확인: tool_confirm 이벤트의 id → 사용자의 승인 여부를 기다리는 Future
+CONFIRM_TIMEOUT_SECONDS = 120.0
+_confirms: dict = {}
+
+
+def resolve_confirm(confirm_id: str, approved: bool) -> bool:
+    """POST /api/chat/confirm. 기다리는 확인이 없으면 False."""
+    future = _confirms.get(confirm_id)
+    if future is None or future.done():
+        return False
+    future.set_result(approved)
+    return True
+
+
+async def _wait_confirm(event: dict) -> bool:
+    future = _confirms.get(event["id"])
+    if future is None:
+        return False
+    try:
+        return await asyncio.wait_for(future, CONFIRM_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        return False
+    finally:
+        _confirms.pop(event["id"], None)
 
 
 class ChatService:
@@ -22,7 +49,8 @@ class ChatService:
         rag_service: Optional[Any] = None,
         history_store: Optional[Any] = None,
         context_enabled: bool = True,
-        context_window_size: int = 20
+        context_window_size: int = 20,
+        tool_provider: Optional[Callable[[], Awaitable[Any]]] = None
     ):
         """
         ChatService 초기화
@@ -33,12 +61,15 @@ class ChatService:
             history_store: 대화 기록 저장소 (None이면 저장 비활성화)
             context_enabled: 컨텍스트 로드 활성화 여부
             context_window_size: Sliding Window 크기 (최근 N개 메시지)
+            tool_provider: 이번 턴에 쓸 ToolRegistry 를 돌려주는 함수
+                (None 이면 도구 없음)
         """
         self.llm_client = llm_client
         self.rag_service = rag_service
         self.history_store = history_store
         self.context_enabled = context_enabled
         self.context_window_size = context_window_size
+        self.tool_provider = tool_provider
 
     async def process_message(
         self,
@@ -91,8 +122,15 @@ class ChatService:
                 f"출처 정보가 있으면 답변에 포함해주세요:\n\n{rag_context}"
             )
 
+        registry = await self.tool_provider() if self.tool_provider else None
+        if registry:
+            extra["tools"] = registry
+            extra["confirm"] = _wait_confirm
+
         # 4. LLM 스트리밍 호출
         full_response = ""
+        tool_results = []
+        web_sources = []
 
         if self.llm_client:
             async for token in self.llm_client.generate_stream(
@@ -101,6 +139,25 @@ class ChatService:
                 conversation_history=conversation_history,
                 **extra
             ):
+                if isinstance(token, dict):
+                    # 도구 이벤트 (tool_call · tool_confirm · tool_result)
+                    # → 채팅에 "검색함"·확인 표시
+                    if token["type"] == "tool_confirm":
+                        loop = asyncio.get_running_loop()
+                        _confirms[token["id"]] = loop.create_future()
+                    elif token["type"] == "tool_result":
+                        tool_results.append(token)
+                        web_sources.extend(token["sources"])
+                    yield {
+                        "type": token["type"],
+                        "content": token.get("content", ""),
+                        "session_id": session_id,
+                        "sources": token.get("sources", []),
+                        "id": token["id"],
+                        "tool": token["name"],
+                        "arguments": token["arguments"],
+                    }
+                    continue
                 full_response += token
                 yield {
                     "type": "token",
@@ -120,6 +177,7 @@ class ChatService:
             }
 
         # 5. 완료 이벤트
+        sources = sources + web_sources
         yield {
             "type": "complete",
             "content": full_response,
@@ -132,6 +190,17 @@ class ChatService:
             return
         if conversation.is_available():
             await conversation.save_message(session_id, "user", message, source="web")
+            for result in tool_results:
+                await conversation.save_message(
+                    session_id,
+                    "tool",
+                    result["content"],
+                    source="web",
+                    rag_sources=[
+                        {"tool": result["name"], "is_error": result["is_error"]},
+                        *result["sources"],
+                    ],
+                )
             await conversation.save_message(
                 session_id,
                 "assistant",
@@ -160,21 +229,7 @@ class ChatService:
         Returns:
             시스템 프롬프트 문자열
         """
-        base_prompt = """당신은 한국어 AI 어시스턴트 EdgeVoice입니다.
-
-[CRITICAL - 언어 규칙]
-- 모든 응답은 100% 한국어로 작성해야 합니다.
-- 중국어(中文) 사용 절대 금지. 한자 사용 금지.
-- 영어, 일본어 등 다른 언어 사용 금지.
-- 사용자가 어떤 언어로 질문해도 반드시 한국어로만 답변하세요.
-
-[응답 규칙]
-- 친절하고 도움이 되는 답변을 제공하세요.
-- 이전 대화 내용을 기억하고 문맥에 맞게 대화하세요.
-- 모르는 것은 모른다고 솔직하게 답변하세요.
-
-IMPORTANT: You MUST respond in Korean (한국어) ONLY.
-NEVER use Chinese characters (中文/汉字). NEVER switch to any other language."""
+        base_prompt = LANGUAGE_PROMPTS["ko"]
 
         if rag_context:
             return f"""{base_prompt}

@@ -1,0 +1,24 @@
+# EdgeVoice 인터넷 검색 도구용 SearXNG 설정 (기본 설정에 덮어쓴다)
+# - format=json 을 켜야 shared/tools.py 의 SearxngProvider 가 결과를 받는다
+# - 한국어 결과 우선, naver 엔진 사용
+use_default_settings: true
+
+general:
+  instance_name: "EdgeVoice Search"
+
+search:
+  default_lang: "ko"
+  formats:
+    - html
+    - json
+
+server:
+  # SEARXNG_SECRET 환경변수가 이 값을 덮어쓴다
+  secret_key: "edgevoice-searxng-change-me"
+  # 내부 네트워크에서 백엔드·오케스트레이터만 부르므로 봇 제한을 끈다
+  limiter: false
+  image_proxy: false
+
+engines:
+  - name: naver
+    disabled: false

@@ -15,8 +15,11 @@ from shared.context_builder import (
     VOICE_MAX_TOKENS,
     build_messages,
     fit_messages,
+    input_budget,
     vllm_tokenize,
 )
+from shared.tool_calling import Confirm, schema_tokens, stream_with_tools
+from shared.tools import ToolRegistry, tool_parser_for
 
 from .pipeline_logger import PipelineLogger
 
@@ -77,6 +80,8 @@ class LLMClient:
         self.max_context_messages = max_context_messages
         # vLLM --max-model-len (/v1/models 응답으로 갱신)
         self.max_model_len = DEFAULT_MAX_MODEL_LEN
+        # vLLM 이 도구 요청을 400 으로 거절하면 False (도구 파서 없이 떠 있음)
+        self.tools_supported = True
 
         # 대화 컨텍스트 저장 (백엔드 세션 히스토리를 못 받을 때의 대체)
         self._context: list[dict[str, str]] = []
@@ -393,8 +398,10 @@ class LLMClient:
         session_id: Optional[str] = None,
         history: Optional[list[dict[str, str]]] = None,
         summary: Optional[str] = None,
+        tools: Optional[ToolRegistry] = None,
+        confirm: Optional[Confirm] = None,
         **kwargs
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[Any, None]:
         """
         LLM 응답 스트리밍 생성
 
@@ -405,25 +412,56 @@ class LLMClient:
             session_id: 세션 ID (로깅용)
             history: 세션 히스토리 (None 이면 메모리 컨텍스트)
             summary: 세션 요약
+            tools: 이번 턴에 쓸 도구 (모델에 맞는 tool parser 가 없으면 쓰지 않는다)
+            confirm: 확인이 필요한 도구를 실행해도 되는지 묻는 콜백
             **kwargs: 추가 생성 파라미터
 
         Yields:
-            토큰 문자열
+            토큰 문자열. 도구를 쓰면 도구 이벤트(dict)도 섞여 나온다
+            (shared.tool_calling.stream_with_tools 참고)
         """
         max_tokens = kwargs.get("max_tokens", self.max_tokens)
+        if tools and not (
+            self.tools_supported and tool_parser_for(await self.resolve_model())
+        ):
+            tools = None
+        reserve = schema_tokens(tools.schemas()) if tools else 0
         if messages or not user_message:
             built_messages = self._build_messages(user_message, messages, rag_context)
         else:
-            # 프롬프트 + max_tokens 가 모델 길이를 넘으면
+            # 프롬프트(+ 도구 스키마) + max_tokens 가 모델 길이를 넘으면
             # vLLM 이 400 으로 거절해 음성 답이 나오지 않는다
             built_messages = await fit_messages(
                 lambda limit: self._build_messages(
-                    user_message, None, rag_context, history, summary, limit, max_tokens
+                    user_message, None, rag_context, history, summary,
+                    limit - reserve, max_tokens
                 ),
                 max_model_len=self.max_model_len,
                 max_tokens=max_tokens,
                 tokenize=self._tokenize,
             )
+
+        async def request(request_messages: list, schemas: Optional[list]):
+            if not schemas:
+                async for chunk in self._make_stream_request(
+                    request_messages, **kwargs
+                ):
+                    yield chunk
+                return
+            try:
+                async for chunk in self._make_stream_request(
+                    request_messages, tools=schemas, tool_choice="auto", **kwargs
+                ):
+                    yield chunk
+            except httpx.HTTPStatusError as e:
+                # vLLM 에 --enable-auto-tool-choice 가 없으면 400 → 도구를 끄고 다시
+                if e.response.status_code != 400:
+                    raise
+                self.tools_supported = False
+                async for chunk in self._make_stream_request(
+                    request_messages, **kwargs
+                ):
+                    yield chunk
 
         # Phase 27.6: Log stream start
         start_time = time.time()
@@ -442,20 +480,17 @@ class LLMClient:
         total_content = ""
 
         try:
-            async for chunk in self._make_stream_request(built_messages, **kwargs):
-                choices = chunk.get("choices", [])
-                if choices:
-                    delta = choices[0].get("delta", {})
-                    content = delta.get("content")
-                    finish_reason = choices[0].get("finish_reason")
-
-                    if finish_reason == "stop":
-                        break
-
-                    if content:
-                        total_tokens += 1
-                        total_content += content
-                        yield content
+            async for item in stream_with_tools(
+                request,
+                built_messages,
+                tools,
+                input_budget=input_budget(self.max_model_len, max_tokens),
+                confirm=confirm,
+            ):
+                if isinstance(item, str):
+                    total_tokens += 1
+                    total_content += item
+                yield item
 
             # Phase 27.6: Log stream completion
             duration_ms = int((time.time() - start_time) * 1000)

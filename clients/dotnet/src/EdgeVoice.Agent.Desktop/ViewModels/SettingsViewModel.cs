@@ -40,6 +40,8 @@ public sealed class SettingsViewModel : PageViewModel
     private double _listeningTimeoutSeconds = 10.0;
     private bool _contextEnabled = true;
     private int _contextWindowSize = 20;
+    private bool _internetToolsEnabled;
+    private string _availableTools = "";
 
     public SettingsViewModel(EdgeVoiceApiClient api)
     {
@@ -49,6 +51,7 @@ public sealed class SettingsViewModel : PageViewModel
         SaveGeneralCommand = new DelegateCommand(SaveGeneral);
         RegisterWakeWordCommand = new DelegateCommand(RegisterWakeWord);
         SaveContextCommand = new DelegateCommand(SaveContext);
+        SaveToolsCommand = new DelegateCommand(SaveTools);
         Load();
     }
 
@@ -77,6 +80,14 @@ public sealed class SettingsViewModel : PageViewModel
     public DelegateCommand RegisterWakeWordCommand { get; }
 
     public DelegateCommand SaveContextCommand { get; }
+
+    public DelegateCommand SaveToolsCommand { get; }
+
+    /// <summary>LLM 인터넷 도구(web_search·web_fetch). 기본 꺼짐.</summary>
+    public bool InternetToolsEnabled { get => _internetToolsEnabled; set => SetProperty(ref _internetToolsEnabled, value); }
+
+    /// <summary>지금 LLM 에 노출되는 도구 이름들 (검색 제공자가 없으면 인터넷 도구는 빠진다).</summary>
+    public string AvailableTools { get => _availableTools; set => SetProperty(ref _availableTools, value); }
 
     // 콤보박스가 항목을 다시 그리는 동안 잠깐 보내는 null 은 무시한다 (선택값 유지)
     public string? TtsEngine
@@ -164,7 +175,22 @@ public sealed class SettingsViewModel : PageViewModel
             ContextEnabled = c?["context_enabled"]?.GetValue<bool>() ?? true;
             ContextWindowSize = c?["context_window_size"]?.GetValue<int>() ?? 20;
         });
+
+        await RunAsync(async () => ShowTools(await _api.GetAsync("api/settings/tools")));
     }
+
+    private void ShowTools(JsonNode? tools)
+    {
+        InternetToolsEnabled = tools?["internet_enabled"]?.GetValue<bool>() ?? false;
+        AvailableTools = "사용 중인 도구: " + string.Join(", ",
+            tools?["tools"]?.AsArray().Select(t => t?.ToString()) ?? Enumerable.Empty<string?>());
+    }
+
+    private async void SaveTools() => await RunAsync(async () =>
+        ShowTools(await _api.SendAsync(HttpMethod.Put, "api/settings/tools", new
+        {
+            internet_enabled = InternetToolsEnabled,
+        })), "도구 설정 저장 완료");
 
     private Task LoadOptions() => RunAsync(async () =>
     {

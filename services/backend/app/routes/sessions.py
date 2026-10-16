@@ -62,10 +62,12 @@ class SessionContextClearResponse(BaseModel):
 class PipelineMessageRequest(BaseModel):
     """파이프라인 메시지 생성 요청"""
     session_id: Optional[str] = None
-    role: Literal["user", "assistant", "system"]
+    role: Literal["user", "assistant", "system", "tool"]
     content: str
     source: Optional[str] = "voice"
     audio_url: Optional[str] = None
+    # {"sources": [...]} — 도구 결과·웹 출처 (messages.rag_sources 에 저장)
+    metadata: Optional[dict] = None
 
 
 class PipelineMessageResponse(BaseModel):
@@ -227,7 +229,11 @@ async def create_pipeline_message(request: PipelineMessageRequest):
 
     session_id = await conversation.resolve_session_id(request.session_id)
     message = await conversation.save_message(
-        session_id, request.role, request.content, source=source
+        session_id,
+        request.role,
+        request.content,
+        source=source,
+        rag_sources=(request.metadata or {}).get("sources"),
     )
     if request.role == "assistant":
         from .chat import get_llm_client

@@ -18,6 +18,8 @@ import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
+from shared.mcp_client import start_mcp_from_env
+
 from .orchestrator import Orchestrator
 from .pipeline_logger import get_logger, PipelineLogger, HEARTBEAT_INTERVAL
 
@@ -137,6 +139,11 @@ async def lifespan(app: FastAPI):
     print(f"Starting Orchestrator in {environment} mode...")
 
     orchestrator = Orchestrator(environment=environment)
+    # MCP_CONFIG_PATH 에 설정한 MCP 서버의 도구를 음성 대화에 붙인다
+    try:
+        orchestrator.mcp = await start_mcp_from_env()
+    except Exception as e:
+        print(f"MCP unavailable: {e}")
 
     # Log service start
     await _logger.info(
@@ -167,6 +174,8 @@ async def lifespan(app: FastAPI):
     )
 
     if orchestrator:
+        if orchestrator.mcp:
+            await orchestrator.mcp.close()
         await orchestrator.stop()
     print("Orchestrator stopped.")
 

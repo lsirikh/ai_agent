@@ -139,10 +139,21 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[Backend] LLM loading monitor start failed: {e}")
 
+    # 7. MCP 서버 연결 (MCP_CONFIG_PATH 가 있을 때만)
+    try:
+        await chat.start_mcp()
+    except Exception as e:
+        print(f"[Backend] MCP start failed: {e}")
+
     yield
 
     # === Shutdown ===
     print("[Backend] Shutting down...")
+
+    try:
+        await chat.stop_mcp()
+    except Exception as e:
+        print(f"[Backend] MCP stop failed: {e}")
 
     # LLM Monitor 중지 (Phase 35)
     try:

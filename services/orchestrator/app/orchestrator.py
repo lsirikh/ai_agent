@@ -11,6 +11,9 @@ import re
 import time
 from typing import Any, Optional
 
+from shared.tool_calling import wrap_untrusted
+from shared.tools import ToolRegistry, build_registry, load_tool_settings
+
 from .backend_client import BackendClient
 from .llm_client import LLMClient
 from .pipeline_logger import get_logger
@@ -33,6 +36,14 @@ WAKE_PHRASE_PATTERN = re.compile(
     r"^\s*(?:hey|hi|헤이|해이)[\s,.!~\-]*(?:jarvis|자비스|쟈비스)[\s,.!?~\-]*",
     re.IGNORECASE,
 )
+
+
+# "실행할까요?" 다음 턴의 예/아니오
+YES_PATTERN = re.compile(
+    r"^\s*(네|예|응|그래|좋아|실행|해\s*줘|오케이|yes|ok)", re.IGNORECASE
+)
+NO_PATTERN = re.compile(r"^\s*(아니|아뇨|취소|하지\s*마|싫어|no\b)", re.IGNORECASE)
+CANCELLED_REPLY = "알겠어요, 실행하지 않을게요."
 
 
 def strip_wake_phrase(text: str) -> str:
@@ -190,6 +201,11 @@ class Orchestrator:
         self._pending_list_number: Optional[int] = None
         self._processing_task: Optional[asyncio.Task] = None
         self._is_running = False
+
+        # 도구: 연결된 MCP 서버(main.py 가 시작 시 붙인다)와
+        # 음성으로 "실행할까요?" 라고 물은 뒤 답을 기다리는 도구 호출
+        self.mcp: Optional[Any] = None
+        self._pending_confirm: Optional[dict] = None
 
         # TTS 설정 (Phase 8.3)
         self._current_session_id: Optional[str] = None
@@ -473,6 +489,8 @@ class Orchestrator:
         self._pending_list_number = None
         full_response = ""
         llm_start_time = time.time()
+        web_sources: list = []
+        announced = False
 
         # 채팅과 같은 활성 세션의 히스토리로 답한다
         # (인식 문장은 히스토리를 읽은 뒤 저장)
@@ -485,37 +503,68 @@ class Orchestrator:
             data={"message": "LLM processing started", "input_text": text[:100]}
         )
 
+        async def speak_sentence(sentence: str) -> None:
+            nonlocal first_sentence_sent
+            # Phase 32: 첫 문장에서 TTS_PROCESSING 상태로 전이
+            if not first_sentence_sent:
+                # LLM_PROCESSING 또는 PROCESSING(별칭)에서 TTS_PROCESSING으로 전이
+                if self.state_machine.current_state in (State.LLM_PROCESSING, State.PROCESSING):
+                    self.state_machine.transition_to(State.TTS_PROCESSING)
+                first_sentence_sent = True
+
+            # TTS 요청 발행
+            await self._speak(sentence)
+
         try:
-            # 채팅과 같은 지식 베이스에서 근거를 찾아 이번 질문에 붙인다
-            knowledge = await self._relevant_knowledge(text)
+            # "실행할까요?" 에 대한 예/아니오 턴
+            rag_context = None
+            pending, self._pending_confirm = self._pending_confirm, None
+            if pending:
+                if NO_PATTERN.match(text):
+                    await speak_sentence(CANCELLED_REPLY)
+                    await self._save_voice_message("assistant", CANCELLED_REPLY)
+                    if self._pending_tts <= 0:
+                        self._finish_turn()
+                    else:
+                        self._start_tts_watchdog()
+                    return
+                if YES_PATTERN.match(text):
+                    rag_context = [await self._run_confirmed_tool(pending)]
+
+            registry = None
+            if rag_context is None:
+                registry = await self._build_tools()
+                # 채팅과 같은 지식 베이스에서 근거를 찾아 이번 질문에 붙인다
+                rag_context = await self._relevant_knowledge(text) or None
             async for token in self.llm_client.generate_stream(
-                text, history=history, summary=summary, rag_context=knowledge or None
+                text, history=history, summary=summary, rag_context=rag_context,
+                tools=registry, confirm=self._defer_confirm
             ):
+                if isinstance(token, dict):
+                    # 도구 이벤트: 실행 전 짧은 안내를 말하고,
+                    # 결과는 저장만 한다(TTS 로 보내지 않음)
+                    tool = registry.get(token["name"]) if registry else None
+                    first_call = token["type"] == "tool_call" and not announced
+                    if first_call and tool and tool.announce:
+                        announced = True
+                        await speak_sentence(tool.announce)
+                    elif token["type"] == "tool_result":
+                        web_sources.extend(token["sources"])
+                        await self._save_tool_message(token)
+                    continue
+
                 # 토큰을 큐 매니저에 추가
                 await self.queue_manager.add_token_async(token)
                 full_response += token
 
                 # 완성된 문장 확인
-                sentences = self.queue_manager.get_complete_sentences()
-
-                for sentence in sentences:
-                    # Phase 32: 첫 문장에서 TTS_PROCESSING 상태로 전이
-                    if not first_sentence_sent:
-                        # LLM_PROCESSING 또는 PROCESSING(별칭)에서 TTS_PROCESSING으로 전이
-                        if self.state_machine.current_state in (State.LLM_PROCESSING, State.PROCESSING):
-                            self.state_machine.transition_to(State.TTS_PROCESSING)
-                        first_sentence_sent = True
-
-                    # TTS 요청 발행
-                    await self._speak(sentence)
+                for sentence in self.queue_manager.get_complete_sentences():
+                    await speak_sentence(sentence)
 
             # 남은 버퍼 처리
             remaining = self.queue_manager.flush()
             if remaining and len(remaining.strip()) > 0:
-                if not first_sentence_sent:
-                    if self.state_machine.current_state in (State.LLM_PROCESSING, State.PROCESSING):
-                        self.state_machine.transition_to(State.TTS_PROCESSING)
-                await self._speak(remaining)
+                await speak_sentence(remaining)
 
             # 어시스턴트 응답을 컨텍스트에 추가
             if hasattr(self.llm_client, 'add_to_context') and full_response:
@@ -524,7 +573,10 @@ class Orchestrator:
 
             # 끼어들기로 잘린 답은 여기까지 오지 않으므로 저장되지 않는다
             if full_response:
-                await self._save_voice_message("assistant", full_response)
+                await self._save_voice_message(
+                    "assistant", full_response,
+                    {"sources": web_sources} if web_sources else None,
+                )
 
             # TTS 가 아직 말하는 중이면 마지막 문장의 tts:complete 에서 READY 로 간다.
             # 보낸 문장이 없으면(빈 응답) 바로 READY.
@@ -581,13 +633,55 @@ class Orchestrator:
             )
             return None, None
 
-    async def _save_voice_message(self, role: str, content: str) -> None:
+    async def _build_tools(self) -> ToolRegistry:
+        """이번 턴에 쓸 도구: 설정(인터넷 토글) + 연결된 MCP 서버의 허용 도구."""
+        settings = await load_tool_settings(self.redis)
+        mcp_tools = []
+        if self.mcp:
+            try:
+                mcp_tools = await self.mcp.tools()
+            except Exception:
+                mcp_tools = []
+        return build_registry(settings, mcp_tools)
+
+    async def _defer_confirm(self, event: dict) -> bool:
+        """
+        음성은 같은 턴 안에서 답을 기다릴 수 없다:
+        도구를 실행하지 않고 기억해 두었다가 다음 턴의 예/아니오로 정한다.
+        """
+        self._pending_confirm = event
+        return False
+
+    async def _run_confirmed_tool(self, pending: dict) -> dict:
+        """사용자가 "네" 라고 한 도구를 실행하고, 답에 쓸 근거로 돌려준다."""
+        registry = await self._build_tools()
+        result = await registry.execute(pending["name"], pending["arguments"])
+        await self._save_tool_message({
+            "name": pending["name"],
+            "content": result.content,
+            "is_error": result.is_error,
+            "sources": result.sources,
+        })
+        return {"source": pending["name"], "content": wrap_untrusted(pending["name"], result.content)}
+
+    async def _save_tool_message(self, event: dict) -> None:
+        """도구 결과를 role='tool' 로 저장한다(채팅에 "검색함"·출처로 보인다)."""
+        await self._save_voice_message(
+            "tool",
+            event["content"],
+            {"sources": [{"tool": event["name"], "is_error": event["is_error"]}, *event["sources"]]},
+        )
+
+    async def _save_voice_message(
+        self, role: str, content: str, metadata: Optional[dict] = None
+    ) -> None:
         """음성 턴을 활성 세션에 source='voice' 로 저장한다(채팅창에도 바로 뜬다)."""
         if not self.backend_client or not self.backend_client.current_session_id:
             return
         try:
             await self.backend_client.save_message(
-                role=role, content=content, source="voice"
+                role=role, content=content, source="voice",
+                **({"metadata": metadata} if metadata else {})
             )
         except Exception as e:
             await self._logger.log(

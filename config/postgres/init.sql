@@ -79,7 +79,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_last_active ON sessions(last_active_at D
 CREATE TABLE IF NOT EXISTS messages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    role VARCHAR(20) NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+    role VARCHAR(20) NOT NULL CHECK (role IN ('user', 'assistant', 'system', 'tool')),
     content TEXT NOT NULL,
     source VARCHAR(50) DEFAULT 'web' CHECK (source IN ('web', 'voice', 'api')),
     audio_url TEXT,

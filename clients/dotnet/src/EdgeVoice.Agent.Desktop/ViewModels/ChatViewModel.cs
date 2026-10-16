@@ -34,6 +34,7 @@ public sealed class ChatMessage : BindableBase
 /// <summary>
 /// 채팅: 음성과 같은 활성 세션을 쓴다. 시작하면 세션 히스토리를 불러오고 /api/chat/stream 을 상시 구독해
 /// 음성 턴을 말풍선으로 보여 준다. 텍스트 질문은 스트리밍 응답(RAG 출처 표시), 마이크 버튼은 상시 마이크 음소거 토글.
+/// LLM 이 도구를 쓰면 "🔎 검색함"·출처 링크를 답에 붙이고, 확인이 필요한 도구는 실행 전에 묻는다.
 /// </summary>
 public sealed class ChatViewModel : PageViewModel, IDisposable
 {
@@ -93,7 +94,8 @@ public sealed class ChatViewModel : PageViewModel, IDisposable
 
         await RunAsync(async () =>
         {
-            var sources = "";
+            // RAG 문서(rag_context)와 웹 검색·페이지(tool_result) 출처
+            var sources = new JsonArray();
             await foreach (var ev in _api.ChatAsync(text, _sessionId, UseRag))
             {
                 var json = ev.Json;
@@ -104,11 +106,25 @@ public sealed class ChatViewModel : PageViewModel, IDisposable
                         reply.Text += json["content"]?.ToString();
                         break;
                     case "rag_context":
-                        sources = string.Join(", ", json["sources"]?.AsArray()
-                            .Select(s => (s?["filename"] ?? s?["doc_id"])?.ToString()) ?? Array.Empty<string?>());
+                    case "tool_result":
+                        foreach (var source in json["sources"]?.AsArray() ?? new JsonArray())
+                        {
+                            sources.Add(source?.DeepClone());
+                        }
+
                         break;
-                    case "complete" when sources.Length > 0:
-                        reply.Text += "\n\nSources: " + sources;
+                    case "tool_call":
+                        Status = "🔎 도구 사용: " + json["tool"];
+                        break;
+                    case "tool_confirm":
+                        // 쓰기·파괴적 MCP 도구: 사용자가 승인해야 실행된다
+                        var approved = await Dialogs.ConfirmAsync(
+                            "도구 실행 확인", $"'{json["tool"]}' 을(를) 실행할까요?\n{json["arguments"]}");
+                        await _api.SendAsync(HttpMethod.Post, "api/chat/confirm",
+                            new { confirm_id = json["id"]?.ToString(), approved });
+                        break;
+                    case "complete":
+                        reply.Text += FormatSources(sources);
                         break;
                     case "error":
                         reply.Text = "Error: " + json["content"];
@@ -177,7 +193,7 @@ public sealed class ChatViewModel : PageViewModel, IDisposable
         }
 
         Messages.Clear();
-        foreach (var m in messages)
+        foreach (var m in messages.Where(IsBubble))
         {
             Messages.Add(ToChatMessage(m));
         }
@@ -188,16 +204,44 @@ public sealed class ChatViewModel : PageViewModel, IDisposable
     /// </summary>
     private void OnStoredMessage(JsonNode? message)
     {
-        if (message?["source"]?.ToString() == "voice")
+        if (message?["source"]?.ToString() == "voice" && IsBubble(message))
         {
             Messages.Add(ToChatMessage(message));
         }
     }
 
+    /// <summary>도구 결과(role=tool)는 말풍선으로 띄우지 않는다 — 답 말풍선에 "검색함"·출처로 붙는다.</summary>
+    private static bool IsBubble(JsonNode? m) => m?["role"]?.ToString() != "tool";
+
     private static ChatMessage ToChatMessage(JsonNode? m) => new(
         m?["role"]?.ToString() == "user" ? "User" : "AI",
-        m?["content"]?.ToString() ?? "",
+        (m?["content"]?.ToString() ?? "") + FormatSources(m?["sources"] as JsonArray),
         m?["source"]?.ToString() == "voice");
+
+    /// <summary>답에 붙일 출처: RAG 문서 이름, 웹 검색·페이지는 "🔎 검색함" 과 링크.</summary>
+    public static string FormatSources(JsonArray? sources)
+    {
+        if (sources is null)
+        {
+            return "";
+        }
+
+        var files = sources.Where(s => s?["url"] is null && s?["tool"] is null)
+            .Select(s => (s?["filename"] ?? s?["doc_id"])?.ToString())
+            .Where(name => !string.IsNullOrEmpty(name))
+            .ToList();
+        var links = sources.Where(s => s?["url"] is not null)
+            .Select(s => $"- {s!["title"]} ({s["url"]})")
+            .Distinct()
+            .ToList();
+        var text = files.Count > 0 ? "\n\nSources: " + string.Join(", ", files) : "";
+        if (links.Count > 0)
+        {
+            text += "\n\n🔎 검색함 · 출처\n" + string.Join("\n", links);
+        }
+
+        return text;
+    }
 
     public void Dispose() => _stream?.Cancel();
 }

@@ -38,6 +38,10 @@ CREATE TABLE IF NOT EXISTS session_summaries (
 );
 CREATE INDEX IF NOT EXISTS idx_session_summaries_session
     ON session_summaries(session_id, created_at DESC);
+-- 도구 결과 메시지(role='tool')
+ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_role_check;
+ALTER TABLE messages ADD CONSTRAINT messages_role_check
+    CHECK (role IN ('user', 'assistant', 'system', 'tool'));
 """
 
 SUMMARY_SYSTEM_PROMPT = (
@@ -181,7 +185,8 @@ async def _uncovered(session_id: str) -> tuple:
         ids = [str(m["id"]) for m in messages]
         if covered in ids:
             messages = messages[ids.index(covered) + 1 :]
-    return summary, messages
+    # 도구 결과는 화면 기록용 — 프롬프트·요약에는 답(assistant)만 이어진다
+    return summary, [m for m in messages if m["role"] != "tool"]
 
 
 async def get_context(session_id: str) -> dict:
