@@ -1,6 +1,7 @@
 using System;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Platform;
 using Avalonia.Threading;
 using EdgeVoice.Agent.Core;
 
@@ -14,6 +15,10 @@ namespace EdgeVoice.Agent.Desktop.Tray;
 public sealed class TrayController : IDisposable
 {
     private const int IconSize = 32;
+
+    // 창·exe 와 같은 앱 아이콘 (Assets/edgevoice.ico)
+    private static readonly WindowIcon AppIcon = new(
+        AssetLoader.Open(new Uri("avares://EdgeVoice.Agent.Desktop/Assets/edgevoice.ico")));
 
     private readonly MicrophoneStreamer _mic;
     private readonly AlwaysOnMicrophone _alwaysOn;
@@ -122,9 +127,15 @@ public sealed class TrayController : IDisposable
 
         _lastDrawn = state;
         _lastNotice = notice;
-        using (var bmp = RippleRenderer.RenderBitmap(IconSize, state, _phase, _level))
+        if (animated)
         {
+            using var bmp = RippleRenderer.RenderBitmap(IconSize, state, _phase, _level);
             _trayIcon.Icon = new WindowIcon(bmp);
+        }
+        else
+        {
+            // 대기·오류·음소거일 때는 앱 아이콘(음성 막대). 듣기·생각·말하기 중에만 파형이 움직인다
+            _trayIcon.Icon = AppIcon;
         }
 
         _trayIcon.ToolTipText = "EdgeVoice Agent - " + (notice ?? StateText(state));
