@@ -433,6 +433,28 @@ async def tts_state_subscriber() -> None:
         await pubsub.unsubscribe(TTS_STATE_CHANNEL)
 
 
+# 답변 음성을 재생할 /ws/audio 클라이언트들 (게이트웨이는 컨테이너 안이라 직접 재생할 수 없다)
+_playback_clients: set = set()
+
+
+def register_playback_client(websocket: Any) -> None:
+    _playback_clients.add(websocket)
+
+
+def unregister_playback_client(websocket: Any) -> None:
+    _playback_clients.discard(websocket)
+
+
+async def forward_tts_audio(audio_bytes: bytes) -> None:
+    """TTS 오디오(float32 24kHz mono)를 연결된 클라이언트에 바이너리 프레임으로 보낸다."""
+    for client in list(_playback_clients):
+        try:
+            await client.send_bytes(audio_bytes)
+        except Exception:
+            # 끊긴 클라이언트는 더 보내지 않는다
+            _playback_clients.discard(client)
+
+
 async def tts_audio_subscriber() -> None:
     """
     TTS 오디오 스트림 구독 태스크 (Phase 35.6)
@@ -467,6 +489,9 @@ async def tts_audio_subscriber() -> None:
 
                 # AEC playback reference로 설정
                 aec.set_playback_reference(audio_data)
+
+                # 클라이언트 스피커로 재생하도록 전달
+                await forward_tts_audio(audio_bytes)
 
                 # Phase 43: log() 메서드 사용으로 event와 message 분리
                 await _logger.log(
@@ -1047,6 +1072,9 @@ async def websocket_audio_stream(websocket: WebSocket):
         "WebSocket audio stream connected"
     )
 
+    # 이 클라이언트가 답변 음성을 받아 재생한다
+    register_playback_client(websocket)
+
     chunk_count = 0
 
     try:
@@ -1195,6 +1223,8 @@ async def websocket_audio_stream(websocket: WebSocket):
             f"WebSocket disconnected after {chunk_count} chunks",
             metadata={"total_chunks": chunk_count}
         )
+    finally:
+        unregister_playback_client(websocket)
 
 
 # 오디오 처리 엔드포인트
