@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  dotnet:
+    name: .NET build & test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet build clients/dotnet/EdgeVoice.Agent.sln -c Release
+      - run: dotnet test clients/dotnet/EdgeVoice.Agent.sln -c Release --no-build
+
+  python:
+    name: pytest ${{ matrix.suite }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 폴더를 섞어 돌리면 서비스별 app 패키지가 서로 간섭하므로 폴더마다 따로 실행한다
+        suite: [orchestrator, shared, rag, llm, stt, tts]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-ci.txt
+      - run: python -m pytest tests/${{ matrix.suite }} -q -p no:cacheprovider
+
+  lint:
+    name: ruff (changed files)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff
+      # 저장소 전체 린트는 기존부터 실패하므로 PR 에서 바뀐 Python 파일만 검사한다
+      - run: |
+          files=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- '*.py')
+          if [ -n "$files" ]; then ruff check $files; else echo "no python changes"; fi
+
+  docker:
+    name: docker build ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # CUDA 기반(stt, tts)과 torch 를 받는 embedding 은 이미지가 커서 릴리스에서만 빌드한다
+        service: [backend, rag, orchestrator, wake_word, audio_gateway]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/${{ matrix.service }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
