@@ -102,6 +102,8 @@ services:
       - MODEL_PATH=/models/kokoro
       - DEVICE=cuda
       - LOG_LEVEL=INFO
+      # 음성 답변 엔진: melo = 한국어 MeloTTS, kokoro = 영어 전용
+      - TTS_ENGINE=${TTS_ENGINE:-melo}
       # Redis 설정 (Phase 8.6)
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -111,6 +113,8 @@ services:
       - PIPELINE_LOGGING_ENABLED=true
     volumes:
       - ${MODEL_CACHE_PATH:-./models}/tts/kokoro:/models
+      # MeloTTS 한국어 모델·BERT 를 한 번만 받도록 캐시 유지
+      - tts-hf-cache:/root/.cache/huggingface
       - ./logs/tts:/app/logs
       # Phase 31: shared module for pipeline logging
       - ./shared:/app/shared:ro
@@ -442,3 +446,5 @@ volumes:
     name: edgevoice-vectordb-data
   backend-data:
     name: edgevoice-backend-data
+  tts-hf-cache:
+    name: edgevoice-tts-hf-cache

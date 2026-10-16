@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 
+from .melo_adapter import create_voice_synthesizer
 from .synthesizer import KokoroTTS
 from .redis_subscriber import TTSRedisSubscriber
 from .pipeline_logger import get_logger, HEARTBEAT_INTERVAL
@@ -53,8 +54,8 @@ async def lifespan(app: FastAPI):
 
     _start_time = time.time()
 
-    # Synthesizer 초기화
-    synthesizer = get_synthesizer()
+    # 음성 답변용 합성기: TTS_ENGINE=melo 이면 한국어 MeloTTS, 아니면 Kokoro
+    synthesizer = create_voice_synthesizer(os.getenv("TTS_ENGINE", "kokoro"), get_synthesizer)
 
     # Phase 27.7: 서비스 시작 로그
     logger = get_logger("tts")

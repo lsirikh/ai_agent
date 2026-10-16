@@ -127,10 +127,11 @@ class MeloTTSEngine(TTSEngine):
             return np.zeros(samples, dtype=np.float32)
 
         try:
-            speaker_id = self._speaker_ids.get(
-                voice or 'KR',
-                self._speaker_ids.get('KR', 0)
-            )
+            # spk2id 는 dict 가 아닌 HParams 라 .get 이 없다 → [] 로 꺼낸다
+            try:
+                speaker_id = self._speaker_ids[voice or 'KR']
+            except (KeyError, AttributeError, TypeError):
+                speaker_id = self._speaker_ids['KR']
 
             # 임시 파일에 저장 후 읽기
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
@@ -138,8 +139,9 @@ class MeloTTSEngine(TTSEngine):
 
             self._model.tts_to_file(text, speaker_id, output_path, speed=speed)
 
-            import scipy.io.wavfile as wav
-            sample_rate, audio = wav.read(output_path)
+            import wave
+            with wave.open(output_path, 'rb') as w:
+                audio = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
             os.unlink(output_path)
 
             return audio.astype(np.float32) / 32768.0
