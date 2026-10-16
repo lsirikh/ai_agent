@@ -3,7 +3,6 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json.Nodes;
-using System.Windows;
 using EdgeVoice.Agent.Core;
 using Prism.Commands;
 
@@ -158,10 +157,10 @@ public sealed class SettingsViewModel : PageViewModel
         var res = await _api.SendAsync(HttpMethod.Post, "api/settings/apply", new { changes });
         var restart = res?["restart_required"]?.AsArray().Select(n => n?.ToString()).ToList();
         Status = "설정 저장 완료";
-        if (restart is { Count: > 0 } && MessageBox.Show(
+        if (restart is { Count: > 0 } && await Dialogs.ConfirmAsync(
+                "Restart Required",
                 $"다음 서비스 재시작이 필요합니다: {string.Join(", ", restart)}\n" +
-                "LLM 재시작 시 진행 중인 대화가 중단됩니다. 지금 재시작할까요?",
-                "Restart Required", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
+                "LLM 재시작 시 진행 중인 대화가 중단됩니다. 지금 재시작할까요?"))
         {
             RestartLlm();
         }

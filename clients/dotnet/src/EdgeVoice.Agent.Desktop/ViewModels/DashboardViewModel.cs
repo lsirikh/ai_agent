@@ -2,7 +2,7 @@ using System;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Text.Json.Nodes;
-using System.Windows.Threading;
+using Avalonia.Threading;
 using EdgeVoice.Agent.Core;
 using Prism.Commands;
 
@@ -25,8 +25,7 @@ public sealed class DashboardViewModel : PageViewModel
         _api = api;
         RefreshCommand = new DelegateCommand(Refresh);
 
-        var dispatcher = Dispatcher.CurrentDispatcher;
-        monitor.StateChanged += s => dispatcher.InvokeAsync(() => OrchestratorState = s.ToString());
+        monitor.StateChanged += s => Dispatcher.UIThread.Post(() => OrchestratorState = s.ToString());
 
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
         timer.Tick += (_, _) => Refresh();

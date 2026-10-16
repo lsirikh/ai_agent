@@ -1,7 +1,7 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Linq;
-using System.Windows.Threading;
+using Avalonia.Threading;
 using EdgeVoice.Agent.Core;
 using Prism.Commands;
 using Prism.Mvvm;
@@ -43,8 +43,7 @@ public sealed class ChatViewModel : PageViewModel
             .ObservesProperty(() => Input);
         ToggleMicCommand = new DelegateCommand(ToggleMic);
 
-        var dispatcher = Dispatcher.CurrentDispatcher;
-        mic.StreamingChanged += on => dispatcher.InvokeAsync(() => IsRecording = on);
+        mic.StreamingChanged += on => Dispatcher.UIThread.Post(() => IsRecording = on);
     }
 
     public ObservableCollection<ChatMessage> Messages { get; } = new();
