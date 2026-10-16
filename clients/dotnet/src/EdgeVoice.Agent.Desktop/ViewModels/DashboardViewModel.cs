@@ -96,15 +96,15 @@ public sealed class DashboardViewModel : PageViewModel
 
     public ISeries[] LogLevelSeries { get => _logLevelSeries; private set => SetProperty(ref _logLevelSeries, value); }
 
-    public Axis[] LogLevelXAxes { get; } = { NeutralAxis() };
+    public Axis[] LogLevelXAxes { get; } = { CategoryAxis() };
 
-    public Axis[] LogLevelYAxes { get; } = { NeutralAxis(min: 0) };
+    public Axis[] LogLevelYAxes { get; } = { CountAxis() };
 
     public ISeries[] LogServiceSeries { get => _logServiceSeries; private set => SetProperty(ref _logServiceSeries, value); }
 
-    public Axis[] LogServiceXAxes { get; } = { NeutralAxis(min: 0) };
+    public Axis[] LogServiceXAxes { get; } = { CountAxis() };
 
-    public Axis[] LogServiceYAxes { get; } = { NeutralAxis() };
+    public Axis[] LogServiceYAxes { get; } = { CategoryAxis() };
 
     public SolidColorPaint LegendTextPaint { get; } = new(Gray);
 
@@ -193,17 +193,38 @@ public sealed class DashboardViewModel : PageViewModel
         Values = new[] { value },
         Fill = new SolidColorPaint(color),
         MaxRadialColumnWidth = 32,
-        DataLabelsPaint = new SolidColorPaint(SKColors.White),
+        // 기본 글꼴은 세리프로 그려져 Office 느낌과 맞지 않는다
+        DataLabelsPaint = new SolidColorPaint(SKColors.White) { SKTypeface = UiTypeface },
+        DataLabelsSize = 14,
         DataLabelsPosition = PolarLabelsPosition.Middle,
         DataLabelsFormatter = p => p.Coordinate.PrimaryValue > 0 ? p.Coordinate.PrimaryValue.ToString("0") : "",
     };
+
+    private static readonly SKTypeface UiTypeface = SKTypeface.FromFamilyName("Malgun Gothic");
 
     private static Axis NeutralAxis(double? min = null, double? max = null) => new()
     {
         MinLimit = min,
         MaxLimit = max,
-        LabelsPaint = new SolidColorPaint(Gray),
+        LabelsPaint = new SolidColorPaint(Gray) { SKTypeface = UiTypeface },
         SeparatorsPaint = new SolidColorPaint(Gray.WithAlpha(50)),
         TextSize = 12,
     };
+
+    /// <summary>항목(서비스·레벨) 축: 이름이 하나도 빠지지 않게 1칸 단위로 표시.</summary>
+    private static Axis CategoryAxis()
+    {
+        var axis = NeutralAxis();
+        axis.MinStep = 1;
+        axis.ForceStepToMin = true;
+        return axis;
+    }
+
+    /// <summary>건수 축: 큰 수는 1.2k 처럼 줄여 겹치지 않게.</summary>
+    private static Axis CountAxis()
+    {
+        var axis = NeutralAxis(min: 0);
+        axis.Labeler = v => v >= 1000 ? $"{v / 1000:0.#}k" : $"{v:0}";
+        return axis;
+    }
 }
