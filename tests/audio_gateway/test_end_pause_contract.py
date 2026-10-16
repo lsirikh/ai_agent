@@ -13,7 +13,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 # 다른 audio_gateway 테스트와 같은 방식으로 서비스 패키지(app)를 불러온다
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../services/audio_gateway"))
+sys.path.insert(
+    0, os.path.join(os.path.dirname(__file__), "../../services/audio_gateway")
+)
 
 
 @pytest.mark.asyncio
