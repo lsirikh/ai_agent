@@ -16,8 +16,13 @@ from .pipeline_logger import get_logger
 from .queue_manager import SentenceQueueManager
 from .state_machine import OrchestratorStateMachine, State
 
+# 한국어 TTS 가 읽을 수 없는 한자(중국어).
+# Qwen 이 답 중간에 중국어로 넘어가는 경우가 있다.
+HAN_CHARACTER_PATTERN = re.compile(r"[㐀-䶿一-鿿]")
+
 DEFAULT_VOICE_SYSTEM_PROMPT = (
-    "당신은 EdgeVoice 음성 비서입니다. 항상 한국어로 답하세요. "
+    "당신은 EdgeVoice 음성 비서입니다. 항상 한국어로만 답하고 "
+    "중국어·한자·일본어는 절대 쓰지 마세요. "
     "답은 소리 내어 읽기 좋게 2~3문장으로 짧고 자연스럽게 말하고, "
     "목록 기호·마크다운·이모지는 쓰지 마세요."
 )
@@ -406,7 +411,7 @@ class Orchestrator:
                         first_sentence_sent = True
 
                     # TTS 요청 발행
-                    await self.publish_tts_request(sentence)
+                    await self._speak(sentence)
 
             # 남은 버퍼 처리
             remaining = self.queue_manager.flush()
@@ -414,7 +419,7 @@ class Orchestrator:
                 if not first_sentence_sent:
                     if self.state_machine.current_state in (State.LLM_PROCESSING, State.PROCESSING):
                         self.state_machine.transition_to(State.TTS_PROCESSING)
-                await self.publish_tts_request(remaining)
+                await self._speak(remaining)
 
             # 어시스턴트 응답을 컨텍스트에 추가
             if hasattr(self.llm_client, 'add_to_context') and full_response:
@@ -455,6 +460,17 @@ class Orchestrator:
             )
             # 에러 시 IDLE로 복귀
             self.state_machine.reset()
+
+    async def _speak(self, sentence: str) -> None:
+        """한국어로 읽을 수 있는 문장만 TTS 로 보낸다(한자가 섞인 문장은 건너뛴다)."""
+        if HAN_CHARACTER_PATTERN.search(sentence):
+            await self._logger.log(
+                event="tts_sentence_skipped",
+                session_id=self._current_session_id,
+                data={"message": f"Skipped non-Korean sentence: {sentence[:50]}"},
+            )
+            return
+        await self.publish_tts_request(sentence)
 
     async def publish_tts_request(self, text: str) -> None:
         """
