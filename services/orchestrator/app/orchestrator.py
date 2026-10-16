@@ -69,6 +69,9 @@ class Orchestrator:
     # 듣기 상태에서 발화·end_pause·STT 처리를 기다리는 여유 시간
     UTTERANCE_GRACE_SECONDS = 30.0
 
+    # 마지막 TTS 요청 후 완료 신호를 기다리는 최대 시간
+    TTS_COMPLETE_TIMEOUT_SECONDS = 60.0
+
     def __init__(
         self,
         llm_client: Optional[LLMClient] = None,
@@ -116,6 +119,10 @@ class Orchestrator:
 
         # 내부 상태
         self._listening_task: Optional[asyncio.Task] = None
+
+        # 이번 턴에 보냈지만 아직 완료되지 않은 TTS 문장 수
+        self._pending_tts = 0
+        self._tts_watchdog: Optional[asyncio.Task] = None
         self._processing_task: Optional[asyncio.Task] = None
         self._is_running = False
 
@@ -291,8 +298,9 @@ class Orchestrator:
         if self._processing_task and not self._processing_task.done():
             self._processing_task.cancel()
 
-        # 큐 클리어
+        # 큐 클리어 (남은 문장의 완료는 더 기다리지 않는다)
         self.queue_manager.clear_on_barge_in()
+        self._pending_tts = 0
 
         # 상태 전이
         return self.state_machine.handle_barge_in()
@@ -313,11 +321,34 @@ class Orchestrator:
         Returns:
             처리 성공 여부
         """
-        # Phase 32: SPEAKING은 TTS_PROCESSING의 별칭
+        # TTS 는 문장마다 완료를 알린다 → 마지막 문장이 끝날 때 READY
         if self.state_machine.current_state in (State.SPEAKING, State.TTS_PROCESSING):
-            # Phase 32: IDLE은 READY의 별칭
+            self._pending_tts = max(0, self._pending_tts - 1)
+            if self._pending_tts == 0:
+                return self._finish_turn()
+        return False
+
+    def _finish_turn(self) -> bool:
+        """한 턴을 끝내고 READY 로 돌아간다(진행 중 상태가 아니면 그대로 둔다)."""
+        self._pending_tts = 0
+        if self._tts_watchdog and not self._tts_watchdog.done():
+            self._tts_watchdog.cancel()
+        if self.state_machine.current_state in (
+            State.STT_PROCESSING, State.LLM_PROCESSING, State.TTS_PROCESSING, State.SPEAKING
+        ):
             return self.state_machine.transition_to(State.READY)
         return False
+
+    def _start_tts_watchdog(self) -> None:
+        """TTS 완료 신호가 끝내 오지 않아도 비서가 멈추지 않도록 READY 로 되돌린다."""
+        if self._tts_watchdog and not self._tts_watchdog.done():
+            self._tts_watchdog.cancel()
+
+        async def watchdog() -> None:
+            await asyncio.sleep(self.TTS_COMPLETE_TIMEOUT_SECONDS)
+            self._finish_turn()
+
+        self._tts_watchdog = asyncio.create_task(watchdog())
 
     async def process_user_input(self, text: str) -> None:
         """
@@ -390,9 +421,12 @@ class Orchestrator:
                 self.llm_client.add_to_context("user", text)
                 self.llm_client.add_to_context("assistant", full_response)
 
-            # Phase 32: 모든 처리 완료 후 READY로 전이
-            if self.state_machine.current_state in (State.TTS_PROCESSING, State.SPEAKING):
-                self.state_machine.transition_to(State.READY)
+            # TTS 가 아직 말하는 중이면 마지막 문장의 tts:complete 에서 READY 로 간다.
+            # 보낸 문장이 없으면(빈 응답) 바로 READY.
+            if self._pending_tts <= 0:
+                self._finish_turn()
+            else:
+                self._start_tts_watchdog()
 
             llm_duration = int((time.time() - llm_start_time) * 1000)
             await self._logger.log(
@@ -438,6 +472,8 @@ class Orchestrator:
                 "voice": self._tts_voice
             }
         )
+
+        self._pending_tts += 1
 
         if self.redis:
             message = json.dumps({
