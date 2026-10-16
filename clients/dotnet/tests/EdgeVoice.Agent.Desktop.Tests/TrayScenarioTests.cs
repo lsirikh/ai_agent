@@ -64,6 +64,7 @@ public class TrayScenarioTests
     [InlineData(VoiceState.Speaking, "말하는 중")]
     [InlineData(VoiceState.Thinking, "생각 중")]
     [InlineData(VoiceState.Error, "오류")]
-    [InlineData(VoiceState.Idle, "대기")]
+    // 마이크가 상시 켜져 있으므로 대기 툴팁은 깨우는 말을 안내한다
+    [InlineData(VoiceState.Idle, "\"Hey Jarvis\" 대기")]
     public void 상태_문구(VoiceState state, string text) => Assert.Equal(text, TrayController.StateText(state));
 }
