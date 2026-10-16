@@ -1,0 +1,396 @@
+# ============================================
+# EdgeVoice Jetson Deployment Environment
+# Phase 7.2: Jetson Nano/Orin 배포용 Compose
+# ============================================
+#
+# 지원 장치:
+# - Jetson Orin Nano (8GB)
+# - Jetson Orin NX (16GB)
+# - Jetson AGX Orin (32GB/64GB)
+#
+# 사용법:
+# docker-compose -f docker-compose.jetson.yml up -d
+# ============================================
+version: '3.8'
+
+services:
+  # --- STT Service (Faster-Whisper Small) ---
+  stt:
+    build:
+      context: ./services/stt
+      dockerfile: Dockerfile.jetson
+    image: edgevoice/stt:jetson
+    container_name: ev-stt-jetson
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - MODEL_SIZE=small
+      - DEVICE=cuda
+      - COMPUTE_TYPE=int8
+      - LOG_LEVEL=INFO
+    volumes:
+      - ${MODEL_CACHE_PATH:-./models}/stt:/models
+      - ./logs/stt:/app/logs
+    ports:
+      - "11001:11001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - edgevoice-jetson
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # --- LLM Service (Qwen 7B Q4) ---
+  llm:
+    build:
+      context: ./services/llm
+      dockerfile: Dockerfile.jetson
+    image: edgevoice/llm:jetson
+    container_name: ev-llm-jetson
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - MODEL_NAME=Qwen/Qwen2.5-7B-Instruct-GPTQ-Int4
+      - TENSOR_PARALLEL_SIZE=1
+      - GPU_MEMORY_UTILIZATION=0.8
+      - MAX_MODEL_LEN=2048
+      - DEVICE=cuda
+      - LOG_LEVEL=INFO
+    volumes:
+      - ${MODEL_CACHE_PATH:-./models}/llm:/root/.cache/huggingface
+      - ./logs/llm:/app/logs
+    ports:
+      - "11003:11003"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+    networks:
+      - edgevoice-jetson
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # --- TTS Service (Kokoro) ---
+  tts:
+    build:
+      context: ./services/tts
+      dockerfile: Dockerfile.jetson
+    image: edgevoice/tts:jetson
+    container_name: ev-tts-jetson
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - MODEL_PATH=/models/kokoro
+      - DEVICE=cuda
+      - LOG_LEVEL=INFO
+    volumes:
+      - ${MODEL_CACHE_PATH:-./models}/tts/kokoro:/models
+      - ./logs/tts:/app/logs
+    ports:
+      - "11002:11002"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - edgevoice-jetson
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # --- Embedding Service (BGE-Small) ---
+  embedding:
+    build:
+      context: ./services/embedding
+      dockerfile: Dockerfile.jetson
+    image: edgevoice/embedding:jetson
+    container_name: ev-embedding-jetson
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - MODEL_NAME=BAAI/bge-small-en-v1.5
+      - DEVICE=cuda
+      - LOG_LEVEL=INFO
+    volumes:
+      - ${MODEL_CACHE_PATH:-./models}/embedding:/models
+      - ./logs/embedding:/app/logs
+    ports:
+      - "11004:11004"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - edgevoice-jetson
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # --- Wake Word Service (OpenWakeWord) ---
+  wake-word:
+    build:
+      context: ./services/wake_word
+      dockerfile: Dockerfile.jetson
+    image: edgevoice/wake-word:jetson
+    container_name: ev-wake-word-jetson
+    environment:
+      - MODEL_PATH=/models/openwakeword
+      - THRESHOLD=0.5
+      - LOG_LEVEL=INFO
+    volumes:
+      - ${MODEL_CACHE_PATH:-./models}/wake_word:/models
+      - ./logs/wake_word:/app/logs
+    ports:
+      - "11005:11005"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - edgevoice-jetson
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # --- RAG Service ---
+  rag:
+    build:
+      context: ./services/rag
+      dockerfile: Dockerfile.jetson
+    image: edgevoice/rag:jetson
+    container_name: ev-rag-jetson
+    environment:
+      - EMBEDDING_SERVICE_URL=http://embedding:11004
+      - VECTOR_DB_PATH=/data/vectordb
+      - LOG_LEVEL=INFO
+    volumes:
+      - vectordb-data:/data/vectordb
+      - ./logs/rag:/app/logs
+    ports:
+      - "11006:11006"
+    depends_on:
+      embedding:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - edgevoice-jetson
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  # --- Orchestrator Service ---
+  orchestrator:
+    build:
+      context: ./services/orchestrator
+      dockerfile: Dockerfile.jetson
+    image: edgevoice/orchestrator:jetson
+    container_name: ev-orchestrator-jetson
+    environment:
+      - STT_SERVICE_URL=http://stt:11001
+      - LLM_SERVICE_URL=http://llm:11003
+      - TTS_SERVICE_URL=http://tts:11002
+      - RAG_SERVICE_URL=http://rag:11006
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./logs/orchestrator:/app/logs
+    ports:
+      - "11007:11007"
+    depends_on:
+      stt:
+        condition: service_healthy
+      llm:
+        condition: service_healthy
+      tts:
+        condition: service_healthy
+      rag:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11007/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - edgevoice-jetson
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # --- Audio Gateway Service ---
+  audio-gateway:
+    build:
+      context: ./services/audio_gateway
+      dockerfile: Dockerfile.jetson
+    image: edgevoice/audio-gateway:jetson
+    container_name: ev-audio-gateway-jetson
+    environment:
+      - WAKE_WORD_SERVICE_URL=http://wake-word:11005
+      - ORCHESTRATOR_URL=http://orchestrator:11007
+      - VAD_THRESHOLD=0.5
+      - LOG_LEVEL=INFO
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # Phase 37: Internal Microphone Settings (enabled by default on Jetson)
+      - USE_INTERNAL_MICROPHONE=${USE_INTERNAL_MICROPHONE:-true}
+      - AUDIO_INPUT_DEVICE=${AUDIO_INPUT_DEVICE:-hw:1,0}
+      - AUDIO_OUTPUT_DEVICE=${AUDIO_OUTPUT_DEVICE:-hw:0,0}
+      - AUDIO_SAMPLE_RATE=${AUDIO_SAMPLE_RATE:-16000}
+      - AUDIO_CHUNK_SIZE=${AUDIO_CHUNK_SIZE:-1600}
+    volumes:
+      - ./logs/audio_gateway:/app/logs
+    # Phase 37: Audio device access
+    devices:
+      - /dev/snd:/dev/snd
+    group_add:
+      - audio
+    ports:
+      - "11008:11008"
+    depends_on:
+      wake-word:
+        condition: service_healthy
+      orchestrator:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11008/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - edgevoice-jetson
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # --- Backend API Service ---
+  backend:
+    build:
+      context: ./services/backend
+      dockerfile: Dockerfile.jetson
+    image: edgevoice/backend:jetson
+    container_name: ev-backend-jetson
+    environment:
+      - DATABASE_URL=sqlite:///data/edgevoice.db
+      - REDIS_URL=redis://redis:6379
+      - ORCHESTRATOR_URL=http://orchestrator:11007
+      - RAG_SERVICE_URL=http://rag:11006
+      - LOG_LEVEL=INFO
+    volumes:
+      - backend-data:/data
+      - ./logs/backend:/app/logs
+      - ./services/backend/static:/app/static
+    ports:
+      - "11000:11000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      orchestrator:
+        condition: service_healthy
+      rag:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11000/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - edgevoice-jetson
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # --- Redis (Pub/Sub & Cache) ---
+  redis:
+    image: redis:7-alpine
+    container_name: ev-redis-jetson
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - edgevoice-jetson
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+networks:
+  edgevoice-jetson:
+    driver: bridge
+    name: edgevoice-jetson-network
+
+volumes:
+  redis-data:
+    name: edgevoice-jetson-redis-data
+  vectordb-data:
+    name: edgevoice-jetson-vectordb-data
+  backend-data:
+    name: edgevoice-jetson-backend-data

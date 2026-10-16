@@ -1,0 +1,16 @@
+{
+  "name": "edgevoice-tests",
+  "version": "1.0.0",
+  "description": "EdgeVoice E2E Testing with Playwright",
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:debug": "playwright test --debug"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}

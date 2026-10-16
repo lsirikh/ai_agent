@@ -1,0 +1,442 @@
+# ============================================
+# EdgeVoice Development Environment
+# Phase 7.1: Complete Docker Compose for Dev
+# ============================================
+
+services:
+  # --- STT Service (Faster-Whisper) ---
+  stt:
+    build:
+      context: ./services/stt
+      dockerfile: Dockerfile
+    image: edgevoice/stt:dev
+    container_name: ev-stt
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - MODEL_SIZE=small
+      - STT_ENVIRONMENT=cpu
+      - DEVICE=cpu
+      - COMPUTE_TYPE=int8
+      - LOG_LEVEL=INFO
+      # Pipeline Logging (Phase 17.1)
+      - BACKEND_URL=http://backend:8000
+      - PIPELINE_LOGGING_ENABLED=true
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    volumes:
+      - ${MODEL_CACHE_PATH:-./models}/stt:/models
+      - ./logs/stt:/app/logs
+      # Phase 31: shared module for pipeline logging
+      - ./shared:/app/shared:ro
+    ports:
+      - "11001:8001"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - edgevoice-net
+    restart: unless-stopped
+
+  # --- LLM Service (vLLM) ---
+  llm:
+    image: vllm/vllm-openai:latest
+    container_name: ev-llm
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HF_TOKEN=${HF_TOKEN:-}
+      - MODEL_NAME=Qwen/Qwen2.5-7B-Instruct-AWQ
+      - TENSOR_PARALLEL_SIZE=1
+      - GPU_MEMORY_UTILIZATION=0.9
+      - DEVICE=cuda
+    volumes:
+      - ${MODEL_CACHE_PATH:-./models}/llm:/root/.cache/huggingface
+      - ./logs/llm:/app/logs
+    ports:
+      - "11003:11003"
+    command: >
+      --model ${LLM_MODEL:-Qwen/Qwen2.5-14B-Instruct-AWQ}
+      --dtype auto
+      --max-model-len 4096
+      --gpu-memory-utilization 0.7
+      --trust-remote-code
+      --port 11003
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    networks:
+      - edgevoice-net
+    restart: unless-stopped
+
+  # --- TTS Service (Kokoro) ---
+  tts:
+    build:
+      context: ./services/tts
+      dockerfile: Dockerfile
+    image: edgevoice/tts:dev
+    container_name: ev-tts
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - MODEL_PATH=/models/kokoro
+      - DEVICE=cuda
+      - LOG_LEVEL=INFO
+      # Redis 설정 (Phase 8.6)
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_ENABLED=true
+      # Pipeline Logging (Phase 27.7)
+      - BACKEND_URL=http://backend:8000
+      - PIPELINE_LOGGING_ENABLED=true
+    volumes:
+      - ${MODEL_CACHE_PATH:-./models}/tts/kokoro:/models
+      - ./logs/tts:/app/logs
+      # Phase 31: shared module for pipeline logging
+      - ./shared:/app/shared:ro
+    ports:
+      - "11002:8002"
+    depends_on:
+      - redis
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - edgevoice-net
+    restart: unless-stopped
+
+  # --- Embedding Service (BGE-M3) ---
+  embedding:
+    build:
+      context: ./services/embedding
+      dockerfile: Dockerfile
+    image: edgevoice/embedding:dev
+    container_name: ev-embedding
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - MODEL_NAME=BAAI/bge-m3
+      - DEVICE=cuda
+      - LOG_LEVEL=INFO
+    volumes:
+      - ${MODEL_CACHE_PATH:-./models}/embedding:/models
+      - ./logs/embedding:/app/logs
+    ports:
+      - "11004:8004"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - edgevoice-net
+    restart: unless-stopped
+
+  # --- Wake Word Service (OpenWakeWord) ---
+  wake-word:
+    build:
+      context: ./services/wake_word
+      dockerfile: Dockerfile
+    image: edgevoice/wake-word:dev
+    container_name: ev-wake-word
+    environment:
+      - MODEL_PATH=/models/openwakeword
+      - THRESHOLD=0.3
+      - WAKE_WORD_THRESHOLD=0.3
+      - LOG_LEVEL=INFO
+      # Pipeline Logging (Phase 17.1)
+      - BACKEND_URL=http://backend:8000
+      - PIPELINE_LOGGING_ENABLED=true
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    volumes:
+      - ${MODEL_CACHE_PATH:-./models}/wake_word:/models
+      - ./logs/wake_word:/app/logs
+      # Phase 31: shared module for pipeline logging
+      - ./shared:/app/shared:ro
+    ports:
+      - "11005:8005"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8005/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - edgevoice-net
+    restart: unless-stopped
+
+  # --- RAG Service ---
+  rag:
+    build:
+      context: ./services/rag
+      dockerfile: Dockerfile
+    image: edgevoice/rag:dev
+    container_name: ev-rag
+    environment:
+      - EMBEDDING_SERVICE_URL=http://embedding:8004
+      - DATABASE_URL=postgresql://edgevoice:edgevoice@postgres:5432/edgevoice
+      - VECTOR_DB_PATH=/data/vectordb
+      - LOG_LEVEL=INFO
+    volumes:
+      - vectordb-data:/data/vectordb
+      - ./logs/rag:/app/logs
+    ports:
+      - "11006:8006"
+    depends_on:
+      embedding:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8006/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - edgevoice-net
+    restart: unless-stopped
+
+  # --- Orchestrator Service ---
+  orchestrator:
+    build:
+      context: ./services/orchestrator
+      dockerfile: Dockerfile
+    image: edgevoice/orchestrator:dev
+    container_name: ev-orchestrator
+    environment:
+      - STT_SERVICE_URL=http://stt:8001
+      - LLM_SERVICE_URL=http://llm:11003
+      - TTS_SERVICE_URL=http://tts:8002
+      - RAG_SERVICE_URL=http://rag:8006
+      # Phase 52: VLLM_BASE_URL for llm_client.py
+      - VLLM_BASE_URL=http://llm:11003
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - LOG_LEVEL=INFO
+      # Pipeline Logging (Phase 27.6 - LLM proxy logging)
+      - BACKEND_URL=http://backend:8000
+      - PIPELINE_LOGGING_ENABLED=true
+    volumes:
+      - ./logs/orchestrator:/app/logs
+      # Phase 31: shared module for pipeline logging
+      - ./shared:/app/shared:ro
+    ports:
+      - "11007:8007"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8007/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - edgevoice-net
+    restart: unless-stopped
+
+  # --- Audio Gateway Service ---
+  audio-gateway:
+    build:
+      context: ./services/audio_gateway
+      dockerfile: Dockerfile
+    image: edgevoice/audio-gateway:dev
+    container_name: ev-audio-gateway
+    environment:
+      - WAKE_WORD_SERVICE_URL=http://wake-word:8005
+      - ORCHESTRATOR_URL=http://orchestrator:8007
+      - STT_URL=http://stt:8001
+      - VAD_THRESHOLD=0.5
+      - LOG_LEVEL=INFO
+      # Redis 설정
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # Pipeline Logging (Phase 17.1)
+      - BACKEND_URL=http://backend:8000
+      - PIPELINE_LOGGING_ENABLED=true
+      # Phase 37: Internal Microphone Settings
+      - USE_INTERNAL_MICROPHONE=${USE_INTERNAL_MICROPHONE:-false}
+      - AUDIO_INPUT_DEVICE=${AUDIO_INPUT_DEVICE:-default}
+      - AUDIO_OUTPUT_DEVICE=${AUDIO_OUTPUT_DEVICE:-default}
+      - AUDIO_SAMPLE_RATE=${AUDIO_SAMPLE_RATE:-16000}
+      - AUDIO_CHUNK_SIZE=${AUDIO_CHUNK_SIZE:-1600}
+    volumes:
+      - ./logs/audio_gateway:/app/logs
+      # Phase 31: shared module for pipeline logging
+      - ./shared:/app/shared:ro
+    # Phase 37: Audio device access (Linux only)
+    # On Linux with microphone: uncomment below and set USE_INTERNAL_MICROPHONE=true
+    # devices:
+    #   - /dev/snd:/dev/snd
+    # group_add:
+    #   - audio
+    ports:
+      - "11008:8008"
+    depends_on:
+      redis:
+        condition: service_healthy
+      wake-word:
+        condition: service_healthy
+      orchestrator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8008/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - edgevoice-net
+    restart: unless-stopped
+
+  # --- Backend API Service ---
+  backend:
+    build:
+      context: ./services/backend
+      dockerfile: Dockerfile
+    image: edgevoice/backend:dev
+    container_name: ev-backend
+    environment:
+      # Database Configuration
+      - DATABASE_URL=postgresql://edgevoice:edgevoice@postgres:5432/edgevoice
+      # Redis Configuration
+      - REDIS_URL=redis://redis:6379
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # Service URLs
+      - ORCHESTRATOR_URL=http://orchestrator:8007
+      - RAG_SERVICE_URL=http://rag:8006
+      - VLLM_BASE_URL=http://llm:11003
+      - TTS_SERVICE_URL=http://tts:8002
+      - STT_SERVICE_URL=http://stt:8001
+      - WAKE_WORD_SERVICE_URL=http://wake-word:8005
+      - EMBEDDING_SERVICE_URL=http://embedding:8004
+      # Phase 25.4: Audio Gateway URL (설정 전파용)
+      - AUDIO_GATEWAY_URL=http://audio-gateway:8008
+      - AUDIO_GATEWAY_SERVICE_URL=http://audio-gateway:8008
+      # Feature Flags
+      - RAG_ENABLED=true
+      - HISTORY_ENABLED=true
+      - LOG_LEVEL=INFO
+      # Phase 16: Settings-Env Sync
+      - ENV_FILE_PATH=/app/.env
+    volumes:
+      - backend-data:/data
+      - ./logs/backend:/app/logs
+      - ./services/backend/static:/app/static
+      # Phase 16: .env 파일 마운트 (Settings-Env 동기화)
+      - ./.env:/app/.env:rw
+      # Phase 35: Docker socket 마운트 (LLM 로딩 모니터용)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "11000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - edgevoice-net
+    restart: unless-stopped
+
+  # --- PostgreSQL Database ---
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: ev-postgres
+    environment:
+      - POSTGRES_USER=edgevoice
+      - POSTGRES_PASSWORD=edgevoice
+      - POSTGRES_DB=edgevoice
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./config/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    ports:
+      - "25432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edgevoice -d edgevoice"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - edgevoice-net
+    restart: unless-stopped
+
+  # --- Redis (Pub/Sub & Cache) ---
+  redis:
+    image: redis:7-alpine
+    container_name: ev-redis
+    ports:
+      - "26379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - edgevoice-net
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+networks:
+  edgevoice-net:
+    driver: bridge
+    name: edgevoice-network
+
+volumes:
+  postgres-data:
+    name: edgevoice-postgres-data
+  redis-data:
+    name: edgevoice-redis-data
+  vectordb-data:
+    name: edgevoice-vectordb-data
+  backend-data:
+    name: edgevoice-backend-data

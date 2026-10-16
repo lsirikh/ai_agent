@@ -1,0 +1,322 @@
+"""
+Backend API - Chat Router
+
+Phase 9.1: 채팅 API 라우터
+Phase 11.1: ChatService + LLMClient 연동
+Phase 11.2: RAGService 연동
+Phase 11.3: PersistentHistoryStore 연동
+Phase 15.5: LLM Context Settings 통합
+Phase 18.4: Chat SSE 스트림 (음성/텍스트 채널 통합)
+"""
+import asyncio
+import json
+import os
+import time
+import uuid
+from typing import Optional
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+from ..services.chat_service import ChatService
+from .settings import _llm_context_settings
+
+
+router = APIRouter(prefix="/api/chat", tags=["chat"])
+
+
+# 서비스 인스턴스 지연 로딩 (optional dependencies)
+# None: 초기화 안됨
+_llm_client = None
+_rag_service = None
+_history_store = None
+_chat_service = None
+
+
+def reset_services():
+    """서비스 인스턴스 리셋 (테스트용)"""
+    global _llm_client, _rag_service, _history_store, _chat_service
+    _llm_client = None
+    _rag_service = None
+    _history_store = None
+    _chat_service = None
+
+
+def get_llm_client():
+    """LLMClient 인스턴스 반환 (지연 로딩)"""
+    global _llm_client
+    if _llm_client is None:
+        try:
+            # Backend용 SimpleLLMClient 사용 (HTTP 기반)
+            from ..services.llm_client import SimpleLLMClient
+
+            vllm_url = os.getenv("VLLM_BASE_URL", "http://ev-llm:11003")
+
+            _llm_client = SimpleLLMClient(
+                base_url=vllm_url,
+                system_prompt="당신은 EdgeVoice AI 어시스턴트입니다. 사용자의 질문에 친절하고 정확하게 한국어로만 답변해주세요."
+            )
+        except Exception:
+            pass
+    return _llm_client
+
+
+def get_rag_service():
+    """RAGService 인스턴스 반환 (지연 로딩)"""
+    global _rag_service
+    if _rag_service is None:
+        try:
+            # Backend용 SimpleRAGClient 사용 (HTTP 기반)
+            from ..services.rag_client import SimpleRAGClient
+
+            # 환경변수에서 RAG 서비스 활성화 여부 확인
+            rag_enabled = os.getenv("RAG_ENABLED", "true").lower() == "true"
+
+            if rag_enabled:
+                _rag_service = SimpleRAGClient()
+        except Exception:
+            pass
+    return _rag_service
+
+
+async def get_history_store():
+    """PersistentHistoryStore 인스턴스 반환 (지연 로딩 + 연결)
+
+    Phase 17: connect() 호출 추가하여 DB 연결 보장
+    """
+    global _history_store
+    if _history_store is None:
+        try:
+            from ..services.persistent_history import PersistentHistoryStore
+
+            # 환경변수에서 데이터베이스 URL 가져오기
+            database_url = os.getenv(
+                "DATABASE_URL",
+                "postgresql://edgevoice:edgevoice@localhost:5432/edgevoice"
+            )
+
+            # History 저장 활성화 여부 확인
+            history_enabled = os.getenv("HISTORY_ENABLED", "true").lower() == "true"
+
+            if history_enabled:
+                _history_store = PersistentHistoryStore(database_url=database_url)
+                # Phase 17: DB 연결 수행
+                await _history_store.connect()
+        except ImportError:
+            # PersistentHistoryStore를 import할 수 없으면 None
+            pass
+        except Exception as e:
+            # 기타 오류 시 None (연결 실패 포함)
+            print(f"[Chat] History store connection failed: {e}")
+            _history_store = None
+    return _history_store
+
+
+async def get_chat_service():
+    """ChatService 인스턴스 반환 (지연 로딩)
+
+    Phase 15.5: LLM context settings를 로드하여 ChatService에 전달
+    Phase 17: async로 변경하여 history_store 연결 보장
+    - context_enabled: 대화 컨텍스트 사용 여부
+    - context_window_size: Sliding Window 크기 (최근 N개 메시지)
+    """
+    global _chat_service
+    if _chat_service is None:
+        llm_client = get_llm_client()
+        rag_service = get_rag_service()
+        history_store = await get_history_store()  # Phase 17: await 추가
+
+        # LLM context settings 로드
+        context_enabled = _llm_context_settings.context_enabled
+        context_window_size = _llm_context_settings.context_window_size
+
+        _chat_service = ChatService(
+            llm_client=llm_client,
+            rag_service=rag_service,
+            history_store=history_store,
+            context_enabled=context_enabled,
+            context_window_size=context_window_size
+        )
+    else:
+        # 이미 생성된 ChatService의 설정 업데이트 (동적 설정 반영)
+        _chat_service.update_context_settings(
+            context_enabled=_llm_context_settings.context_enabled,
+            context_window_size=_llm_context_settings.context_window_size
+        )
+    return _chat_service
+
+
+class ChatRequest(BaseModel):
+    """채팅 요청 모델"""
+    session_id: Optional[str] = None
+    message: str
+    use_rag: bool = True
+
+
+class ChatEvent(BaseModel):
+    """채팅 이벤트 모델"""
+    type: str  # "token" | "complete" | "rag_context" | "error"
+    content: str
+    session_id: str
+    sources: list = []
+
+
+@router.post("/message")
+async def send_message(request: ChatRequest):
+    """
+    채팅 메시지 전송 (SSE 스트리밍)
+
+    Args:
+        request: 채팅 요청
+
+    Returns:
+        SSE 스트리밍 응답
+    """
+    session_id = request.session_id or str(uuid.uuid4())
+
+    # Phase 17: ChatService를 미리 await로 가져옴
+    chat_service = await get_chat_service()
+
+    async def generate_response():
+        """응답 스트리밍 생성기"""
+        try:
+            async for event in chat_service.process_message(
+                session_id=session_id,
+                message=request.message,
+                use_rag=request.use_rag
+            ):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            # 에러 발생 시 에러 이벤트 발행
+            error_event = {
+                "type": "error",
+                "content": str(e),
+                "session_id": session_id,
+                "sources": []
+            }
+            yield f"data: {json.dumps(error_event, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        generate_response(),
+        media_type="text/event-stream"
+    )
+
+
+@router.websocket("/ws/{session_id}")
+async def websocket_chat(websocket: WebSocket, session_id: str):
+    """
+    WebSocket 채팅 엔드포인트
+
+    Args:
+        websocket: WebSocket 연결
+        session_id: 세션 ID
+    """
+    await websocket.accept()
+    # Phase 17: await 추가
+    chat_service = await get_chat_service()
+
+    try:
+        while True:
+            data = await websocket.receive_json()
+
+            if data.get("type") == "message":
+                content = data.get("content", "")
+                use_rag = data.get("use_rag", True)
+
+                try:
+                    async for event in chat_service.process_message(
+                        session_id=session_id,
+                        message=content,
+                        use_rag=use_rag
+                    ):
+                        await websocket.send_json(event)
+
+                except Exception as e:
+                    await websocket.send_json({
+                        "type": "error",
+                        "content": str(e),
+                        "session_id": session_id,
+                        "sources": []
+                    })
+
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+
+
+# ===== Phase 18.4: Chat SSE 스트림 =====
+
+@router.get("/stream")
+async def stream_chat(session_id: str):
+    """
+    세션별 채팅 메시지 SSE 스트림
+
+    클라이언트가 이 엔드포인트에 연결하면 해당 세션의 메시지를
+    실시간으로 수신할 수 있습니다. 음성/텍스트 채널 통합을 위해
+    pipeline에서 생성된 메시지도 이 스트림을 통해 전달됩니다.
+
+    이벤트 타입:
+    - init: 초기 연결 + 최근 히스토리
+    - message: 새 메시지 도착
+    - heartbeat: 연결 유지용 (30초마다)
+
+    Args:
+        session_id: 세션 ID
+
+    Returns:
+        StreamingResponse (text/event-stream)
+    """
+
+    async def event_generator():
+        """SSE 이벤트 생성기"""
+        try:
+            # 1. 초기 연결 이벤트 (히스토리 포함)
+            history_store = await get_history_store()
+            messages = []
+
+            if history_store:
+                try:
+                    messages = await history_store.get_messages(
+                        session_id=session_id,
+                        limit=50
+                    )
+                except Exception:
+                    messages = []
+
+            init_data = {
+                "session_id": session_id,
+                "messages": messages,
+                "timestamp": time.time()
+            }
+            yield f"event: init\ndata: {json.dumps(init_data, ensure_ascii=False)}\n\n"
+
+            # 2. 주기적으로 새 메시지 확인 및 heartbeat
+            update_count = 0
+            while True:
+                await asyncio.sleep(1)
+                update_count += 1
+
+                # 30초마다 heartbeat
+                if update_count % 30 == 0:
+                    yield f"event: heartbeat\ndata: {json.dumps({'timestamp': time.time()})}\n\n"
+
+                # TODO: Redis Pub/Sub으로 새 메시지 수신 구현
+
+        except asyncio.CancelledError:
+            # 클라이언트 연결 종료
+            pass
+        except Exception as e:
+            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )

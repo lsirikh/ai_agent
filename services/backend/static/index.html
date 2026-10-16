@@ -1,0 +1,2788 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EdgeVoice Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #e4e4e7;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 0;
+            border-bottom: 1px solid #3f3f46;
+            margin-bottom: 30px;
+        }
+
+        .logo {
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: #60a5fa;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: #22c55e20;
+            border: 1px solid #22c55e;
+            border-radius: 20px;
+            font-size: 0.9rem;
+        }
+
+        .status-badge.offline {
+            background: #ef444420;
+            border-color: #ef4444;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #22c55e;
+            animation: pulse 2s infinite;
+        }
+
+        .status-badge.offline .status-dot {
+            background: #ef4444;
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: #27272a;
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid #3f3f46;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #a1a1aa;
+        }
+
+        .card-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+        }
+
+        .card-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .card-subtitle {
+            font-size: 0.85rem;
+            color: #71717a;
+        }
+
+        .services-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+        }
+
+        .service-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px;
+            background: #18181b;
+            border-radius: 8px;
+            border: 1px solid #3f3f46;
+        }
+
+        .service-status {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .service-status.online { background: #22c55e; }
+        .service-status.offline { background: #ef4444; }
+        .service-status.unknown { background: #f59e0b; }
+
+        .service-info {
+            flex: 1;
+        }
+
+        .service-name {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .service-latency {
+            font-size: 0.8rem;
+            color: #71717a;
+        }
+
+        /* Phase 34: LLM Loading Progress Bar */
+        .llm-progress-container {
+            display: none;
+            margin-top: 8px;
+            background: #3f3f46;
+            border-radius: 4px;
+            height: 6px;
+            overflow: hidden;
+        }
+
+        .llm-progress-container.visible {
+            display: block;
+        }
+
+        .llm-progress-bar {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s ease-out;
+            background: linear-gradient(90deg, #3b82f6, #60a5fa);
+        }
+
+        .llm-progress-bar.initializing {
+            background: linear-gradient(90deg, #6b7280, #9ca3af);
+        }
+
+        .llm-progress-bar.loading_weights {
+            background: linear-gradient(90deg, #3b82f6, #60a5fa);
+        }
+
+        .llm-progress-bar.estimated {
+            background: linear-gradient(90deg, #f59e0b, #fbbf24);
+        }
+
+        .llm-progress-bar.complete {
+            background: linear-gradient(90deg, #22c55e, #4ade80);
+        }
+
+        .llm-progress-text {
+            font-size: 0.75rem;
+            color: #a1a1aa;
+            margin-top: 4px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .llm-progress-text .percent {
+            font-weight: 600;
+            color: #60a5fa;
+        }
+
+        .llm-progress-text .elapsed {
+            color: #71717a;
+        }
+
+        /* Loading status indicator */
+        .service-status.loading {
+            background: #f59e0b;
+            animation: pulse 1.5s infinite;
+        }
+
+        .chat-section {
+            background: #27272a;
+            border-radius: 12px;
+            border: 1px solid #3f3f46;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            padding: 16px 24px;
+            border-bottom: 1px solid #3f3f46;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .chat-messages {
+            height: 400px;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .message {
+            margin-bottom: 16px;
+            display: flex;
+            gap: 12px;
+        }
+
+        .message.user {
+            flex-direction: row-reverse;
+        }
+
+        .message-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: #3f3f46;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .message.user .message-avatar {
+            background: #3b82f6;
+        }
+
+        .message-content {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            background: #3f3f46;
+        }
+
+        .message.user .message-content {
+            background: #3b82f6;
+        }
+
+        .chat-input {
+            display: flex;
+            gap: 12px;
+            padding: 16px 24px;
+            border-top: 1px solid #3f3f46;
+        }
+
+        .chat-input input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid #3f3f46;
+            border-radius: 8px;
+            background: #18181b;
+            color: #e4e4e7;
+            font-size: 1rem;
+        }
+
+        .chat-input input:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+
+        .chat-input button {
+            padding: 12px 24px;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .chat-input button:hover {
+            background: #2563eb;
+        }
+
+        .mic-btn {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: #ef4444;
+            border: none;
+            color: white;
+            font-size: 1.2rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .mic-btn.recording {
+            animation: pulse-red 1s infinite;
+        }
+
+        @keyframes pulse-red {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+            50% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
+        }
+
+        /* Phase 39: Pipeline Status Badges */
+        .pipeline-status {
+            display: none;
+            gap: 8px;
+            padding: 8px 12px;
+            background: #18181b;
+            border-top: 1px solid #27272a;
+            align-items: center;
+            font-size: 0.75rem;
+        }
+
+        .pipeline-status.active {
+            display: flex;
+        }
+
+        .pipeline-label {
+            color: #71717a;
+            margin-right: 4px;
+        }
+
+        .stage-badge {
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .stage-badge.idle { background: #27272a; color: #71717a; }
+        .stage-badge.active { background: #1d4ed8; color: white; animation: pulse-badge 1s infinite; }
+        .stage-badge.complete { background: #059669; color: white; }
+        .stage-badge.error { background: #dc2626; color: white; }
+
+        @keyframes pulse-badge {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .pipeline-message {
+            margin-left: auto;
+            color: #a1a1aa;
+            font-style: italic;
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .nav-tabs {
+            display: flex;
+            gap: 4px;
+            padding: 8px;
+            background: #18181b;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .nav-tab {
+            padding: 10px 20px;
+            border: none;
+            background: transparent;
+            color: #a1a1aa;
+            cursor: pointer;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+
+        .nav-tab.active {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .nav-tab:hover:not(.active) {
+            background: #27272a;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Settings page */
+        .settings-form {
+            display: grid;
+            gap: 20px;
+        }
+
+        .form-group {
+            display: grid;
+            gap: 8px;
+        }
+
+        .form-group label {
+            font-weight: 500;
+            color: #a1a1aa;
+        }
+
+        .form-group input,
+        .form-group select {
+            padding: 12px;
+            border: 1px solid #3f3f46;
+            border-radius: 8px;
+            background: #18181b;
+            color: #e4e4e7;
+            font-size: 1rem;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+
+        /* Knowledge page */
+        .upload-zone {
+            border: 2px dashed #3f3f46;
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .upload-zone:hover {
+            border-color: #3b82f6;
+            background: #3b82f610;
+        }
+
+        .document-list {
+            display: grid;
+            gap: 12px;
+            margin-top: 20px;
+        }
+
+        .document-item {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 16px;
+            background: #18181b;
+            border-radius: 8px;
+            border: 1px solid #3f3f46;
+        }
+
+        .document-icon {
+            font-size: 2rem;
+        }
+
+        .document-info {
+            flex: 1;
+        }
+
+        .document-name {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .document-meta {
+            font-size: 0.85rem;
+            color: #71717a;
+        }
+
+        .document-actions button {
+            padding: 8px 12px;
+            border: none;
+            border-radius: 6px;
+            background: #ef444420;
+            color: #ef4444;
+            cursor: pointer;
+        }
+
+        /* History page */
+        .history-item {
+            padding: 16px;
+            background: #18181b;
+            border-radius: 8px;
+            border: 1px solid #3f3f46;
+            margin-bottom: 12px;
+        }
+
+        .history-time {
+            font-size: 0.85rem;
+            color: #71717a;
+            margin-bottom: 8px;
+        }
+
+        .history-query {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .history-response {
+            color: #a1a1aa;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">EdgeVoice</div>
+            <div class="status-badge" id="systemStatus">
+                <div class="status-dot"></div>
+                <span>System Online</span>
+            </div>
+        </header>
+
+        <div class="nav-tabs">
+            <button class="nav-tab active" data-tab="dashboard">Dashboard</button>
+            <button class="nav-tab" data-tab="chat">Chat</button>
+            <button class="nav-tab" data-tab="knowledge">Knowledge Base</button>
+            <button class="nav-tab" data-tab="settings">Settings</button>
+            <button class="nav-tab" data-tab="logs">Logs</button>
+            <button class="nav-tab" data-tab="history">History</button>
+        </div>
+
+        <!-- Dashboard Tab -->
+        <div id="dashboard" class="tab-content active">
+            <div class="grid">
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">Orchestrator State</span>
+                        <div class="card-icon" style="background: #3b82f620; color: #3b82f6;">
+                            <span>O</span>
+                        </div>
+                    </div>
+                    <div class="card-value" id="orchestratorState">IDLE</div>
+                    <div class="card-subtitle">Current pipeline state</div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">Active Sessions</span>
+                        <div class="card-icon" style="background: #22c55e20; color: #22c55e;">
+                            <span>S</span>
+                        </div>
+                    </div>
+                    <div class="card-value" id="activeSessions">0</div>
+                    <div class="card-subtitle">Current active sessions</div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">GPU Memory</span>
+                        <div class="card-icon" style="background: #f59e0b20; color: #f59e0b;">
+                            <span>G</span>
+                        </div>
+                    </div>
+                    <div class="card-value" id="gpuMemory">N/A</div>
+                    <div class="card-subtitle">Memory utilization</div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">Documents</span>
+                        <div class="card-icon" style="background: #8b5cf620; color: #8b5cf6;">
+                            <span>D</span>
+                        </div>
+                    </div>
+                    <div class="card-value" id="documentCount">0</div>
+                    <div class="card-subtitle">In knowledge base</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Service Status</span>
+                </div>
+                <div class="services-grid" id="servicesGrid">
+                    <!-- Services will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat Tab -->
+        <div id="chat" class="tab-content">
+            <div class="chat-section">
+                <div class="chat-header">
+                    <span style="font-size: 1.2rem;">Voice Assistant</span>
+                </div>
+                <div class="chat-messages" id="chatMessages">
+                    <div class="message">
+                        <div class="message-avatar">AI</div>
+                        <div class="message-content">
+                            안녕하세요! 저는 당신의 AI 비서 EdgeVoice입니다. 무엇을 도와드릴까요?
+                        </div>
+                    </div>
+                </div>
+                <!-- Phase 39: Pipeline Status Bar -->
+                <div class="pipeline-status" id="pipelineStatus">
+                    <span class="pipeline-label">Pipeline:</span>
+                    <span class="stage-badge idle" id="stage-wake_word">Wake</span>
+                    <span class="stage-badge idle" id="stage-stt">STT</span>
+                    <span class="stage-badge idle" id="stage-llm">LLM</span>
+                    <span class="stage-badge idle" id="stage-tts">TTS</span>
+                    <span class="pipeline-message" id="pipelineMessage"></span>
+                </div>
+                <div class="chat-input">
+                    <button class="mic-btn" id="micBtn" title="Push to talk (hold to record)">
+                        <span>🎤</span>
+                    </button>
+                    <input type="text" id="chatInput" placeholder="Type your message..." />
+                    <button id="sendBtn">Send</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Knowledge Base Tab -->
+        <div id="knowledge" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Upload Documents</span>
+                </div>
+                <div class="upload-zone" id="uploadZone">
+                    <p style="font-size: 1.2rem; margin-bottom: 8px;">Drop files here or click to upload</p>
+                    <p style="color: #71717a;">Supported: PDF, TXT, DOCX, MD</p>
+                    <input type="file" id="fileInput" style="display: none;" multiple accept=".pdf,.txt,.docx,.md" />
+                </div>
+
+                <div class="document-list" id="documentList">
+                    <!-- Documents will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Tab -->
+        <div id="settings" class="tab-content">
+            <!-- GPU Memory Indicator -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header">
+                    <span class="card-title">GPU Status</span>
+                </div>
+                <div data-testid="gpu-memory-indicator" id="settingsGpuIndicator" style="padding: 16px; background: #18181b; border-radius: 8px;">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <span style="font-size: 1.5rem;">GPU</span>
+                        <div style="flex: 1;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                <span>VRAM Usage</span>
+                                <span id="settingsGpuMemoryText">Loading...</span>
+                            </div>
+                            <div style="background: #3f3f46; border-radius: 4px; height: 8px; overflow: hidden;">
+                                <div id="settingsGpuMemoryBar" style="background: #22c55e; height: 100%; width: 0%; transition: width 0.3s;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Model Selection Settings -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header">
+                    <span class="card-title">Model Settings</span>
+                </div>
+                <div class="settings-form">
+                    <!-- TTS Engine Selection -->
+                    <div class="form-group">
+                        <label>TTS Engine</label>
+                        <select id="ttsEngine" data-testid="tts-engine-select">
+                            <option value="melo">MeloTTS Korean (Recommended)</option>
+                            <option value="kokoro">Kokoro TTS</option>
+                            <option value="edge_tts">Microsoft Edge TTS</option>
+                            <option value="gtts">Google TTS</option>
+                        </select>
+                        <small style="color: #71717a; margin-top: 4px; display: block;" id="ttsEngineInfo">Korean optimized, GPU required</small>
+                    </div>
+
+                    <!-- TTS Voice Selection -->
+                    <div class="form-group">
+                        <label>TTS Voice</label>
+                        <select id="ttsVoice" data-testid="tts-voice-select">
+                            <!-- MeloTTS voices -->
+                            <option value="KR">Korean (KR)</option>
+                            <option value="EN">English (EN)</option>
+                            <option value="EN-US">English US (EN-US)</option>
+                            <option value="EN-BR">English British (EN-BR)</option>
+                            <option value="ES">Spanish (ES)</option>
+                            <option value="FR">French (FR)</option>
+                            <option value="ZH">Chinese (ZH)</option>
+                            <option value="JP">Japanese (JP)</option>
+                            <!-- Kokoro voices -->
+                            <option value="af_heart">AF Heart (Kokoro)</option>
+                            <option value="af_bella">AF Bella (Kokoro)</option>
+                            <option value="af_nicole">AF Nicole (Kokoro)</option>
+                            <option value="am_adam">AM Adam (Kokoro)</option>
+                            <option value="am_michael">AM Michael (Kokoro)</option>
+                            <!-- Edge TTS voices -->
+                            <option value="ko-KR-SunHiNeural">Korean Female (Edge)</option>
+                            <option value="ko-KR-InJoonNeural">Korean Male (Edge)</option>
+                            <option value="en-US-JennyNeural">English Female (Edge)</option>
+                            <option value="en-US-GuyNeural">English Male (Edge)</option>
+                        </select>
+                        <small style="color: #71717a; margin-top: 4px; display: block;" id="ttsVoiceInfo">Select voice for TTS engine</small>
+                    </div>
+
+                    <!-- STT Model Selection -->
+                    <div class="form-group">
+                        <label>STT Model (Whisper)</label>
+                        <select id="sttModel" data-testid="stt-model-select">
+                            <option value="tiny">Tiny (1GB VRAM, Fast)</option>
+                            <option value="base">Base (1GB VRAM)</option>
+                            <option value="small" selected>Small (2GB VRAM, Balanced)</option>
+                            <option value="medium">Medium (5GB VRAM)</option>
+                            <option value="large-v3">Large V3 (10GB VRAM, Best Quality)</option>
+                            <option value="large-v3-turbo">Large V3 Turbo (6GB VRAM)</option>
+                            <option value="ghost613/faster-whisper-large-v3-turbo-korean">Korean Optimized (6GB VRAM)</option>
+                        </select>
+                        <small style="color: #71717a; margin-top: 4px; display: block;" id="sttModelInfo">Balanced speed and quality</small>
+                    </div>
+
+                    <!-- LLM Model Selection (Downloaded Models Only) -->
+                    <div class="form-group">
+                        <label>LLM Model</label>
+                        <select id="llmModel" data-testid="llm-model-select">
+                            <option value="qwen2.5-3b-instruct">Qwen 2.5 3B Instruct (2GB VRAM)</option>
+                            <option value="qwen2.5-7b-instruct-awq">Qwen 2.5 7B AWQ (5GB VRAM)</option>
+                            <option value="qwen2.5-14b-instruct-awq">Qwen 2.5 14B AWQ (10GB VRAM)</option>
+                            <option value="qwen2.5-72b-instruct-awq">Qwen 2.5 72B AWQ (40GB VRAM)</option>
+                            <option value="phi-4-mini-instruct">Phi-4 Mini Instruct (5GB VRAM)</option>
+                            <option value="deepseek-r1-distill-qwen-7b">DeepSeek R1 Distill Qwen 7B (5GB VRAM)</option>
+                            <option value="deepseek-r1-distill-qwen-14b">DeepSeek R1 Distill Qwen 14B (10GB VRAM)</option>
+                            <option value="deepseek-r1-distill-llama-8b">DeepSeek R1 Distill Llama 8B (6GB VRAM)</option>
+                        </select>
+                        <small style="color: #71717a; margin-top: 4px; display: block;" id="llmModelInfo">Select based on available VRAM</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Advanced LLM Settings (Phase 15) -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header" style="cursor: pointer;" onclick="toggleLLMAdvancedSettings()">
+                    <span class="card-title">Advanced LLM Settings</span>
+                    <span id="llmAdvancedToggle" style="color: #71717a; font-size: 1.2rem;">▶</span>
+                </div>
+                <div id="llmAdvancedPanel" style="display: none;">
+                    <div class="settings-form" style="padding-top: 16px;">
+                        <!-- Context Enabled Toggle -->
+                        <div class="form-group">
+                            <label style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
+                                <input type="checkbox" id="contextEnabled" checked style="width: 20px; height: 20px; cursor: pointer;">
+                                <span>Enable Conversation Context</span>
+                            </label>
+                            <small style="color: #71717a; margin-top: 4px; display: block;">
+                                When enabled, the AI remembers previous messages in the conversation
+                            </small>
+                        </div>
+
+                        <!-- Context Window Size Slider -->
+                        <div class="form-group">
+                            <label>
+                                Context Window Size
+                                <span id="contextWindowValue" style="font-weight: bold; color: #3b82f6; margin-left: 8px;">20</span>
+                                messages
+                            </label>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span style="font-size: 12px; color: #666;">5</span>
+                                <input type="range" id="contextWindowSize" min="5" max="50" step="1" value="20" style="flex: 1;">
+                                <span style="font-size: 12px; color: #666;">50</span>
+                            </div>
+                            <small style="color: #71717a; margin-top: 4px; display: block;">
+                                Number of previous messages to include as context
+                            </small>
+                        </div>
+
+                        <!-- Estimated Tokens Display -->
+                        <div class="form-group">
+                            <label>Estimated Token Usage</label>
+                            <div id="estimatedTokensDisplay" style="padding: 12px; background: #18181b; border-radius: 8px; border: 1px solid #3f3f46;">
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                    <span>System Prompt:</span>
+                                    <span>~200 tokens</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                    <span>Context (<span id="contextMsgCount">20</span> messages):</span>
+                                    <span id="contextTokens">~1000 tokens</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                    <span>New Message:</span>
+                                    <span>~30 tokens</span>
+                                </div>
+                                <hr style="border-color: #3f3f46; margin: 8px 0;">
+                                <div style="display: flex; justify-content: space-between; font-weight: bold; color: #60a5fa;">
+                                    <span>Total Estimated:</span>
+                                    <span id="totalEstimatedTokens">~1230 tokens</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Save LLM Context Settings Button -->
+                        <div style="margin-top: 16px;">
+                            <button id="saveLLMContextBtn" style="padding: 12px 24px; background: #3b82f6; color: white; border: none; border-radius: 8px; cursor: pointer;">
+                                Save Context Settings
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- General Settings -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">General Settings</span>
+                </div>
+                <div class="settings-form">
+                    <div class="form-group">
+                        <label>Wake Word <span id="currentWakeWord" style="font-size: 11px; color: #10b981;"></span></label>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <select id="wakeWord" style="flex: 1;">
+                                <option value="hey_jarvis" selected>Hey Jarvis (권장)</option>
+                                <option value="alexa">Alexa</option>
+                                <option value="hey_mycroft">Hey Mycroft</option>
+                            </select>
+                            <button id="registerWakeWordBtn" style="padding: 8px 16px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; white-space: nowrap;">
+                                Register
+                            </button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Language</label>
+                        <select id="language">
+                            <option value="ko">Korean</option>
+                            <option value="en">English</option>
+                            <option value="ja">Japanese</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Voice Speed <span id="voiceSpeedValue" style="font-weight: bold; color: #3b82f6;">1.0x</span></label>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 12px; color: #666;">0.5x</span>
+                            <input type="range" id="voiceSpeed" min="0.5" max="2" step="0.1" value="1" style="flex: 1;" />
+                            <span style="font-size: 12px; color: #666;">2.0x</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Wake Word Threshold <span id="thresholdValue" style="font-weight: bold; color: #3b82f6;">0.5</span></label>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 12px; color: #666;">0.1</span>
+                            <input type="range" id="wakeWordThreshold" min="0.1" max="0.9" step="0.1" value="0.5" style="flex: 1;" />
+                            <span style="font-size: 12px; color: #666;">0.9</span>
+                        </div>
+                        <small style="color: #666; font-size: 11px;">Higher = More precise wake word match required</small>
+                    </div>
+                    <!-- Phase 50: End Pause Settings -->
+                    <div class="form-group">
+                        <label>End Pause (Speech Timeout) <span id="endPauseValue" style="font-weight: bold; color: #3b82f6;">3.0s</span></label>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 12px; color: #666;">1s</span>
+                            <input type="range" id="endPauseSeconds" min="1" max="10" step="0.5" value="3" style="flex: 1;" />
+                            <span style="font-size: 12px; color: #666;">10s</span>
+                        </div>
+                        <small style="color: #666; font-size: 11px;">Silence duration before speech is considered complete</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Listening Timeout <span id="listeningTimeoutValue" style="font-weight: bold; color: #3b82f6;">10.0s</span></label>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 12px; color: #666;">5s</span>
+                            <input type="range" id="listeningTimeoutSeconds" min="5" max="30" step="1" value="10" style="flex: 1;" />
+                            <span style="font-size: 12px; color: #666;">30s</span>
+                        </div>
+                        <small style="color: #666; font-size: 11px;">Maximum time to wait for speech input</small>
+                    </div>
+                    <div style="display: flex; gap: 12px; margin-top: 16px;">
+                        <button id="saveSettingsBtn" style="padding: 12px 24px; background: #3b82f6; color: white; border: none; border-radius: 8px; cursor: pointer;">
+                            Save Settings
+                        </button>
+                        <button id="restartServicesBtn" style="padding: 12px 24px; background: #f59e0b; color: white; border: none; border-radius: 8px; cursor: pointer; display: none;">
+                            Restart Required Services
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Tab -->
+        <div id="history" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Conversation History</span>
+                </div>
+                <div id="historyList">
+                    <!-- History will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Logs Tab (Phase 17) -->
+        <div id="logs" class="tab-content">
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header">
+                    <span class="card-title">Pipeline Logs</span>
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <select id="logServiceFilter" style="padding: 8px; border-radius: 6px; background: #18181b; border: 1px solid #3f3f46; color: #e4e4e7;">
+                            <option value="">All Services</option>
+                            <option value="orchestrator">Orchestrator</option>
+                            <option value="stt">STT</option>
+                            <option value="llm">LLM</option>
+                            <option value="tts">TTS</option>
+                            <option value="wake_word">Wake Word</option>
+                        </select>
+                        <select id="logLevelFilter" style="padding: 8px; border-radius: 6px; background: #18181b; border: 1px solid #3f3f46; color: #e4e4e7;">
+                            <option value="">All Levels</option>
+                            <option value="DEBUG">DEBUG</option>
+                            <option value="INFO">INFO</option>
+                            <option value="WARNING">WARNING</option>
+                            <option value="ERROR">ERROR</option>
+                        </select>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="logAutoScroll" checked style="width: 16px; height: 16px;">
+                            <span style="font-size: 14px;">Auto-scroll</span>
+                        </label>
+                        <button id="clearLogsBtn" style="padding: 8px 16px; background: #ef4444; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                            Clear
+                        </button>
+                        <button id="toggleLiveLogsBtn" style="padding: 8px 16px; background: #22c55e; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                            Live
+                        </button>
+                    </div>
+                </div>
+                <div id="logsContainer" style="height: 500px; overflow-y: auto; background: #18181b; border-radius: 8px; padding: 12px; font-family: 'Consolas', 'Monaco', monospace; font-size: 13px;">
+                    <!-- Logs will be populated by JavaScript -->
+                    <div id="logsList"></div>
+                </div>
+            </div>
+
+            <!-- Log Statistics -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Log Statistics (Last 24h)</span>
+                    <button id="refreshStatsBtn" style="padding: 8px 16px; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                        Refresh
+                    </button>
+                </div>
+                <div id="logStats" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; padding: 16px;">
+                    <!-- Stats will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Tab navigation
+        document.querySelectorAll('.nav-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById(tab.dataset.tab).classList.add('active');
+            });
+        });
+
+        // File upload
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+
+        uploadZone.addEventListener('click', () => fileInput.click());
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.style.borderColor = '#3b82f6';
+        });
+        uploadZone.addEventListener('dragleave', () => {
+            uploadZone.style.borderColor = '#3f3f46';
+        });
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.style.borderColor = '#3f3f46';
+            const files = e.dataTransfer.files;
+            handleFiles(files);
+        });
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        async function handleFiles(files) {
+            for (const file of files) {
+                const uploadText = uploadZone.querySelector('p');
+                const originalText = uploadText.textContent;
+                uploadText.textContent = `Uploading: ${file.name}...`;
+                uploadZone.style.borderColor = '#f59e0b';
+
+                try {
+                    const formData = new FormData();
+                    formData.append('file', file);
+
+                    const response = await fetch('/api/knowledge/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (response.ok) {
+                        const result = await response.json();
+                        uploadText.textContent = `Uploaded: ${file.name}`;
+                        uploadZone.style.borderColor = '#22c55e';
+                        fetchDocuments();
+                    } else {
+                        const error = await response.json();
+                        uploadText.textContent = `Failed: ${error.detail || 'Upload error'}`;
+                        uploadZone.style.borderColor = '#ef4444';
+                    }
+                } catch (err) {
+                    uploadText.textContent = `Error: ${err.message}`;
+                    uploadZone.style.borderColor = '#ef4444';
+                }
+
+                setTimeout(() => {
+                    uploadText.textContent = originalText;
+                    uploadZone.style.borderColor = '#3f3f46';
+                }, 3000);
+            }
+        }
+
+        // Chat functionality
+        const chatInput = document.getElementById('chatInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const chatMessages = document.getElementById('chatMessages');
+        const micBtn = document.getElementById('micBtn');
+        let currentSessionId = null;
+
+        sendBtn.addEventListener('click', sendMessage);
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        async function sendMessage() {
+            const text = chatInput.value.trim();
+            if (!text) return;
+
+            addMessage(text, 'user');
+            chatInput.value = '';
+            sendBtn.disabled = true;
+
+            // Create AI message container for streaming
+            const aiMessageDiv = addMessage('', 'ai', true);
+            const contentDiv = aiMessageDiv.querySelector('.message-content');
+
+            try {
+                const response = await fetch('/api/chat/message', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: text,
+                        session_id: currentSessionId,
+                        use_rag: true
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Chat request failed');
+                }
+
+                // Read SSE stream
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let fullResponse = '';
+                let sources = [];
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const event = JSON.parse(line.slice(6));
+
+                                // Update session ID
+                                if (event.session_id && !currentSessionId) {
+                                    currentSessionId = event.session_id;
+                                }
+
+                                if (event.type === 'token') {
+                                    fullResponse += event.content;
+                                    contentDiv.textContent = fullResponse;
+                                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                                } else if (event.type === 'rag_context') {
+                                    // Show RAG indicator
+                                    sources = event.sources || [];
+                                } else if (event.type === 'complete') {
+                                    // Add sources if available
+                                    if (sources.length > 0) {
+                                        const sourcesHtml = sources.map(s =>
+                                            `<span style="background:#3f3f46;padding:2px 6px;border-radius:4px;font-size:0.8rem;">${s.filename || s.doc_id}</span>`
+                                        ).join(' ');
+                                        contentDiv.innerHTML = fullResponse + `<div style="margin-top:8px;color:#71717a;">Sources: ${sourcesHtml}</div>`;
+                                    }
+                                } else if (event.type === 'error') {
+                                    contentDiv.textContent = 'Error: ' + event.content;
+                                    contentDiv.style.color = '#ef4444';
+                                }
+                            } catch (e) {
+                                // Ignore JSON parse errors
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                contentDiv.textContent = 'Failed to get response: ' + error.message;
+                contentDiv.style.color = '#ef4444';
+            } finally {
+                sendBtn.disabled = false;
+            }
+        }
+
+        function addMessage(text, type, returnElement = false) {
+            const div = document.createElement('div');
+            div.className = 'message ' + (type === 'user' ? 'user' : '');
+            div.innerHTML = `
+                <div class="message-avatar">${type === 'user' ? 'U' : 'AI'}</div>
+                <div class="message-content">${text}</div>
+            `;
+            chatMessages.appendChild(div);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            if (returnElement) return div;
+        }
+
+        // ===== Phase 38: Push-to-Talk Mic Button with WebSocket Audio Streaming =====
+        let audioContext = null;
+        let audioStream = null;
+        let audioProcessor = null;
+        let audioWebSocket = null;
+        let isRecording = false;
+
+        // Get Audio Gateway WebSocket URL
+        function getAudioGatewayUrl() {
+            // In production, use audio-gateway container
+            // In development, use localhost
+            const hostname = window.location.hostname;
+            if (hostname === 'localhost' || hostname === '127.0.0.1') {
+                return 'ws://localhost:8008/ws/audio';
+            }
+            // Docker network - use audio-gateway service name
+            return `ws://${hostname}:8008/ws/audio`;
+        }
+
+        // Start recording on mouse/touch down
+        async function startRecording(e) {
+            e.preventDefault();
+            if (isRecording) return;
+
+            try {
+                // Request microphone access
+                audioStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        sampleRate: 16000,
+                        channelCount: 1,
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
+                });
+
+                // Connect to audio-gateway WebSocket
+                audioWebSocket = new WebSocket(getAudioGatewayUrl());
+
+                audioWebSocket.onopen = () => {
+                    console.log('Audio WebSocket connected');
+                    isRecording = true;
+                    micBtn.classList.add('recording');
+                    micBtn.innerHTML = '<span>🎙️</span>';
+
+                    // Phase 39: Start pipeline monitoring
+                    startPipelineMonitor();
+
+                    // Create AudioContext (browser may not honor sampleRate, we'll resample)
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    const actualSampleRate = audioContext.sampleRate;
+                    console.log('AudioContext sampleRate:', actualSampleRate);
+
+                    const source = audioContext.createMediaStreamSource(audioStream);
+
+                    // Calculate buffer size for ~100ms at actual sample rate
+                    const bufferSize = Math.round(actualSampleRate * 0.1);
+                    // ScriptProcessor bufferSize must be power of 2: 256, 512, 1024, 2048, 4096, 8192, 16384
+                    const powerOf2 = Math.pow(2, Math.ceil(Math.log2(bufferSize)));
+                    const finalBufferSize = Math.min(Math.max(powerOf2, 256), 16384);
+                    console.log('Using buffer size:', finalBufferSize);
+
+                    audioProcessor = audioContext.createScriptProcessor(finalBufferSize, 1, 1);
+
+                    // Resampling function (simple linear interpolation)
+                    function resample(inputData, inputSampleRate, outputSampleRate) {
+                        const ratio = inputSampleRate / outputSampleRate;
+                        const outputLength = Math.round(inputData.length / ratio);
+                        const output = new Float32Array(outputLength);
+
+                        for (let i = 0; i < outputLength; i++) {
+                            const srcIndex = i * ratio;
+                            const srcIndexFloor = Math.floor(srcIndex);
+                            const srcIndexCeil = Math.min(srcIndexFloor + 1, inputData.length - 1);
+                            const fraction = srcIndex - srcIndexFloor;
+
+                            output[i] = inputData[srcIndexFloor] * (1 - fraction) + inputData[srcIndexCeil] * fraction;
+                        }
+
+                        return output;
+                    }
+
+                    // Accumulated buffer for sending consistent chunk sizes
+                    let audioBuffer = new Float32Array(0);
+                    const targetChunkSize = 1600; // 100ms at 16kHz
+
+                    audioProcessor.onaudioprocess = (event) => {
+                        if (audioWebSocket && audioWebSocket.readyState === WebSocket.OPEN) {
+                            const inputData = event.inputBuffer.getChannelData(0);
+
+                            // Resample to 16kHz if needed
+                            let float32Data;
+                            if (actualSampleRate !== 16000) {
+                                float32Data = resample(inputData, actualSampleRate, 16000);
+                            } else {
+                                float32Data = inputData;
+                            }
+
+                            // Accumulate audio data
+                            const newBuffer = new Float32Array(audioBuffer.length + float32Data.length);
+                            newBuffer.set(audioBuffer);
+                            newBuffer.set(float32Data, audioBuffer.length);
+                            audioBuffer = newBuffer;
+
+                            // Send chunks of targetChunkSize (1600 samples = 100ms at 16kHz)
+                            while (audioBuffer.length >= targetChunkSize) {
+                                const chunk = audioBuffer.slice(0, targetChunkSize);
+                                audioBuffer = audioBuffer.slice(targetChunkSize);
+
+                                // Convert float32 to int16 for transmission
+                                const int16Data = new Int16Array(chunk.length);
+                                for (let i = 0; i < chunk.length; i++) {
+                                    const s = Math.max(-1, Math.min(1, chunk[i]));
+                                    int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                                }
+                                audioWebSocket.send(int16Data.buffer);
+                            }
+                        }
+                    };
+
+                    source.connect(audioProcessor);
+                    // Connect to a silent destination (required for processing to work)
+                    // Create a gain node with zero gain to prevent audio feedback
+                    const silentGain = audioContext.createGain();
+                    silentGain.gain.value = 0;
+                    audioProcessor.connect(silentGain);
+                    silentGain.connect(audioContext.destination);
+                };
+
+                audioWebSocket.onmessage = (event) => {
+                    try {
+                        const result = JSON.parse(event.data);
+                        // VAD result received
+                        if (result.is_speech) {
+                            micBtn.style.boxShadow = '0 0 20px rgba(34, 197, 94, 0.8)';
+                        } else {
+                            micBtn.style.boxShadow = '';
+                        }
+                    } catch (e) {
+                        console.error('Failed to parse VAD result:', e);
+                    }
+                };
+
+                audioWebSocket.onerror = (error) => {
+                    console.error('Audio WebSocket error:', error);
+                    stopRecording();
+                    showToast('Failed to connect to audio service', 'error');
+                };
+
+                audioWebSocket.onclose = () => {
+                    console.log('Audio WebSocket closed');
+                };
+
+            } catch (error) {
+                console.error('Failed to start recording:', error);
+                if (error.name === 'NotAllowedError') {
+                    showToast('Microphone permission denied', 'error');
+                } else {
+                    showToast('Failed to access microphone: ' + error.message, 'error');
+                }
+            }
+        }
+
+        // Stop recording on mouse/touch up
+        function stopRecording(e) {
+            if (e) e.preventDefault();
+            if (!isRecording) return;
+
+            isRecording = false;
+            micBtn.classList.remove('recording');
+            micBtn.innerHTML = '<span>🎤</span>';
+            micBtn.style.boxShadow = '';
+
+            // Phase 39: Stop pipeline monitoring (with delay to show results)
+            stopPipelineMonitor();
+
+            // Close WebSocket
+            if (audioWebSocket) {
+                audioWebSocket.close();
+                audioWebSocket = null;
+            }
+
+            // Stop audio processing
+            if (audioProcessor) {
+                audioProcessor.disconnect();
+                audioProcessor = null;
+            }
+
+            // Close AudioContext
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+
+            // Stop microphone stream
+            if (audioStream) {
+                audioStream.getTracks().forEach(track => track.stop());
+                audioStream = null;
+            }
+
+            console.log('Recording stopped');
+        }
+
+        // Push-to-Talk event listeners
+        micBtn.addEventListener('mousedown', startRecording);
+        micBtn.addEventListener('touchstart', startRecording);
+        micBtn.addEventListener('mouseup', stopRecording);
+        micBtn.addEventListener('touchend', stopRecording);
+        micBtn.addEventListener('mouseleave', stopRecording);
+        // Prevent context menu on long press (mobile)
+        micBtn.addEventListener('contextmenu', (e) => e.preventDefault());
+
+        // ===== Phase 39: Pipeline Event Monitoring via SSE =====
+        let pipelineEventSource = null;
+        const pipelineStages = ['wake_word', 'stt', 'llm', 'tts'];
+        const stageStatus = {
+            wake_word: 'idle',
+            stt: 'idle',
+            llm: 'idle',
+            tts: 'idle'
+        };
+
+        // Set stage status and update UI
+        function setStageStatus(stage, status) {
+            stageStatus[stage] = status;
+            const badge = document.getElementById(`stage-${stage}`);
+            if (badge) {
+                badge.className = `stage-badge ${status}`;
+            }
+        }
+
+        // Set pipeline message
+        function setPipelineMessage(message) {
+            const msgEl = document.getElementById('pipelineMessage');
+            if (msgEl) {
+                msgEl.textContent = message || '';
+            }
+        }
+
+        // Reset all pipeline stages
+        function resetPipelineStatus() {
+            pipelineStages.forEach(stage => setStageStatus(stage, 'idle'));
+            setPipelineMessage('');
+        }
+
+        // Update pipeline status based on log event
+        function updatePipelineStatus(log) {
+            const service = log.service || '';
+            const event = log.stage || log.event || '';
+            const level = (log.level || '').toUpperCase();
+            const message = log.message || '';
+            const data = log.metadata || log.data || {};
+
+            // Error handling
+            if (level === 'ERROR') {
+                if (service === 'wake_word') setStageStatus('wake_word', 'error');
+                else if (service === 'stt') setStageStatus('stt', 'error');
+                else if (service === 'llm' || service === 'orchestrator') setStageStatus('llm', 'error');
+                else if (service === 'tts') setStageStatus('tts', 'error');
+                setPipelineMessage(`Error: ${message}`);
+                return;
+            }
+
+            // Wake Word events
+            if (service === 'wake_word') {
+                if (event.includes('detected') || event.includes('wake_word_detected')) {
+                    setStageStatus('wake_word', 'complete');
+                    setStageStatus('stt', 'active');
+                    setPipelineMessage('Wake word detected! Listening...');
+                }
+            }
+            // Audio Gateway / VAD events
+            else if (service === 'audio_gateway') {
+                if (event.includes('speech_started') || event.includes('recording_started')) {
+                    setStageStatus('wake_word', 'active');
+                    setPipelineMessage('Listening for wake word...');
+                }
+                else if (event.includes('speech_ended') || event.includes('recording_complete')) {
+                    setPipelineMessage('Processing speech...');
+                }
+            }
+            // STT events
+            else if (service === 'stt') {
+                if (event.includes('start') || event.includes('transcription_start')) {
+                    setStageStatus('stt', 'active');
+                    setPipelineMessage('Transcribing speech...');
+                }
+                else if (event.includes('complete') || event.includes('transcription_complete')) {
+                    setStageStatus('stt', 'complete');
+                    setStageStatus('llm', 'active');
+                    const text = data.text || data.transcription || message;
+                    if (text && !text.includes('Transcription')) {
+                        addMessage(text, 'user');
+                    }
+                    setPipelineMessage('Generating response...');
+                }
+            }
+            // LLM / Orchestrator events
+            else if (service === 'orchestrator' || service === 'llm') {
+                if (event.includes('llm_request') || event.includes('llm_start')) {
+                    setStageStatus('llm', 'active');
+                    setPipelineMessage('Thinking...');
+                }
+                else if (event.includes('llm_response') || event.includes('llm_complete') || event.includes('response_complete')) {
+                    setStageStatus('llm', 'complete');
+                    setStageStatus('tts', 'active');
+                    const response = data.response || data.content || '';
+                    if (response) {
+                        addMessage(response, 'assistant');
+                    }
+                    setPipelineMessage('Synthesizing speech...');
+                }
+            }
+            // TTS events
+            else if (service === 'tts') {
+                if (event.includes('start') || event.includes('synthesis_start')) {
+                    setStageStatus('tts', 'active');
+                    setPipelineMessage('Speaking...');
+                }
+                else if (event.includes('complete') || event.includes('synthesis_complete')) {
+                    setStageStatus('tts', 'complete');
+                    setPipelineMessage('Complete!');
+                    // Auto-hide pipeline status after completion
+                    setTimeout(() => {
+                        if (stageStatus.tts === 'complete') {
+                            document.getElementById('pipelineStatus').classList.remove('active');
+                            resetPipelineStatus();
+                        }
+                    }, 3000);
+                }
+            }
+        }
+
+        // Start pipeline monitoring via SSE
+        function startPipelineMonitor() {
+            if (pipelineEventSource) {
+                pipelineEventSource.close();
+            }
+
+            // Show pipeline status bar
+            document.getElementById('pipelineStatus').classList.add('active');
+            resetPipelineStatus();
+            setPipelineMessage('Connecting...');
+
+            pipelineEventSource = new EventSource('/api/logs/stream');
+
+            pipelineEventSource.addEventListener('log', (event) => {
+                try {
+                    const log = JSON.parse(event.data);
+                    updatePipelineStatus(log);
+                } catch (e) {
+                    console.error('Failed to parse pipeline log:', e);
+                }
+            });
+
+            pipelineEventSource.addEventListener('connected', () => {
+                setPipelineMessage('Ready - speak now');
+            });
+
+            pipelineEventSource.onerror = (e) => {
+                console.error('Pipeline SSE error:', e);
+                setPipelineMessage('Connection lost');
+            };
+        }
+
+        // Stop pipeline monitoring
+        function stopPipelineMonitor() {
+            if (pipelineEventSource) {
+                pipelineEventSource.close();
+                pipelineEventSource = null;
+            }
+            // Keep status visible for a moment after recording stops
+            setTimeout(() => {
+                if (!isRecording) {
+                    document.getElementById('pipelineStatus').classList.remove('active');
+                    resetPipelineStatus();
+                }
+            }, 5000);
+        }
+
+        // ===== Phase 28.3: Dashboard Initialize + SSE Pattern =====
+        let dashboardEventSource = null;
+        // Phase 35.1: 전역 서비스 상태 추적 (SSE 이벤트 시 배지 업데이트용)
+        let currentServiceStatuses = {};
+
+        // Format model name for display
+        function formatModelName(model) {
+            if (!model) return '';
+            // "Qwen/Qwen2.5-7B-Instruct-AWQ" → "Qwen-7B-AWQ"
+            if (model.includes('/')) {
+                let name = model.split('/')[1];
+                name = name.replace('Qwen2.5-', 'Qwen-');
+                name = name.replace('-Instruct', '');
+                return name;
+            }
+            // "BAAI/bge-m3" → "BGE-M3"
+            if (model.toLowerCase().includes('bge')) {
+                return model.split('/').pop().toUpperCase();
+            }
+            return model;
+        }
+
+        // Get display name for service based on info
+        function getServiceDisplayName(key, info) {
+            const baseNames = {
+                stt: 'STT',
+                tts: 'TTS',
+                llm: 'LLM',
+                embedding: 'Embedding',
+                audio_gateway: 'Audio Gateway',
+                wake_word: 'Wake Word',
+                rag: 'RAG',
+                orchestrator: 'Orchestrator'
+            };
+
+            let displayName = baseNames[key] || key;
+
+            // Add model/engine info
+            if (info.model?.size) {
+                displayName += ` (${info.model.size})`;
+            } else if (info.model?.name) {
+                displayName += ` (${formatModelName(info.model.name)})`;
+            } else if (info.engine?.name) {
+                displayName += ` (${info.engine.name})`;
+            }
+
+            return displayName;
+        }
+
+        // Initialize Dashboard with new API
+        async function initializeDashboard() {
+            try {
+                const response = await fetch('/api/dashboard/init');
+                const data = await response.json();
+
+                // Update orchestrator state
+                const orchestratorInfo = data.services?.orchestrator;
+                document.getElementById('orchestratorState').textContent = orchestratorInfo?.state || 'IDLE';
+
+                // Update system stats
+                document.getElementById('activeSessions').textContent = data.system?.sessions?.active || 0;
+                document.getElementById('documentCount').textContent = data.system?.documents?.count || 0;
+
+                // Update GPU memory
+                updateGpuDisplay(data.system?.gpu);
+
+                // Update services grid
+                updateServicesGrid(data.services);
+
+                // Update system status badge
+                updateSystemStatusBadge(data.services);
+
+                // Start SSE connection for real-time updates
+                startDashboardStream();
+
+            } catch (error) {
+                console.error('Failed to initialize dashboard:', error);
+                // Fallback to legacy API
+                fetchStatusLegacy();
+            }
+        }
+
+        // Update GPU display
+        function updateGpuDisplay(gpuInfo) {
+            if (gpuInfo?.available) {
+                const used = gpuInfo.used_gb?.toFixed(1) || '0';
+                const total = gpuInfo.total_gb?.toFixed(1) || '0';
+                const utilization = gpuInfo.utilization_percent?.toFixed(0) || 0;
+                const percentUsed = total > 0 ? ((gpuInfo.used_gb / gpuInfo.total_gb) * 100).toFixed(0) : 0;
+
+                document.getElementById('gpuMemory').textContent = `${used}/${total} GB (${utilization}%)`;
+
+                // Update Settings tab GPU indicator
+                document.getElementById('settingsGpuMemoryText').textContent = `${used}/${total} GB`;
+                document.getElementById('settingsGpuMemoryBar').style.width = `${percentUsed}%`;
+                // Color based on usage
+                const barColor = percentUsed > 90 ? '#ef4444' : percentUsed > 70 ? '#f59e0b' : '#22c55e';
+                document.getElementById('settingsGpuMemoryBar').style.background = barColor;
+            } else {
+                document.getElementById('gpuMemory').textContent = 'N/A';
+                document.getElementById('settingsGpuMemoryText').textContent = 'GPU not available';
+            }
+        }
+
+        // Update system status badge
+        function updateSystemStatusBadge(services) {
+            const statusBadge = document.getElementById('systemStatus');
+            const allOnline = Object.values(services || {}).every(s => {
+                const st = s.status || s.state || s;
+                return st === 'healthy' || st === 'ready' || st === 'READY';
+            });
+            if (allOnline) {
+                statusBadge.classList.remove('offline');
+                statusBadge.querySelector('span').textContent = 'System Online';
+            } else {
+                statusBadge.classList.add('offline');
+                statusBadge.querySelector('span').textContent = 'Some Services Offline';
+            }
+        }
+
+        // Phase 34.3.1: Format elapsed time for display
+        function formatElapsedTime(seconds) {
+            if (!seconds || seconds < 0) return '';
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            if (mins > 0) {
+                return `${mins}분 ${secs}초`;
+            }
+            return `${secs}초`;
+        }
+
+        // Update services grid with Phase 28 format
+        function updateServicesGrid(services) {
+            const grid = document.getElementById('servicesGrid');
+            grid.innerHTML = '';
+
+            // Phase 35.1: 전역 서비스 상태 저장
+            currentServiceStatuses = {};
+            for (const [key, service] of Object.entries(services || {})) {
+                currentServiceStatuses[key] = service.status;
+                // Phase 34: Determine status class with loading state
+                let statusClass;
+                const isLoading = service.loading_stage && service.loading_stage !== 'complete' && service.loading_stage !== 'unknown';
+                if (isLoading) {
+                    statusClass = 'loading';
+                } else if (service.status === 'healthy' || service.status === 'ready') {
+                    statusClass = 'online';
+                } else if (service.status === 'unknown') {
+                    statusClass = 'unknown';
+                } else {
+                    statusClass = 'offline';
+                }
+
+                const latency = service.latency_ms ? `${Math.round(service.latency_ms)}ms` : '-';
+
+                // Get display name with model/engine info
+                const displayName = getServiceDisplayName(key, service);
+
+                // Get model detail for subtitle
+                let modelDetail = '';
+                if (service.model?.size) {
+                    modelDetail = service.model.size;
+                } else if (service.model?.name) {
+                    modelDetail = formatModelName(service.model.name);
+                } else if (service.engine?.name) {
+                    modelDetail = service.engine.name;
+                } else if (service.settings?.voice) {
+                    modelDetail = service.settings.voice;
+                }
+
+                // Phase 35: LLM 상태에 따른 서브타이틀 결정
+                let serviceSubtitle = '';
+                if (key === 'llm') {
+                    const progressPercent = service.progress_percent || 0;
+                    const loadingStage = service.loading_stage || 'unknown';
+                    const loadingMessage = service.loading_message || '';
+
+                    if (isLoading) {
+                        // 로딩 중: "Starting..." 또는 "Loading: X%"
+                        if (loadingStage === 'initializing' || loadingStage === 'starting') {
+                            serviceSubtitle = 'Starting...';
+                        } else if (loadingStage === 'loading_weights' || loadingStage === 'cuda_graphs' || loadingStage === 'estimated') {
+                            serviceSubtitle = `Loading: ${progressPercent}%`;
+                        } else {
+                            serviceSubtitle = loadingMessage || 'Loading...';
+                        }
+                    } else if (service.status === 'healthy') {
+                        // 로딩 완료: "모델명 | Latency: XXms"
+                        serviceSubtitle = `${modelDetail} | Latency: ${latency}`;
+                    } else {
+                        // 오프라인
+                        serviceSubtitle = 'Offline';
+                    }
+                } else {
+                    // 다른 서비스: 기존 로직
+                    serviceSubtitle = `${modelDetail ? modelDetail + ' | ' : ''}Latency: ${latency}`;
+                }
+
+                // Phase 34: LLM loading progress bar HTML
+                let progressHtml = '';
+                if (key === 'llm') {
+                    const progressPercent = service.progress_percent || 0;
+                    const loadingStage = service.loading_stage || 'unknown';
+                    const loadingMessage = service.loading_message || '';
+                    const elapsedSeconds = service.elapsed_seconds || 0;
+                    const showProgress = isLoading || (progressPercent > 0 && progressPercent < 100);
+
+                    progressHtml = `
+                        <div class="llm-progress-container ${showProgress ? 'visible' : ''}" data-llm-progress>
+                            <div class="llm-progress-bar ${loadingStage}" style="width: ${progressPercent}%"></div>
+                        </div>
+                        <div class="llm-progress-text" style="display: ${showProgress ? 'flex' : 'none'};" data-llm-progress-text>
+                            <span class="percent">${progressPercent}% - ${loadingMessage}</span>
+                            <span class="elapsed">${formatElapsedTime(elapsedSeconds)}</span>
+                        </div>
+                    `;
+                }
+
+                const div = document.createElement('div');
+                div.className = 'service-item';
+                div.dataset.service = key;
+                div.innerHTML = `
+                    <div class="service-status ${statusClass}"></div>
+                    <div class="service-info">
+                        <div class="service-name">${displayName}</div>
+                        <div class="service-latency" data-service-subtitle>${serviceSubtitle}</div>
+                        ${progressHtml}
+                    </div>
+                `;
+                grid.appendChild(div);
+            }
+        }
+
+        // Start SSE stream for real-time updates
+        function startDashboardStream() {
+            if (dashboardEventSource) {
+                dashboardEventSource.close();
+            }
+
+            dashboardEventSource = new EventSource('/api/dashboard/stream');
+
+            // Orchestrator state updates
+            dashboardEventSource.addEventListener('orchestrator_state', (e) => {
+                try {
+                    const data = JSON.parse(e.data);
+                    document.getElementById('orchestratorState').textContent = data.state || 'UNKNOWN';
+                } catch (err) {
+                    console.error('Failed to parse orchestrator_state event:', err);
+                }
+            });
+
+            // Service status updates
+            dashboardEventSource.addEventListener('service_status', (e) => {
+                try {
+                    const data = JSON.parse(e.data);
+                    updateServiceCard(data.service, data);
+                } catch (err) {
+                    console.error('Failed to parse service_status event:', err);
+                }
+            });
+
+            // GPU memory updates
+            dashboardEventSource.addEventListener('gpu_update', (e) => {
+                try {
+                    const data = JSON.parse(e.data);
+                    updateGpuDisplay(data);
+                } catch (err) {
+                    console.error('Failed to parse gpu_update event:', err);
+                }
+            });
+
+            // Session updates
+            dashboardEventSource.addEventListener('session_update', (e) => {
+                try {
+                    const data = JSON.parse(e.data);
+                    document.getElementById('activeSessions').textContent = data.active || 0;
+                } catch (err) {
+                    console.error('Failed to parse session_update event:', err);
+                }
+            });
+
+            // Heartbeat - connection is alive
+            dashboardEventSource.addEventListener('heartbeat', (e) => {
+                // Connection alive
+            });
+
+            // Error handling with reconnection
+            dashboardEventSource.onerror = (e) => {
+                console.error('Dashboard SSE error:', e);
+                dashboardEventSource.close();
+                // Reconnect after 5 seconds
+                setTimeout(startDashboardStream, 5000);
+            };
+        }
+
+        // Update single service card (Phase 34.2.2: LLM progress handling)
+        function updateServiceCard(serviceName, data) {
+            const serviceItem = document.querySelector(`.service-item[data-service="${serviceName}"]`);
+            if (!serviceItem) return;
+
+            const statusEl = serviceItem.querySelector('.service-status');
+
+            // Phase 34: Determine status class with loading state for LLM
+            const isLoading = data.loading_stage && data.loading_stage !== 'complete' && data.loading_stage !== 'unknown';
+            let statusClass;
+            if (isLoading) {
+                statusClass = 'loading';
+            } else if (data.status === 'healthy' || data.status === 'ready') {
+                statusClass = 'online';
+            } else if (data.status === 'unknown') {
+                statusClass = 'unknown';
+            } else {
+                statusClass = 'offline';
+            }
+            statusEl.className = `service-status ${statusClass}`;
+
+            // Phase 35.1: SSE 이벤트로 개별 서비스 업데이트 시 전역 상태 및 배지 갱신
+            currentServiceStatuses[serviceName] = data.status || data.state;
+            updateSystemStatusBadge(currentServiceStatuses);
+
+            // Phase 34.2.2: Update LLM progress bar if this is the LLM service
+            if (serviceName === 'llm') {
+                const progressContainer = serviceItem.querySelector('[data-llm-progress]');
+                const progressText = serviceItem.querySelector('[data-llm-progress-text]');
+                const subtitleEl = serviceItem.querySelector('[data-service-subtitle]');
+
+                const progressPercent = data.progress_percent || 0;
+                const loadingStage = data.loading_stage || 'unknown';
+                const loadingMessage = data.loading_message || '';
+                const elapsedSeconds = data.elapsed_seconds || 0;
+                const showProgress = isLoading || (progressPercent > 0 && progressPercent < 100);
+                const latency = data.latency_ms ? `${Math.round(data.latency_ms)}ms` : '-';
+                const modelDetail = data.model?.name ? formatModelName(data.model.name) : '';
+
+                // Phase 35: Update subtitle based on state
+                if (subtitleEl) {
+                    if (isLoading) {
+                        if (loadingStage === 'initializing' || loadingStage === 'starting') {
+                            subtitleEl.textContent = 'Starting...';
+                        } else if (loadingStage === 'loading_weights' || loadingStage === 'cuda_graphs' || loadingStage === 'estimated') {
+                            subtitleEl.textContent = `Loading: ${progressPercent}%`;
+                        } else {
+                            subtitleEl.textContent = loadingMessage || 'Loading...';
+                        }
+                    } else if (data.status === 'healthy') {
+                        subtitleEl.textContent = `${modelDetail} | Latency: ${latency}`;
+                    } else {
+                        subtitleEl.textContent = 'Offline';
+                    }
+                }
+
+                if (progressContainer && progressText) {
+                    // Update progress bar
+                    const progressBar = progressContainer.querySelector('.llm-progress-bar');
+                    if (progressBar) {
+                        progressBar.style.width = `${progressPercent}%`;
+                        // Update stage class for color
+                        progressBar.className = `llm-progress-bar ${loadingStage}`;
+                    }
+
+                    // Update progress text
+                    const percentSpan = progressText.querySelector('.percent');
+                    const elapsedSpan = progressText.querySelector('.elapsed');
+                    if (percentSpan) {
+                        percentSpan.textContent = `${progressPercent}% - ${loadingMessage}`;
+                    }
+                    if (elapsedSpan) {
+                        elapsedSpan.textContent = formatElapsedTime(elapsedSeconds);
+                    }
+
+                    // Show/hide progress elements
+                    if (showProgress) {
+                        progressContainer.classList.add('visible');
+                        progressText.style.display = 'flex';
+                    } else {
+                        progressContainer.classList.remove('visible');
+                        progressText.style.display = 'none';
+                    }
+                }
+            }
+        }
+
+        // Legacy fallback for /api/status
+        async function fetchStatusLegacy() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+
+                document.getElementById('orchestratorState').textContent = data.orchestrator?.state || 'IDLE';
+                document.getElementById('activeSessions').textContent = data.dashboard_stats?.active_sessions || 0;
+                document.getElementById('documentCount').textContent = data.dashboard_stats?.documents_count || 0;
+
+                if (data.gpu?.available) {
+                    const used = (data.gpu.memory_used / 1073741824).toFixed(1);
+                    const total = (data.gpu.memory_total / 1073741824).toFixed(1);
+                    document.getElementById('gpuMemory').textContent = `${used}/${total} GB`;
+                }
+
+                // Convert legacy format to new format for grid
+                const servicesForGrid = {};
+                for (const [key, service] of Object.entries(data.services || {})) {
+                    servicesForGrid[key] = {
+                        ...service,
+                        status: service.status
+                    };
+                }
+                updateServicesGrid(servicesForGrid);
+                updateSystemStatusBadge(data.services);
+
+            } catch (error) {
+                console.error('Failed to fetch legacy status:', error);
+            }
+        }
+
+        // Initialize dashboard on page load
+        initializeDashboard();
+
+        // Fetch documents
+        async function fetchDocuments() {
+            try {
+                const response = await fetch('/api/knowledge/documents');
+                const data = await response.json();
+
+                document.getElementById('documentCount').textContent = data.documents?.length || 0;
+
+                const list = document.getElementById('documentList');
+                list.innerHTML = '';
+
+                for (const doc of data.documents || []) {
+                    const div = document.createElement('div');
+                    div.className = 'document-item';
+                    div.innerHTML = `
+                        <div class="document-icon">${getFileIcon(doc.filename)}</div>
+                        <div class="document-info">
+                            <div class="document-name">${doc.filename}</div>
+                            <div class="document-meta">${doc.chunk_count || 0} chunks | ${formatDate(doc.uploaded_at)}</div>
+                        </div>
+                        <div class="document-actions">
+                            <button onclick="deleteDocument('${doc.id}')">Delete</button>
+                        </div>
+                    `;
+                    list.appendChild(div);
+                }
+            } catch (error) {
+                console.error('Failed to fetch documents:', error);
+            }
+        }
+
+        function getFileIcon(filename) {
+            if (filename.endsWith('.pdf')) return 'PDF';
+            if (filename.endsWith('.txt')) return 'TXT';
+            if (filename.endsWith('.md')) return 'MD';
+            if (filename.endsWith('.docx')) return 'DOC';
+            return 'File';
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return '-';
+            return new Date(dateStr).toLocaleDateString();
+        }
+
+        async function deleteDocument(id) {
+            if (!confirm('Are you sure you want to delete this document?')) return;
+            try {
+                await fetch(`/api/knowledge/documents/${id}`, { method: 'DELETE' });
+                fetchDocuments();
+            } catch (error) {
+                console.error('Failed to delete document:', error);
+            }
+        }
+
+        fetchDocuments();
+
+        // Fetch history
+        async function fetchHistory() {
+            try {
+                const response = await fetch('/api/history');
+                const data = await response.json();
+
+                const list = document.getElementById('historyList');
+                list.innerHTML = '';
+
+                for (const item of data.conversations || []) {
+                    const div = document.createElement('div');
+                    div.className = 'history-item';
+                    div.innerHTML = `
+                        <div class="history-time">${formatDate(item.timestamp)}</div>
+                        <div class="history-query">${item.query}</div>
+                        <div class="history-response">${item.response}</div>
+                    `;
+                    list.appendChild(div);
+                }
+
+                if (!data.conversations?.length) {
+                    list.innerHTML = '<p style="color: #71717a; text-align: center; padding: 40px;">No conversation history yet.</p>';
+                }
+            } catch (error) {
+                console.error('Failed to fetch history:', error);
+            }
+        }
+
+        fetchHistory();
+
+        // Settings management
+        async function fetchSettingsOptions() {
+            try {
+                const response = await fetch('/api/settings/options');
+                const data = await response.json();
+
+                // Populate TTS engine dropdown
+                const ttsSelect = document.getElementById('ttsEngine');
+                if (data.tts_engines) {
+                    ttsSelect.innerHTML = '';
+                    data.tts_engines.forEach(engine => {
+                        const option = document.createElement('option');
+                        option.value = engine.id;
+                        option.textContent = `${engine.display_name} (${engine.recommended_for})`;
+                        if (engine.id === data.current?.tts_engine) {
+                            option.selected = true;
+                        }
+                        ttsSelect.appendChild(option);
+                    });
+                }
+
+                // Populate STT model dropdown
+                const sttSelect = document.getElementById('sttModel');
+                if (data.stt_models) {
+                    sttSelect.innerHTML = '';
+                    data.stt_models.forEach(model => {
+                        const option = document.createElement('option');
+                        option.value = model.id;
+                        option.textContent = `${model.display_name} (${model.vram_gb}GB VRAM, ${model.korean_quality})`;
+                        if (model.id === data.current?.stt_model) {
+                            option.selected = true;
+                        }
+                        sttSelect.appendChild(option);
+                    });
+                }
+
+                // Populate LLM model dropdown
+                const llmSelect = document.getElementById('llmModel');
+                if (data.llm_models) {
+                    llmSelect.innerHTML = '';
+                    data.llm_models.forEach(model => {
+                        const option = document.createElement('option');
+                        option.value = model.id;
+                        option.textContent = `${model.display_name} (${model.vram_gb}GB VRAM)`;
+                        if (model.id === data.current?.llm_model) {
+                            option.selected = true;
+                        }
+                        llmSelect.appendChild(option);
+                    });
+                }
+
+                // Set current TTS voice if available
+                if (data.current?.tts_voice) {
+                    const ttsVoiceSelect = document.getElementById('ttsVoice');
+                    ttsVoiceSelect.value = data.current.tts_voice;
+                }
+
+                // Trigger TTS engine change to filter voice options
+                document.getElementById('ttsEngine').dispatchEvent(new Event('change'));
+            } catch (error) {
+                console.error('Failed to fetch settings options:', error);
+            }
+        }
+
+        async function saveSettings() {
+            const changes = {
+                tts: {
+                    engine: document.getElementById('ttsEngine').value,
+                    voice: document.getElementById('ttsVoice').value
+                },
+                stt: { model_size: document.getElementById('sttModel').value },
+                llm: { model: document.getElementById('llmModel').value }
+            };
+
+            try {
+                const response = await fetch('/api/settings/apply', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ changes })
+                });
+                const data = await response.json();
+
+                if (data.restart_required && data.restart_required.length > 0) {
+                    document.getElementById('restartServicesBtn').style.display = 'inline-block';
+                    // Show restart modal instead of simple alert
+                    showRestartModal(data.restart_required);
+                } else {
+                    showToast('Settings saved successfully!', 'success');
+                }
+            } catch (error) {
+                console.error('Failed to save settings:', error);
+                showToast('Failed to save settings', 'error');
+            }
+        }
+
+        // ===== LLM Restart Functions (Phase 13.6) =====
+        function showRestartModal(services) {
+            const modal = document.createElement('div');
+            modal.id = 'restartModal';
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 1000;';
+            modal.innerHTML = `
+                <div style="background: #27272a; border-radius: 12px; padding: 24px; max-width: 400px; width: 90%; border: 1px solid #3f3f46;">
+                    <h3 style="margin: 0 0 16px 0; color: #f59e0b;">Restart Required</h3>
+                    <p style="margin: 0 0 16px 0; color: #a1a1aa;">
+                        The following services need to be restarted for changes to take effect:
+                    </p>
+                    <ul style="margin: 0 0 24px 0; padding-left: 20px; color: #e4e4e7;">
+                        ${services.map(s => `<li>${s.toUpperCase()}</li>`).join('')}
+                    </ul>
+                    <p style="margin: 0 0 24px 0; color: #f87171; font-size: 14px;">
+                        Warning: Restarting LLM service will interrupt any ongoing conversations.
+                    </p>
+                    <div style="display: flex; gap: 12px; justify-content: flex-end;">
+                        <button onclick="closeRestartModal()" style="padding: 10px 20px; background: #3f3f46; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                            Later
+                        </button>
+                        <button onclick="restartLLMService()" style="padding: 10px 20px; background: #f59e0b; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                            Restart Now
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        function closeRestartModal() {
+            const modal = document.getElementById('restartModal');
+            if (modal) modal.remove();
+        }
+
+        async function restartLLMService() {
+            closeRestartModal();
+            showToast('Restarting LLM service...', 'success');
+
+            try {
+                const response = await fetch('/api/services/llm/restart', {
+                    method: 'POST'
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    showToast(`LLM: ${data.status} - ${data.message}`, 'success');
+                    document.getElementById('restartServicesBtn').style.display = 'none';
+                } else {
+                    showToast('Failed to restart LLM service', 'error');
+                }
+            } catch (error) {
+                console.error('Failed to restart LLM service:', error);
+                showToast('Failed to restart LLM service', 'error');
+            }
+        }
+
+        // Restart Services button handler
+        document.getElementById('restartServicesBtn').addEventListener('click', function() {
+            showRestartModal(['llm']);
+        });
+
+        // ===== General Settings Functions (Phase 13.5) =====
+        async function fetchGeneralSettings() {
+            try {
+                const response = await fetch('/api/settings/general');
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('wakeWord').value = data.wake_word || 'hey_jarvis';
+                    document.getElementById('language').value = data.language || 'ko';
+                    document.getElementById('voiceSpeed').value = data.voice_speed || 1.0;
+                    document.getElementById('wakeWordThreshold').value = data.wake_word_threshold || 0.5;
+                    // Phase 50: End Pause settings
+                    document.getElementById('endPauseSeconds').value = data.end_pause_seconds || 3.0;
+                    document.getElementById('listeningTimeoutSeconds').value = data.listening_timeout_seconds || 10.0;
+                    // Update displayed values
+                    updateVoiceSpeedDisplay();
+                    updateThresholdDisplay();
+                    updateEndPauseDisplay();
+                    updateListeningTimeoutDisplay();
+                }
+            } catch (error) {
+                console.error('Failed to fetch general settings:', error);
+            }
+        }
+
+        async function saveGeneralSettings() {
+            const generalSettings = {
+                wake_word: document.getElementById('wakeWord').value,
+                language: document.getElementById('language').value,
+                voice_speed: parseFloat(document.getElementById('voiceSpeed').value),
+                wake_word_threshold: parseFloat(document.getElementById('wakeWordThreshold').value),
+                // Phase 50: End Pause settings
+                end_pause_seconds: parseFloat(document.getElementById('endPauseSeconds').value),
+                listening_timeout_seconds: parseFloat(document.getElementById('listeningTimeoutSeconds').value)
+            };
+
+            try {
+                const response = await fetch('/api/settings/general', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(generalSettings)
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    showToast('General settings saved successfully!', 'success');
+                } else {
+                    showToast('Failed to save general settings', 'error');
+                }
+            } catch (error) {
+                console.error('Failed to save general settings:', error);
+                showToast('Failed to save general settings', 'error');
+            }
+        }
+
+        function updateVoiceSpeedDisplay() {
+            const value = document.getElementById('voiceSpeed').value;
+            const display = document.getElementById('voiceSpeedValue');
+            if (display) display.textContent = value + 'x';
+        }
+
+        function updateThresholdDisplay() {
+            const value = document.getElementById('wakeWordThreshold').value;
+            const display = document.getElementById('thresholdValue');
+            if (display) display.textContent = value;
+        }
+
+        // Phase 50: End Pause display functions
+        function updateEndPauseDisplay() {
+            const value = document.getElementById('endPauseSeconds').value;
+            const display = document.getElementById('endPauseValue');
+            if (display) display.textContent = value + 's';
+        }
+
+        function updateListeningTimeoutDisplay() {
+            const value = document.getElementById('listeningTimeoutSeconds').value;
+            const display = document.getElementById('listeningTimeoutValue');
+            if (display) display.textContent = value + 's';
+        }
+
+        function showToast(message, type) {
+            // Simple toast implementation
+            const toast = document.createElement('div');
+            toast.className = 'toast ' + type;
+            toast.textContent = message;
+            toast.style.cssText = 'position: fixed; bottom: 20px; right: 20px; padding: 16px 24px; border-radius: 8px; color: white; z-index: 1000;';
+            toast.style.background = type === 'success' ? '#10b981' : '#ef4444';
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        // Initialize settings
+        fetchSettingsOptions();
+        fetchGeneralSettings();
+
+        // Settings save button handler - save both model settings and general settings
+        document.getElementById('saveSettingsBtn').addEventListener('click', async function() {
+            await saveSettings();  // Model settings (TTS/STT/LLM)
+            await saveGeneralSettings();  // General settings (Wake Word, Language, Speed, Threshold)
+        });
+
+        // Voice Speed slider realtime update
+        document.getElementById('voiceSpeed').addEventListener('input', updateVoiceSpeedDisplay);
+
+        // Threshold slider realtime update
+        document.getElementById('wakeWordThreshold').addEventListener('input', updateThresholdDisplay);
+
+        // Phase 50: End Pause sliders realtime update
+        document.getElementById('endPauseSeconds').addEventListener('input', updateEndPauseDisplay);
+        document.getElementById('listeningTimeoutSeconds').addEventListener('input', updateListeningTimeoutDisplay);
+
+        // TTS engine change handler - update info text
+        document.getElementById('ttsEngine').addEventListener('change', function() {
+            const engineInfo = {
+                'melo': 'Korean optimized, GPU required',
+                'kokoro': 'English optimized, GPU required',
+                'edge_tts': 'Cloud-based, Internet required',
+                'gtts': 'Cloud-based, Internet required'
+            };
+            document.getElementById('ttsEngineInfo').textContent = engineInfo[this.value] || '';
+        });
+
+        // STT model change handler - update info text
+        document.getElementById('sttModel').addEventListener('change', function() {
+            const modelInfo = {
+                'tiny': 'Fast but low accuracy',
+                'base': 'Basic quality',
+                'small': 'Balanced speed and quality',
+                'medium': 'Good quality, more VRAM',
+                'large-v3': 'Best quality, high VRAM required',
+                'large-v3-turbo': 'Fast with good quality',
+                'ghost613/faster-whisper-large-v3-turbo-korean': 'Korean optimized (Recommended)'
+            };
+            document.getElementById('sttModelInfo').textContent = modelInfo[this.value] || '';
+        });
+
+        // ===== Wake Word Registration (Phase 13.1) =====
+        async function registerWakeWord() {
+            const wakeWord = document.getElementById('wakeWord').value;
+            const btn = document.getElementById('registerWakeWordBtn');
+
+            btn.disabled = true;
+            btn.textContent = 'Registering...';
+
+            try {
+                const response = await fetch('/api/settings/wake-word', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ wake_word: wakeWord })
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    // Update current wake word indicator
+                    const wakeWordNames = {
+                        'hey_jarvis': 'Hey Jarvis',
+                        'alexa': 'Alexa',
+                        'hey_mycroft': 'Hey Mycroft'
+                    };
+                    document.getElementById('currentWakeWord').textContent = '(Active: ' + (wakeWordNames[data.wake_word] || data.wake_word) + ')';
+                    showToast('Wake word registered: ' + wakeWordNames[data.wake_word], 'success');
+                } else {
+                    showToast('Failed to register wake word', 'error');
+                }
+            } catch (error) {
+                console.error('Failed to register wake word:', error);
+                showToast('Failed to register wake word', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Register';
+            }
+        }
+
+        // Wake Word Register button handler
+        document.getElementById('registerWakeWordBtn').addEventListener('click', registerWakeWord);
+
+        // Update current wake word indicator on page load
+        function updateCurrentWakeWordIndicator() {
+            const wakeWord = document.getElementById('wakeWord').value;
+            const wakeWordNames = {
+                'hey_jarvis': 'Hey Jarvis',
+                'alexa': 'Alexa',
+                'hey_mycroft': 'Hey Mycroft'
+            };
+            document.getElementById('currentWakeWord').textContent = '(Active: ' + wakeWordNames[wakeWord] + ')';
+        }
+
+        // Update indicator after fetching settings
+        const originalFetchGeneralSettings = fetchGeneralSettings;
+        fetchGeneralSettings = async function() {
+            await originalFetchGeneralSettings();
+            updateCurrentWakeWordIndicator();
+        };
+
+        // ===== Advanced LLM Settings (Phase 15) =====
+        function toggleLLMAdvancedSettings() {
+            const panel = document.getElementById('llmAdvancedPanel');
+            const toggle = document.getElementById('llmAdvancedToggle');
+            if (panel.style.display === 'none') {
+                panel.style.display = 'block';
+                toggle.textContent = '▼';
+            } else {
+                panel.style.display = 'none';
+                toggle.textContent = '▶';
+            }
+        }
+
+        function updateEstimatedTokens() {
+            const windowSize = parseInt(document.getElementById('contextWindowSize').value);
+            const contextTokens = windowSize * 50;  // ~50 tokens per message
+            const totalTokens = 200 + contextTokens + 30;  // system + context + new message
+
+            document.getElementById('contextWindowValue').textContent = windowSize;
+            document.getElementById('contextMsgCount').textContent = windowSize;
+            document.getElementById('contextTokens').textContent = `~${contextTokens} tokens`;
+            document.getElementById('totalEstimatedTokens').textContent = `~${totalTokens} tokens`;
+        }
+
+        async function fetchLLMContextSettings() {
+            try {
+                const response = await fetch('/api/settings/llm/context');
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('contextEnabled').checked = data.context_enabled !== false;
+                    document.getElementById('contextWindowSize').value = data.context_window_size || 20;
+                    updateEstimatedTokens();
+                }
+            } catch (error) {
+                console.error('Failed to fetch LLM context settings:', error);
+            }
+        }
+
+        async function saveLLMContextSettings() {
+            const settings = {
+                context_enabled: document.getElementById('contextEnabled').checked,
+                context_window_size: parseInt(document.getElementById('contextWindowSize').value)
+            };
+
+            try {
+                const response = await fetch('/api/settings/llm/context', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(settings)
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    showToast('LLM context settings saved!', 'success');
+                    // Update estimated tokens from response if provided
+                    if (data.estimated_tokens) {
+                        document.getElementById('totalEstimatedTokens').textContent = `~${data.estimated_tokens} tokens`;
+                    }
+                } else {
+                    showToast('Failed to save LLM context settings', 'error');
+                }
+            } catch (error) {
+                console.error('Failed to save LLM context settings:', error);
+                showToast('Failed to save LLM context settings', 'error');
+            }
+        }
+
+        // Context Window Size slider realtime update
+        document.getElementById('contextWindowSize').addEventListener('input', updateEstimatedTokens);
+
+        // Save LLM Context Settings button handler
+        document.getElementById('saveLLMContextBtn').addEventListener('click', saveLLMContextSettings);
+
+        // Fetch LLM context settings on page load
+        fetchLLMContextSettings();
+
+        // ===== Pipeline Logs (Phase 17) =====
+        let logsEventSource = null;
+        let isLiveLogsEnabled = true;
+        const maxLogEntries = 500;
+
+        function formatLogTime(timestamp) {
+            const date = new Date(timestamp);
+            return date.toLocaleTimeString('ko-KR', { hour12: false }) + '.' + String(date.getMilliseconds()).padStart(3, '0');
+        }
+
+        function getLevelColor(level) {
+            switch (level) {
+                case 'ERROR': return '#ef4444';
+                case 'WARNING': return '#f59e0b';
+                case 'DEBUG': return '#6b7280';
+                default: return '#22c55e';
+            }
+        }
+
+        function createLogEntry(log) {
+            const div = document.createElement('div');
+            div.className = 'log-entry';
+            div.style.cssText = 'padding: 4px 0; border-bottom: 1px solid #27272a; display: flex; gap: 12px;';
+
+            const time = formatLogTime(log.created_at);
+            const levelColor = getLevelColor(log.level);
+
+            div.innerHTML = `
+                <span style="color: #6b7280; flex-shrink: 0;">${time}</span>
+                <span style="color: ${levelColor}; width: 60px; flex-shrink: 0;">[${log.level}]</span>
+                <span style="color: #60a5fa; width: 100px; flex-shrink: 0;">${log.service}</span>
+                <span style="color: #a78bfa; width: 150px; flex-shrink: 0;">${log.stage}</span>
+                <span style="flex: 1; color: #e4e4e7;">${log.message}</span>
+                ${log.duration_ms ? `<span style="color: #71717a; flex-shrink: 0;">${log.duration_ms}ms</span>` : ''}
+            `;
+            return div;
+        }
+
+        function addLogEntry(log) {
+            const logsList = document.getElementById('logsList');
+            const logsContainer = document.getElementById('logsContainer');
+
+            // Apply filters
+            const serviceFilter = document.getElementById('logServiceFilter').value;
+            const levelFilter = document.getElementById('logLevelFilter').value;
+
+            if (serviceFilter && log.service !== serviceFilter) return;
+            if (levelFilter && log.level !== levelFilter) return;
+
+            const entry = createLogEntry(log);
+            logsList.appendChild(entry);
+
+            // Limit entries
+            while (logsList.children.length > maxLogEntries) {
+                logsList.removeChild(logsList.firstChild);
+            }
+
+            // Auto-scroll
+            if (document.getElementById('logAutoScroll').checked) {
+                logsContainer.scrollTop = logsContainer.scrollHeight;
+            }
+        }
+
+        async function fetchLogs() {
+            const serviceFilter = document.getElementById('logServiceFilter').value;
+            const levelFilter = document.getElementById('logLevelFilter').value;
+
+            try {
+                let url = '/api/logs?limit=100';
+                if (serviceFilter) url += `&service=${serviceFilter}`;
+                if (levelFilter) url += `&level=${levelFilter}`;
+
+                const response = await fetch(url);
+                const data = await response.json();
+
+                const logsList = document.getElementById('logsList');
+                logsList.innerHTML = '';
+
+                // Logs API returns array directly, not wrapped in {logs: [...]}
+                // Phase 27.5: API 응답 형식 수정
+                const logs = (Array.isArray(data) ? data : data.logs || []).reverse();
+                logs.forEach(log => {
+                    logsList.appendChild(createLogEntry(log));
+                });
+
+                // Auto-scroll to bottom
+                const logsContainer = document.getElementById('logsContainer');
+                logsContainer.scrollTop = logsContainer.scrollHeight;
+            } catch (error) {
+                console.error('Failed to fetch logs:', error);
+            }
+        }
+
+        function startLiveLogStream() {
+            if (logsEventSource) {
+                logsEventSource.close();
+            }
+
+            const serviceFilter = document.getElementById('logServiceFilter').value;
+            const levelFilter = document.getElementById('logLevelFilter').value;
+
+            let url = '/api/logs/stream?';
+            if (serviceFilter) url += `service=${serviceFilter}&`;
+            if (levelFilter) url += `level=${levelFilter}&`;
+
+            logsEventSource = new EventSource(url);
+
+            // Phase 27.5: 백엔드가 'event: log' 타입으로 전송하므로 addEventListener 사용
+            logsEventSource.addEventListener('log', function(event) {
+                try {
+                    const log = JSON.parse(event.data);
+                    addLogEntry(log);
+                } catch (e) {
+                    console.error('Failed to parse log event:', e);
+                }
+            });
+
+            // 연결 이벤트 처리
+            logsEventSource.addEventListener('connected', function(event) {
+                console.log('Log stream connected:', JSON.parse(event.data));
+            });
+
+            // 하트비트 이벤트 처리
+            logsEventSource.addEventListener('heartbeat', function(event) {
+                // Heartbeat received - connection is alive
+            });
+
+            // 에러 이벤트 처리
+            logsEventSource.addEventListener('error', function(event) {
+                try {
+                    const error = JSON.parse(event.data);
+                    console.error('Log stream error event:', error);
+                } catch (e) {
+                    // Not a JSON error event
+                }
+            });
+
+            logsEventSource.onerror = function(e) {
+                console.error('Log stream error:', e);
+                // Reconnect after 5 seconds
+                setTimeout(() => {
+                    if (isLiveLogsEnabled) {
+                        startLiveLogStream();
+                    }
+                }, 5000);
+            };
+
+            document.getElementById('toggleLiveLogsBtn').style.background = '#22c55e';
+            document.getElementById('toggleLiveLogsBtn').textContent = 'Live';
+        }
+
+        function stopLiveLogStream() {
+            if (logsEventSource) {
+                logsEventSource.close();
+                logsEventSource = null;
+            }
+            document.getElementById('toggleLiveLogsBtn').style.background = '#6b7280';
+            document.getElementById('toggleLiveLogsBtn').textContent = 'Paused';
+        }
+
+        async function fetchLogStats() {
+            try {
+                const response = await fetch('/api/logs/stats');
+                const data = await response.json();
+
+                const statsContainer = document.getElementById('logStats');
+                statsContainer.innerHTML = '';
+
+                // Total count
+                const totalDiv = document.createElement('div');
+                totalDiv.style.cssText = 'background: #18181b; padding: 16px; border-radius: 8px; text-align: center;';
+                totalDiv.innerHTML = `
+                    <div style="font-size: 2rem; font-weight: bold; color: #60a5fa;">${data.total || 0}</div>
+                    <div style="color: #71717a; font-size: 0.9rem;">Total Logs</div>
+                `;
+                statsContainer.appendChild(totalDiv);
+
+                // By level
+                const levels = ['INFO', 'WARNING', 'ERROR', 'DEBUG'];
+                const levelColors = { INFO: '#22c55e', WARNING: '#f59e0b', ERROR: '#ef4444', DEBUG: '#6b7280' };
+
+                levels.forEach(level => {
+                    const count = data.by_level?.[level] || 0;
+                    if (count > 0) {
+                        const div = document.createElement('div');
+                        div.style.cssText = 'background: #18181b; padding: 16px; border-radius: 8px; text-align: center;';
+                        div.innerHTML = `
+                            <div style="font-size: 2rem; font-weight: bold; color: ${levelColors[level]};">${count}</div>
+                            <div style="color: #71717a; font-size: 0.9rem;">${level}</div>
+                        `;
+                        statsContainer.appendChild(div);
+                    }
+                });
+
+                // By service
+                Object.entries(data.by_service || {}).forEach(([service, count]) => {
+                    const div = document.createElement('div');
+                    div.style.cssText = 'background: #18181b; padding: 16px; border-radius: 8px; text-align: center;';
+                    div.innerHTML = `
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #a78bfa;">${count}</div>
+                        <div style="color: #71717a; font-size: 0.9rem;">${service}</div>
+                    `;
+                    statsContainer.appendChild(div);
+                });
+            } catch (error) {
+                console.error('Failed to fetch log stats:', error);
+            }
+        }
+
+        // Log filter change handlers
+        document.getElementById('logServiceFilter').addEventListener('change', () => {
+            fetchLogs();
+            if (isLiveLogsEnabled) {
+                startLiveLogStream();
+            }
+        });
+
+        document.getElementById('logLevelFilter').addEventListener('change', () => {
+            fetchLogs();
+            if (isLiveLogsEnabled) {
+                startLiveLogStream();
+            }
+        });
+
+        // Clear logs button
+        document.getElementById('clearLogsBtn').addEventListener('click', () => {
+            document.getElementById('logsList').innerHTML = '';
+        });
+
+        // Toggle live logs button
+        document.getElementById('toggleLiveLogsBtn').addEventListener('click', () => {
+            isLiveLogsEnabled = !isLiveLogsEnabled;
+            if (isLiveLogsEnabled) {
+                startLiveLogStream();
+            } else {
+                stopLiveLogStream();
+            }
+        });
+
+        // Refresh stats button
+        document.getElementById('refreshStatsBtn').addEventListener('click', fetchLogStats);
+
+        // Start log stream when Logs tab is activated
+        document.querySelectorAll('.nav-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                if (tab.dataset.tab === 'logs') {
+                    fetchLogs();
+                    fetchLogStats();
+                    if (isLiveLogsEnabled) {
+                        startLiveLogStream();
+                    }
+                } else {
+                    // Stop stream when leaving logs tab to save resources
+                    stopLiveLogStream();
+                }
+            });
+        });
+
+        // ===== TTS Voice Selection Handler =====
+        document.getElementById('ttsEngine').addEventListener('change', function() {
+            const engine = this.value;
+            const voiceSelect = document.getElementById('ttsVoice');
+            const voiceOptions = voiceSelect.options;
+
+            // Show/hide voice options based on engine
+            const meloVoices = ['KR', 'EN', 'EN-US', 'EN-BR', 'ES', 'FR', 'ZH', 'JP'];
+            const kokoroVoices = ['af_heart', 'af_bella', 'af_nicole', 'am_adam', 'am_michael'];
+            const edgeVoices = ['ko-KR-SunHiNeural', 'ko-KR-InJoonNeural', 'en-US-JennyNeural', 'en-US-GuyNeural'];
+
+            let relevantVoices;
+            let defaultVoice;
+
+            switch (engine) {
+                case 'melo':
+                    relevantVoices = meloVoices;
+                    defaultVoice = 'KR';
+                    break;
+                case 'kokoro':
+                    relevantVoices = kokoroVoices;
+                    defaultVoice = 'af_heart';
+                    break;
+                case 'edge_tts':
+                    relevantVoices = edgeVoices;
+                    defaultVoice = 'ko-KR-SunHiNeural';
+                    break;
+                case 'gtts':
+                    relevantVoices = ['ko', 'en'];
+                    defaultVoice = 'ko';
+                    break;
+                default:
+                    relevantVoices = meloVoices;
+                    defaultVoice = 'KR';
+            }
+
+            // Update visibility and select default
+            for (let option of voiceOptions) {
+                if (relevantVoices.includes(option.value)) {
+                    option.style.display = '';
+                    if (option.value === defaultVoice) {
+                        option.selected = true;
+                    }
+                } else {
+                    option.style.display = 'none';
+                }
+            }
+
+            // Update info text
+            const voiceInfo = {
+                'melo': 'MeloTTS voices - Korean optimized',
+                'kokoro': 'Kokoro voices - English optimized',
+                'edge_tts': 'Microsoft Edge TTS voices',
+                'gtts': 'Google TTS voices'
+            };
+            document.getElementById('ttsVoiceInfo').textContent = voiceInfo[engine] || 'Select voice for TTS engine';
+        });
+
+        // Trigger initial voice filter
+        document.getElementById('ttsEngine').dispatchEvent(new Event('change'));
+    </script>
+</body>
+</html>

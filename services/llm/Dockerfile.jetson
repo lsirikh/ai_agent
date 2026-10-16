@@ -1,0 +1,43 @@
+# EdgeVoice LLM Service Dockerfile for Jetson
+# vLLM 기반 LLM 서비스 (Jetson 최적화)
+
+# Jetson L4T 베이스 이미지 사용
+FROM nvcr.io/nvidia/l4t-pytorch:r35.2.1-pth2.0-py3
+
+# 환경 변수 설정
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV MODEL_NAME=Qwen/Qwen2.5-7B-Instruct-GPTQ-Int4
+ENV TENSOR_PARALLEL_SIZE=1
+ENV GPU_MEMORY_UTILIZATION=0.8
+ENV MAX_MODEL_LEN=2048
+ENV DEVICE=cuda
+
+# 시스템 패키지 설치
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# 작업 디렉토리 설정
+WORKDIR /app
+
+# 의존성 설치 (Jetson 최적화)
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# 애플리케이션 코드 복사
+COPY app/ ./app/
+
+# 모델 캐시 디렉토리
+RUN mkdir -p /root/.cache/huggingface
+
+# 포트 노출
+EXPOSE 8003
+
+# 헬스체크
+HEALTHCHECK --interval=30s --timeout=10s --retries=5 --start-period=180s \
+    CMD curl -f http://localhost:8003/health || exit 1
+
+# 실행
+CMD ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8003"]

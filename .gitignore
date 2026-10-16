@@ -1,0 +1,67 @@
+# NATS JetStream Data
+db/jetstream/*/
+
+# Backups
+backups/
+*.tar.gz
+*.zip
+
+# Logs
+*.log
+logs/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Docker
+docker-compose.override.yml
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Prds
+Prds/
+prds/
+Prd/
+prd/
+*prd.md
+prd*.md
+plan.md
+claude.md
+.claude/
+.claude/*
+.Claude/
+
+
+# docs
+Docs/
+docs/
+Doc/
+doc/
+
+# Model weights (download via scripts/, never commit)
+models/
+
+# Runtime / tool output
+output/
+.playwright-mcp/
+.pytest_cache/
+__pycache__/
+
+# Legacy harness installer
+claude-skill-harness-v2.1.1/

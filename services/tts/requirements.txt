@@ -1,0 +1,23 @@
+# EdgeVoice TTS Service Dependencies
+
+# FastAPI & Server
+fastapi>=0.104.0
+uvicorn>=0.24.0
+
+# TTS Engine (Kokoro)
+kokoro>=0.3.0
+
+# Audio Processing
+numpy>=1.24.0
+
+# Utilities
+pydantic>=2.5.0
+
+# PyTorch (for Kokoro)
+torch>=2.0.0
+
+# Redis (Phase 8.2)
+redis>=5.0.0
+
+# HTTP Client (Phase 27 - Log sending to backend)
+aiohttp>=3.9.0

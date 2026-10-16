@@ -1,0 +1,41 @@
+# EdgeVoice RAG Service Dockerfile for Jetson
+# 검색 증강 생성 서비스 (Jetson 최적화)
+
+# Jetson L4T 베이스 이미지 사용
+FROM nvcr.io/nvidia/l4t-base:r35.2.1
+
+# 환경 변수 설정
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV EMBEDDING_SERVICE_URL=http://embedding:8004
+ENV VECTOR_DB_PATH=/data/vectordb
+
+# Python 및 시스템 패키지 설치
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# 작업 디렉토리 설정
+WORKDIR /app
+
+# 의존성 설치
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# 애플리케이션 코드 복사
+COPY app/ ./app/
+
+# 데이터 디렉토리
+RUN mkdir -p /data/vectordb
+
+# 포트 노출
+EXPOSE 8006
+
+# 헬스체크
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD curl -f http://localhost:8006/health || exit 1
+
+# 실행
+CMD ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8006"]

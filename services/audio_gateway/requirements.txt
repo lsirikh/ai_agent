@@ -1,0 +1,32 @@
+# Audio Gateway Service Dependencies
+# Phase 3.5
+
+# Web framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+websockets>=12.0
+pydantic>=2.5.0
+
+# Audio processing
+numpy>=1.24.0
+soundfile>=0.12.0
+# Phase 37: Real-time audio I/O
+sounddevice>=0.4.6
+pyaudio>=0.2.14
+
+# VAD (Silero)
+torch>=2.0.0
+torchaudio>=2.0.0
+onnxruntime>=1.16.0
+
+# Redis
+redis>=5.0.0
+aioredis>=2.0.0
+
+# HTTP client
+httpx>=0.25.0
+aiohttp>=3.9.0
+
+# Utilities
+python-multipart>=0.0.6
+packaging>=23.0

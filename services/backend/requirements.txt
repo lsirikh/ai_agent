@@ -1,0 +1,33 @@
+# Backend API Dependencies
+# Phase 5.6: Backend API 의존성
+
+# Web Framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+
+# Data Validation
+pydantic>=2.5.0
+
+# HTTP Client
+httpx>=0.26.0
+aiohttp>=3.9.0
+
+# System Metrics
+psutil>=5.9.0
+
+# Database
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.0
+
+# Redis (Phase 26: Log Streaming)
+redis>=5.0.0
+
+# File Processing
+python-multipart>=0.0.6
+
+# Optional: PDF/DOCX processing
+# PyPDF2>=3.0.0
+# python-docx>=1.1.0
+
+# Docker SDK (Phase 35: LLM Loading Monitor)
+docker>=7.0.0
