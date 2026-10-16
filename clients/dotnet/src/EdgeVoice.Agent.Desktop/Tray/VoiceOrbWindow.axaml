@@ -2,15 +2,85 @@
         xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:tray="clr-namespace:EdgeVoice.Agent.Desktop.Tray"
-        Width="132" Height="150"
+        Width="232" Height="196"
         SystemDecorations="None" TransparencyLevelHint="Transparent" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" CanResize="False" ShowActivated="False"
         ToolTip.Tip="왼쪽 클릭: 말하기 시작/중지 · 오른쪽 클릭: EdgeVoice 창 열기 · 드래그: 이동">
-    <StackPanel>
-        <Border Width="120" Height="120" CornerRadius="60" Background="#B318181B">
+    <Window.Styles>
+        <!-- 단계 칸: 대기는 흐림, 지나간 단계는 반투명 색, 지금 단계는 불 들어온 색 -->
+        <Style Selector="Border.stage">
+            <Setter Property="Width" Value="52" />
+            <Setter Property="Height" Value="40" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Background" Value="#4018181B" />
+            <Setter Property="BorderBrush" Value="#3FFFFFFF" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Opacity" Value="0.55" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.2" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Border.stage.done">
+            <Setter Property="Opacity" Value="0.8" />
+        </Style>
+        <Style Selector="Border.stage.active">
+            <Setter Property="Opacity" Value="1" />
+            <Setter Property="BorderBrush" Value="#FFFFFFFF" />
+        </Style>
+        <Style Selector="Border.stage PathIcon">
+            <Setter Property="Width" Value="16" />
+            <Setter Property="Height" Value="16" />
+            <Setter Property="Foreground" Value="#E4E4E7" />
+        </Style>
+        <Style Selector="Border.stage TextBlock">
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="Foreground" Value="#E4E4E7" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Border.stage.done PathIcon, Border.stage.active PathIcon">
+            <Setter Property="Foreground" Value="#FFFFFFFF" />
+        </Style>
+        <Style Selector="Border.stage.done TextBlock, Border.stage.active TextBlock">
+            <Setter Property="Foreground" Value="#FFFFFFFF" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+    </Window.Styles>
+
+    <StackPanel HorizontalAlignment="Center" Spacing="6">
+        <Border Width="120" Height="120" CornerRadius="60" Background="#B318181B" HorizontalAlignment="Center">
             <tray:RippleView x:Name="Ripple" Width="120" Height="120" />
         </Border>
-        <TextBlock x:Name="StateLabel" HorizontalAlignment="Center" Foreground="#E4E4E7"
-                   FontSize="12" Margin="0,4,0,0" Text="대기" />
+
+        <StackPanel x:Name="Stages" Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center">
+            <Border x:Name="StageListen" Classes="stage" ToolTip.Tip="웨이크워드 후 듣는 중">
+                <StackPanel VerticalAlignment="Center" Spacing="1">
+                    <PathIcon Data="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0h-2a5 5 0 0 1-10 0zM11 18h2v4h-2z" />
+                    <TextBlock Text="듣기" />
+                </StackPanel>
+            </Border>
+            <Border x:Name="StageStt" Classes="stage" ToolTip.Tip="STT: 음성을 글자로">
+                <StackPanel VerticalAlignment="Center" Spacing="1">
+                    <PathIcon Data="M4 5h16v2H4zM4 11h16v2H4zM4 17h10v2H4z" />
+                    <TextBlock Text="STT" />
+                </StackPanel>
+            </Border>
+            <Border x:Name="StageLlm" Classes="stage" ToolTip.Tip="LLM: 답변 생성">
+                <StackPanel VerticalAlignment="Center" Spacing="1">
+                    <PathIcon Data="M12 2l2.2 6.8L21 11l-6.8 2.2L12 20l-2.2-6.8L3 11l6.8-2.2z" />
+                    <TextBlock Text="LLM" />
+                </StackPanel>
+            </Border>
+            <Border x:Name="StageTts" Classes="stage" ToolTip.Tip="TTS: 답변을 음성으로">
+                <StackPanel VerticalAlignment="Center" Spacing="1">
+                    <PathIcon Data="M3 9h4l5-4v14l-5-4H3zM16 8a5 5 0 0 1 0 8l-1.4-1.4a3 3 0 0 0 0-5.2z" />
+                    <TextBlock Text="TTS" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+
+        <TextBlock x:Name="StateLabel" HorizontalAlignment="Center" Foreground="#FCA5A5"
+                   FontSize="12" TextWrapping="Wrap" MaxWidth="224" IsVisible="False" />
     </StackPanel>
 </Window>

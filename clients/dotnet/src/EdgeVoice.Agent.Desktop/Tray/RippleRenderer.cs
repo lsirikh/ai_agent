@@ -92,6 +92,14 @@ public static class RippleRenderer
                 break;
         }
 
-        g.DrawEllipse(new SolidColorBrush(color), null, center, core, core);
+        // 가운데는 상태 색으로 물든 움직이는 프랙탈(작은 트레이 아이콘은 점이 더 잘 보인다)
+        if (size >= 64)
+        {
+            FractalRenderer.Draw(g, center, size * 0.5, state, level);
+        }
+        else
+        {
+            g.DrawEllipse(new SolidColorBrush(color), null, center, core, core);
+        }
     }
 }

@@ -57,6 +57,7 @@ public sealed class TrayController : IDisposable
         _orb.Show();
 
         monitor.StateChanged += s => Dispatcher.UIThread.Post(() => _serverState = s);
+        monitor.StageChanged += st => Dispatcher.UIThread.Post(() => _orb.SetStage(st));
         _mic.LevelChanged += l => _level = l;
         _mic.StreamingChanged += on => Dispatcher.UIThread.Post(() => _talkItem.Header = on ? "말하기 중지" : "말하기 시작");
 
@@ -73,27 +74,30 @@ public sealed class TrayController : IDisposable
     {
         var state = EffectiveState;
         var animated = state is VoiceState.Listening or VoiceState.Speaking or VoiceState.Thinking;
-        if (!animated && _lastDrawn == state && _error is null)
-        {
-            return;
-        }
-
         _phase = (_phase + (state == VoiceState.Listening ? 0.03 + _level * 0.05 : 0.035)) % 1.0;
-        _lastDrawn = state;
-
-        using (var bmp = RippleRenderer.RenderBitmap(IconSize, state, _phase, _level))
-        {
-            _trayIcon.Icon = new WindowIcon(bmp);
-        }
 
         if (_error is not null && DateTime.Now > _errorUntil)
         {
             _error = null;
         }
 
-        var text = _error ?? StateText(state);
-        _trayIcon.ToolTipText = "EdgeVoice Agent - " + text;
-        _orb.Update(state, _phase, _level, text);
+        // 오버레이의 프랙탈은 대기 중에도 천천히 움직이므로 매 프레임 그린다.
+        // 글자는 오류일 때만 보인다(상태는 파형과 단계 아이콘이 보여 준다).
+        _orb.Update(state, _phase, _level, _error ?? string.Empty);
+
+        // 트레이 아이콘은 움직이는 상태이거나 바뀌었을 때만 다시 그린다
+        if (!animated && _lastDrawn == state && _error is null)
+        {
+            return;
+        }
+
+        _lastDrawn = state;
+        using (var bmp = RippleRenderer.RenderBitmap(IconSize, state, _phase, _level))
+        {
+            _trayIcon.Icon = new WindowIcon(bmp);
+        }
+
+        _trayIcon.ToolTipText = "EdgeVoice Agent - " + (_error ?? StateText(state));
     }
 
     public static string StateText(VoiceState state) => state switch
