@@ -145,12 +145,8 @@ class TestTTSRedisSubscriberMessageHandling:
 
             await subscriber._handle_message(json.dumps(test_data))
 
-            # 합성기 호출 확인
-            mock_synthesizer.synthesize.assert_called_once_with(
-                text="테스트 음성입니다",
-                voice="af_heart",
-                speed=1.0
-            )
+            # 합성기 호출 확인 (KokoroTTS.synthesize(text) 시그니처)
+            mock_synthesizer.synthesize.assert_called_once_with("테스트 음성입니다")
 
             await subscriber.stop()
 
@@ -188,12 +184,15 @@ class TestTTSRedisSubscriberMessageHandling:
             await subscriber._handle_message(json.dumps(test_data))
 
             # tts:complete 채널에 메시지 발행 확인
-            mock_redis.publish.assert_called_once()
-            call_args = mock_redis.publish.call_args
-            assert call_args[0][0] == "edgevoice:tts:complete"
+            # (Phase 36.5 부터 tts:state 의 started/complete 이벤트도 함께 발행된다)
+            complete_calls = [
+                c for c in mock_redis.publish.call_args_list
+                if c[0][0] == "edgevoice:tts:complete"
+            ]
+            assert len(complete_calls) == 1
 
             # 발행된 메시지 내용 확인
-            published_message = json.loads(call_args[0][1])
+            published_message = json.loads(complete_calls[0][0][1])
             assert published_message["session_id"] == "test-session-789"
             assert published_message["status"] == "complete"
             assert "audio_length" in published_message

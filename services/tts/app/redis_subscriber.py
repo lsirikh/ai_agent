@@ -161,11 +161,12 @@ class TTSRedisSubscriber:
                 })
                 await self.redis_client.publish(TTS_STATE_CHANNEL, started_message)
 
-            audio_data = self.synthesizer.synthesize(
-                text=text,
-                voice=voice,
-                speed=speed
-            )
+            # KokoroTTS.synthesize 는 text 만 받고 float32 배열을 돌려준다
+            audio = self.synthesizer.synthesize(text)
+            if isinstance(audio, np.ndarray):
+                audio_data = audio.astype(np.float32, copy=False).tobytes()
+            else:
+                audio_data = audio or b""
 
             tts_duration = int((time.time() - tts_start_time) * 1000)
 
