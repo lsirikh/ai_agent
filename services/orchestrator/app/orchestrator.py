@@ -281,9 +281,8 @@ class Orchestrator:
         Args:
             text: 사용자 입력 텍스트
         """
-        # 사용자 메시지를 컨텍스트에 추가
-        if hasattr(self.llm_client, 'add_to_context'):
-            self.llm_client.add_to_context("user", text)
+        # 사용자 메시지는 generate_stream 이 요청에 붙이므로 여기서 컨텍스트에 미리 넣지 않는다
+        # (응답이 끝나면 _process_llm_stream 이 user/assistant 를 함께 기록)
 
         # LLM 스트리밍 처리
         self._processing_task = asyncio.create_task(
@@ -343,6 +342,7 @@ class Orchestrator:
 
             # 어시스턴트 응답을 컨텍스트에 추가
             if hasattr(self.llm_client, 'add_to_context') and full_response:
+                self.llm_client.add_to_context("user", text)
                 self.llm_client.add_to_context("assistant", full_response)
 
             # Phase 32: 모든 처리 완료 후 READY로 전이
