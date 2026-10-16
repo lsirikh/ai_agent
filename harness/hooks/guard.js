@@ -175,7 +175,7 @@ function prog(word) {
 //   문법은 하나만 쓴다(도구가 정한다). 두 문법으로 겹쳐 읽으면 한쪽이 다른 쪽의 데이터(heredoc 본문 등)를
 //   명령으로 오독해 오탐한다 — 실측: bash `$(cat <<'EOF' … (git push) … EOF)` 를 PowerShell 로 읽으면 걸린다.
 function analyze(command, opts) {
-  const ctx = { cwd: opts.cwd || process.cwd(), root: undefined, depth: opts.depth || 0 };
+  const ctx = { cwd: opts.cwd || process.cwd(), root: undefined, depth: opts.depth || 0, worker: !!opts.worker };
   return analyzeString(command, opts.mode || 'bash', ctx);
 }
 
@@ -224,20 +224,20 @@ function analyzeCommand(words0, mode, ctx) {
   }
   if (PWSH.has(p)) {
     const k = args.findIndex(a => /^[-/](c|co|com|comm|comma|comman|command)$/i.test(a));
-    if (k >= 0) return analyze(args.slice(k + 1).join(' '), { cwd: ctx.cwd, mode: 'ps', depth: ctx.depth + 1 });
+    if (k >= 0) return analyze(args.slice(k + 1).join(' '), { cwd: ctx.cwd, mode: 'ps', depth: ctx.depth + 1, worker: ctx.worker });
     const e = args.findIndex(a => /^[-/](e|ec|en|enc|enco|encod|encode|encoded|encodedc|encodedcommand)$/i.test(a));
     if (e >= 0 && args[e + 1]) {
       let decoded = '';
       try { decoded = Buffer.from(args[e + 1], 'base64').toString('utf16le'); } catch { decoded = ''; }
-      if (decoded) return analyze(decoded, { cwd: ctx.cwd, mode: 'ps', depth: ctx.depth + 1 });
+      if (decoded) return analyze(decoded, { cwd: ctx.cwd, mode: 'ps', depth: ctx.depth + 1, worker: ctx.worker });
     }
     const f = args.find(a => !a.startsWith('-'));
-    if (f && !/\.ps1$/i.test(f)) return analyze(args.filter(a => !/^-/.test(a)).join(' '), { cwd: ctx.cwd, mode: 'ps', depth: ctx.depth + 1 });
+    if (f && !/\.ps1$/i.test(f)) return analyze(args.filter(a => !/^-/.test(a)).join(' '), { cwd: ctx.cwd, mode: 'ps', depth: ctx.depth + 1, worker: ctx.worker });
     return null;
   }
   if (p === 'cmd') {
     const k = args.findIndex(a => /^\/[ck]$/i.test(a));
-    if (k >= 0) return analyze(args.slice(k + 1).join(' '), { cwd: ctx.cwd, mode: 'ps', depth: ctx.depth + 1 });
+    if (k >= 0) return analyze(args.slice(k + 1).join(' '), { cwd: ctx.cwd, mode: 'ps', depth: ctx.depth + 1, worker: ctx.worker });
     return null;
   }
   if (p === 'eval' || p === 'invoke-expression' || p === 'iex') {
@@ -275,6 +275,7 @@ const GIT_VALUE_OPTS = new Set(['-c', '--git-dir', '--work-tree', '--namespace',
 const WHOLE_TREE = new Set(['.', './', '.\\', ':/', ':/.', ':/*', '*', './*', '.\\*', ':(top)', ':(top).', ':(top)*', '-A', ':']);
 
 const REASONS = {
+  outsideWorker: '하네스 작업자는 자기 worktree 밖의 파일 · 폴더를 지울 수 없습니다. worktree 안에서만 지우세요 — 꼭 필요하면 BLOCKED.md 에 무엇을 왜 지워야 하는지 적으세요.',
   // [버그 2026-10-01] AGENTS.md 는 "사용자가 명시한 뒤에만" 이라 적었는데 허락의 길이 없었다 — 좁힌 하네스 명령으로 안내한다.
   push: 'git push 는 직접 실행하지 않습니다. 사용자가 push 를 **명시적으로** 요청했다면 `node harness/cli.js push [<remote>] [<branch>]` 를 쓰세요 — 강제 push 없이 빨리감기만 하고, 원격이 앞서 있으면 거부합니다(실행 때 승인 프롬프트가 뜹니다). 요청이 없었다면 커밋까지만 하고 무엇을 올릴지 보고하세요. 사용자가 직접 올릴 때: 터미널판은 `! git push …`, VS Code 확장은 보기 → 터미널에서 실행합니다.',
   reset: 'git reset --hard 는 미커밋 변경을 되돌릴 수 없게 지웁니다. 커밋을 되돌리려면 `git revert <sha>`, 자기가 고친 파일 하나를 되돌리려면 `git restore -- <file>` 을 쓰세요.',
@@ -482,6 +483,20 @@ function secretReason(what, files) {
 }
 
 // ── 삭제 ──
+// 작업자 모드(--worker): 자기 worktree 밖의 파일 · 폴더는 지우지 못한다. [2026-10-16 실측] 허용 목록을 걷어 낸(open) 작업자가
+//   저장소 밖 폴더를 rm -rf 로 지웠다 — 대화형 guard 는 위험한 대상(루트 · 홈 · 저장소 · .git)만 막는다.
+function outsideWorktree(targets, mode, ctx) {
+  const root = repoRootOf(ctx.cwd, ctx);
+  if (!root) return null;
+  for (const t0 of targets) {
+    const t = String(mode === 'ps' && !C.IS_WIN ? t0.replace(/\\/g, '/') : t0).trim().replace(/^["']|["']$/g, '');
+    const abs = resolveTarget(ctx.cwd, t);
+    if (!abs) continue;   // 풀 수 없는 대상은 아래의 재귀 삭제 규칙이 본다
+    const norm = C.real(abs);
+    if (!(C.samePath(norm, root) || isAncestor(root, norm))) return `${REASONS.outsideWorker} (대상: ${t})`;
+  }
+  return null;
+}
 function checkDelete(p, args, mode, ctx) {
   let recursive = p === 'rimraf';
   const targets = [];
@@ -497,6 +512,7 @@ function checkDelete(p, args, mode, ctx) {
     if (!endOpts && a.startsWith('-')) continue;
     for (const t of a.split(',')) if (t) targets.push(t);
   }
+  if (ctx.worker) { const o = outsideWorktree(targets, mode, ctx); if (o) return o; }
   // PowerShell 의 rm/rmdir/Remove-Item 은 폴더에 -Recurse 가 없으면 확인을 묻는다 — 재귀 삭제가 아니다.
   if (!recursive) return null;
   for (const t0 of targets) {
@@ -589,7 +605,8 @@ function modeFor(tool, runtime) {
   return 'bash';
 }
 
-function decide(input, runtime) {
+function decide(input, runtime, opts) {
+  const worker = !!(opts && opts.worker);
   const tool = String(input.tool_name || '');
   if (!tool || tool === 'apply_patch' || tool.startsWith('mcp__')) return null;
   const ti = input.tool_input;
@@ -597,9 +614,9 @@ function decide(input, runtime) {
   const c = ti.command != null ? ti.command : ti.cmd;
   const cwd = input.cwd && typeof input.cwd === 'string' ? input.cwd : process.cwd();
   // Codex 는 argv 배열(["powershell","-Command","…"] · ["bash","-lc","…"])로 줄 수 있다 — 이미 쪼개진 단어다.
-  if (Array.isArray(c)) return c.length ? analyzeCommand(c.map(String), modeFor(tool, runtime), { cwd, root: undefined, depth: 0 }) : null;
+  if (Array.isArray(c)) return c.length ? analyzeCommand(c.map(String), modeFor(tool, runtime), { cwd, root: undefined, depth: 0, worker }) : null;
   if (typeof c !== 'string' || !c.trim()) return null;
-  return analyze(c, { cwd, mode: modeFor(tool, runtime || C.detectRuntime(input)) });
+  return analyze(c, { cwd, mode: modeFor(tool, runtime || C.detectRuntime(input)), worker });
 }
 
 function main() {
@@ -608,7 +625,7 @@ function main() {
     const r = C.readStdinJson();
     if (!r.input) { if (r.error !== 'empty stdin') C.logError('guard', r.error); return; }
     input = r.input;
-    const reason = decide(input, C.detectRuntime(input));
+    const reason = decide(input, C.detectRuntime(input), { worker: process.argv.includes('--worker') });   // 작업자 모드 — policy 의 open 설정이 붙인다
     if (!reason) return;
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `[harness guard] ${reason}` },

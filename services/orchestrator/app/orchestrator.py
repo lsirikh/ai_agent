@@ -7,6 +7,7 @@ Redis 이벤트 기반으로 STT, LLM, TTS를 조율
 import asyncio
 import json
 import os
+import re
 import time
 from typing import Any, Optional
 
@@ -14,6 +15,22 @@ from .llm_client import LLMClient
 from .pipeline_logger import get_logger
 from .queue_manager import SentenceQueueManager
 from .state_machine import OrchestratorStateMachine, State
+
+DEFAULT_VOICE_SYSTEM_PROMPT = (
+    "당신은 EdgeVoice 음성 비서입니다. 항상 한국어로 답하세요. "
+    "답은 소리 내어 읽기 좋게 2~3문장으로 짧고 자연스럽게 말하고, "
+    "목록 기호·마크다운·이모지는 쓰지 마세요."
+)
+
+# 녹음에 섞여 들어온 웨이크워드("Hey Jarvis", "헤이 자비스")를 STT 결과 앞에서 뗀다
+WAKE_PHRASE_PATTERN = re.compile(
+    r"^\s*(?:hey|hi|헤이|해이)[\s,.!~\-]*(?:jarvis|자비스|쟈비스)[\s,.!?~\-]*",
+    re.IGNORECASE,
+)
+
+
+def strip_wake_phrase(text: str) -> str:
+    return WAKE_PHRASE_PATTERN.sub("", text, count=1).strip()
 
 
 class Orchestrator:
@@ -45,6 +62,16 @@ class Orchestrator:
         "state_change": "edgevoice:orchestrator:state"
     }
 
+    # 백엔드 StateManager 의 ORCHESTRATOR_STATE_KEY 와 같은 키
+    STATE_KEY = "orchestrator:state"
+    STATE_KEY_TTL_SECONDS = 300
+
+    # 듣기 상태에서 발화·end_pause·STT 처리를 기다리는 여유 시간
+    UTTERANCE_GRACE_SECONDS = 30.0
+
+    # 마지막 TTS 요청 후 완료 신호를 기다리는 최대 시간
+    TTS_COMPLETE_TIMEOUT_SECONDS = 60.0
+
     def __init__(
         self,
         llm_client: Optional[LLMClient] = None,
@@ -73,8 +100,11 @@ class Orchestrator:
             on_state_change=self._on_state_change
         )
 
-        # LLM 클라이언트
-        self.llm_client = llm_client or LLMClient(environment=environment)
+        # LLM 클라이언트 (음성 경로는 한국어로 짧게 답하도록 시스템 프롬프트를 준다)
+        self.llm_client = llm_client or LLMClient(
+            environment=environment,
+            system_prompt=os.getenv("VOICE_SYSTEM_PROMPT", DEFAULT_VOICE_SYSTEM_PROMPT),
+        )
 
         # Redis 클라이언트 (lazy initialization)
         self.redis = redis_client
@@ -89,6 +119,10 @@ class Orchestrator:
 
         # 내부 상태
         self._listening_task: Optional[asyncio.Task] = None
+
+        # 이번 턴에 보냈지만 아직 완료되지 않은 TTS 문장 수
+        self._pending_tts = 0
+        self._tts_watchdog: Optional[asyncio.Task] = None
         self._processing_task: Optional[asyncio.Task] = None
         self._is_running = False
 
@@ -131,6 +165,17 @@ class Orchestrator:
             })
             try:
                 await self.redis.publish(self.CHANNELS["state_change"], message)
+            except Exception:
+                pass
+
+            # 백엔드 /api/status/stream 은 이 키를 읽는다 (없으면 항상 OFF 로 보인다)
+            current = json.dumps({
+                "state": new_state.name,
+                "session_id": self._current_session_id,
+                "timestamp": time.time()
+            })
+            try:
+                await self.redis.set(self.STATE_KEY, current, ex=self.STATE_KEY_TTL_SECONDS)
             except Exception:
                 pass
 
@@ -210,6 +255,13 @@ class Orchestrator:
         if self.state_machine.current_state != State.LISTENING:
             return
 
+        text = strip_wake_phrase(text)
+        if not text:
+            # 웨이크워드만 들렸으면 LLM 을 부르지 않고 대기로 돌아간다
+            self._cancel_listening_timeout()
+            self.state_machine.transition_to(State.READY)
+            return
+
         await self._logger.log(
             event="stt_result_received",
             session_id=self._current_session_id,
@@ -246,8 +298,9 @@ class Orchestrator:
         if self._processing_task and not self._processing_task.done():
             self._processing_task.cancel()
 
-        # 큐 클리어
+        # 큐 클리어 (남은 문장의 완료는 더 기다리지 않는다)
         self.queue_manager.clear_on_barge_in()
+        self._pending_tts = 0
 
         # 상태 전이
         return self.state_machine.handle_barge_in()
@@ -268,11 +321,34 @@ class Orchestrator:
         Returns:
             처리 성공 여부
         """
-        # Phase 32: SPEAKING은 TTS_PROCESSING의 별칭
+        # TTS 는 문장마다 완료를 알린다 → 마지막 문장이 끝날 때 READY
         if self.state_machine.current_state in (State.SPEAKING, State.TTS_PROCESSING):
-            # Phase 32: IDLE은 READY의 별칭
+            self._pending_tts = max(0, self._pending_tts - 1)
+            if self._pending_tts == 0:
+                return self._finish_turn()
+        return False
+
+    def _finish_turn(self) -> bool:
+        """한 턴을 끝내고 READY 로 돌아간다(진행 중 상태가 아니면 그대로 둔다)."""
+        self._pending_tts = 0
+        if self._tts_watchdog and not self._tts_watchdog.done():
+            self._tts_watchdog.cancel()
+        if self.state_machine.current_state in (
+            State.STT_PROCESSING, State.LLM_PROCESSING, State.TTS_PROCESSING, State.SPEAKING
+        ):
             return self.state_machine.transition_to(State.READY)
         return False
+
+    def _start_tts_watchdog(self) -> None:
+        """TTS 완료 신호가 끝내 오지 않아도 비서가 멈추지 않도록 READY 로 되돌린다."""
+        if self._tts_watchdog and not self._tts_watchdog.done():
+            self._tts_watchdog.cancel()
+
+        async def watchdog() -> None:
+            await asyncio.sleep(self.TTS_COMPLETE_TIMEOUT_SECONDS)
+            self._finish_turn()
+
+        self._tts_watchdog = asyncio.create_task(watchdog())
 
     async def process_user_input(self, text: str) -> None:
         """
@@ -345,9 +421,12 @@ class Orchestrator:
                 self.llm_client.add_to_context("user", text)
                 self.llm_client.add_to_context("assistant", full_response)
 
-            # Phase 32: 모든 처리 완료 후 READY로 전이
-            if self.state_machine.current_state in (State.TTS_PROCESSING, State.SPEAKING):
-                self.state_machine.transition_to(State.READY)
+            # TTS 가 아직 말하는 중이면 마지막 문장의 tts:complete 에서 READY 로 간다.
+            # 보낸 문장이 없으면(빈 응답) 바로 READY.
+            if self._pending_tts <= 0:
+                self._finish_turn()
+            else:
+                self._start_tts_watchdog()
 
             llm_duration = int((time.time() - llm_start_time) * 1000)
             await self._logger.log(
@@ -393,6 +472,8 @@ class Orchestrator:
                 "voice": self._tts_voice
             }
         )
+
+        self._pending_tts += 1
 
         if self.redis:
             message = json.dumps({
@@ -442,7 +523,9 @@ class Orchestrator:
             self._listening_task.cancel()
 
         async def timeout_handler():
-            await asyncio.sleep(self.listening_timeout)
+            # 말 시작 대기(listening_timeout) + 말하는 시간·end_pause·STT 처리 여유.
+            # 말이 아예 없으면 게이트웨이가 먼저 듣기를 끝낸다.
+            await asyncio.sleep(self.listening_timeout + self.UTTERANCE_GRACE_SECONDS)
             if self.state_machine.current_state == State.LISTENING:
                 await self.handle_timeout()
 

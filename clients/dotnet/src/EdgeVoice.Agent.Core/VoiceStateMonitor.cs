@@ -15,6 +15,10 @@ public sealed class VoiceStateMonitor : IDisposable
 
     public event Action<VoiceState>? StateChanged;
 
+    public PipelineStage Stage { get; private set; } = PipelineStage.None;
+
+    public event Action<PipelineStage>? StageChanged;
+
     public void Start() => _ = Task.Run(() => RunAsync(_cts.Token));
 
     private async Task RunAsync(CancellationToken ct)
@@ -33,7 +37,9 @@ public sealed class VoiceStateMonitor : IDisposable
                     };
                     if (state is not null)
                     {
-                        SetState(VoiceStateMapper.FromOrchestrator(state.GetValue<string>()));
+                        var raw = state.GetValue<string>();
+                        SetState(VoiceStateMapper.FromOrchestrator(raw));
+                        SetStage(PipelineStageMapper.FromOrchestrator(raw));
                     }
                 }
             }
@@ -47,6 +53,7 @@ public sealed class VoiceStateMonitor : IDisposable
             }
 
             SetState(VoiceState.Idle);
+            SetStage(PipelineStage.None);
             try
             {
                 await Task.Delay(TimeSpan.FromSeconds(5), ct);
@@ -67,6 +74,17 @@ public sealed class VoiceStateMonitor : IDisposable
 
         State = state;
         StateChanged?.Invoke(state);
+    }
+
+    private void SetStage(PipelineStage stage)
+    {
+        if (Stage == stage)
+        {
+            return;
+        }
+
+        Stage = stage;
+        StageChanged?.Invoke(stage);
     }
 
     public void Dispose() => _cts.Cancel();

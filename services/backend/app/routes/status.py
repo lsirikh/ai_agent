@@ -441,8 +441,17 @@ def set_status_redis_client(redis):
 
 async def get_status_state_manager() -> StateManager:
     """StateManager 인스턴스 반환"""
-    global _state_manager
+    global _redis_client, _state_manager
     if _state_manager is None:
+        if _redis_client is None:
+            # lifespan 에서 주입되지 않았으면 직접 연결한다(없으면 상태가 항상 OFF 로 보인다)
+            import redis.asyncio as aioredis
+
+            _redis_client = aioredis.Redis(
+                host=os.getenv("REDIS_HOST", "redis"),
+                port=int(os.getenv("REDIS_PORT", "6379")),
+                decode_responses=True,
+            )
         _state_manager = StateManager(redis=_redis_client)
     return _state_manager
 

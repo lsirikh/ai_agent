@@ -155,9 +155,10 @@ class TestWebSocketVADEventIntegration:
                 mock_started.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_handle_vad_result_calls_stt_on_speech_end(self):
+    async def test_handle_vad_result_does_not_end_on_short_vad_pause(self):
         """
-        handle_vad_result에서 음성 종료 감지 시 STT가 호출되어야 함
+        VAD 의 짧은 무음(speech_ended)으로는 STT 를 호출하지 않는다.
+        발화 종료는 end_pause_seconds 무음(process_speech_timeout)이 판정한다.
         """
         from app import main
 
@@ -182,8 +183,8 @@ class TestWebSocketVADEventIntegration:
 
                 await main.handle_vad_result(vad_result, session_id="test-session")
 
-                # on_speech_ended가 호출되어야 함
-                mock_ended.assert_called_once_with(session_id="test-session")
+                # 짧은 무음으로는 녹음을 끝내지 않는다
+                mock_ended.assert_not_called()
 
 
 class TestSpeechEndedSTTTrigger:

@@ -7,16 +7,18 @@ using EdgeVoice.Agent.Core;
 namespace EdgeVoice.Agent.Desktop.Tray;
 
 /// <summary>
-/// 시스템 트레이 아이콘(Avalonia TrayIcon). 음성 상태에 따라 아이콘 자체가 파형 애니메이션을 그리고,
-/// 웹/메인 창 없이 트레이 클릭만으로 말하기(마이크 스트리밍)를 켜고 끌 수 있다.
+/// 시스템 트레이 아이콘(Avalonia TrayIcon). 음성 상태에 따라 아이콘 자체가 파형 애니메이션을 그린다.
+/// 마이크는 앱이 켜지면 상시 스트리밍되어 "Hey Jarvis" 만으로 바로 깨어난다.
+/// 트레이·오버레이 클릭은 음소거를 켜고 끈다.
 /// </summary>
 public sealed class TrayController : IDisposable
 {
     private const int IconSize = 32;
 
     private readonly MicrophoneStreamer _mic;
+    private readonly AlwaysOnMicrophone _alwaysOn;
     private readonly TrayIcon _trayIcon;
-    private readonly NativeMenuItem _talkItem;
+    private readonly NativeMenuItem _muteItem;
     private readonly NativeMenuItem _orbItem;
     private readonly VoiceOrbWindow _orb;
     private readonly DispatcherTimer _timer;
@@ -25,16 +27,15 @@ public sealed class TrayController : IDisposable
     private float _level;
     private double _phase;
     private VoiceState? _lastDrawn;
-    private bool _toggling;
-    private string? _error;
-    private DateTime _errorUntil;
+    private string? _lastNotice;
 
     public TrayController(Application app, VoiceStateMonitor monitor, MicrophoneStreamer mic, Action openMainWindow, Action exit)
     {
         _mic = mic;
+        _alwaysOn = new AlwaysOnMicrophone(mic);
 
-        _talkItem = new NativeMenuItem("말하기 시작");
-        _talkItem.Click += (_, _) => ToggleTalk();
+        _muteItem = new NativeMenuItem("마이크 음소거");
+        _muteItem.Click += (_, _) => ToggleMute();
         _orbItem = new NativeMenuItem("화면 파형 표시") { ToggleType = NativeMenuItemToggleType.CheckBox, IsChecked = true };
         _orbItem.Click += (_, _) => ToggleOrb();
         var openItem = new NativeMenuItem("EdgeVoice 창 열기");
@@ -45,55 +46,75 @@ public sealed class TrayController : IDisposable
         _trayIcon = new TrayIcon
         {
             ToolTipText = "EdgeVoice Agent",
-            Menu = new NativeMenu { _talkItem, _orbItem, openItem, new NativeMenuItemSeparator(), exitItem },
+            Menu = new NativeMenu { _muteItem, _orbItem, openItem, new NativeMenuItemSeparator(), exitItem },
             IsVisible = true,
         };
-        _trayIcon.Clicked += (_, _) => ToggleTalk();
+        _trayIcon.Clicked += (_, _) => ToggleMute();
         TrayIcon.SetIcons(app, new TrayIcons { _trayIcon });
 
         _orb = new VoiceOrbWindow();
-        _orb.TalkRequested += ToggleTalk;
+        _orb.TalkRequested += ToggleMute;
         _orb.OpenRequested += openMainWindow;
         _orb.Show();
 
         monitor.StateChanged += s => Dispatcher.UIThread.Post(() => _serverState = s);
+        monitor.StageChanged += st => Dispatcher.UIThread.Post(() => _orb.SetStage(st));
         _mic.LevelChanged += l => _level = l;
-        _mic.StreamingChanged += on => Dispatcher.UIThread.Post(() => _talkItem.Header = on ? "말하기 중지" : "말하기 시작");
+        _alwaysOn.MutedChanged += muted => Dispatcher.UIThread.Post(
+            () => _muteItem.Header = muted ? "마이크 음소거 해제" : "마이크 음소거");
 
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(60) };
         _timer.Tick += (_, _) => Animate();
         _timer.Start();
+
+        // 클릭 없이 바로 대기: 웨이크워드 감지는 마이크 소리가 게이트웨이로 들어와야 동작한다
+        _alwaysOn.Start();
     }
 
-    /// <summary>서버가 대기 상태여도 로컬 마이크 스트리밍 중이면 '듣는 중'으로 표시한다.</summary>
-    private VoiceState EffectiveState
-        => _serverState == VoiceState.Idle && _mic.IsStreaming ? VoiceState.Listening : _serverState;
+    /// <summary>오버레이·툴팁에 보일 안내. 평상시에는 없다(상태는 파형과 단계 아이콘이 보여 준다).</summary>
+    private string? Notice
+    {
+        get
+        {
+            if (_alwaysOn.IsMuted)
+            {
+                return "마이크 음소거";
+            }
+
+            if (!_mic.IsStreaming && _alwaysOn.LastError is { } error)
+            {
+                return "음성 연결 대기: " + error;
+            }
+
+            return null;
+        }
+    }
 
     private void Animate()
     {
-        var state = EffectiveState;
+        var state = _serverState;
         var animated = state is VoiceState.Listening or VoiceState.Speaking or VoiceState.Thinking;
-        if (!animated && _lastDrawn == state && _error is null)
+        _phase = (_phase + (state == VoiceState.Listening ? 0.03 + _level * 0.05 : 0.035)) % 1.0;
+
+        var notice = Notice;
+
+        // 오버레이의 프랙탈은 대기 중에도 천천히 움직이므로 매 프레임 그린다
+        _orb.Update(state, _phase, _level, notice ?? string.Empty);
+
+        // 트레이 아이콘은 움직이는 상태이거나 바뀌었을 때만 다시 그린다
+        if (!animated && _lastDrawn == state && notice == _lastNotice)
         {
             return;
         }
 
-        _phase = (_phase + (state == VoiceState.Listening ? 0.03 + _level * 0.05 : 0.035)) % 1.0;
         _lastDrawn = state;
-
+        _lastNotice = notice;
         using (var bmp = RippleRenderer.RenderBitmap(IconSize, state, _phase, _level))
         {
             _trayIcon.Icon = new WindowIcon(bmp);
         }
 
-        if (_error is not null && DateTime.Now > _errorUntil)
-        {
-            _error = null;
-        }
-
-        var text = _error ?? StateText(state);
-        _trayIcon.ToolTipText = "EdgeVoice Agent - " + text;
-        _orb.Update(state, _phase, _level, text);
+        _trayIcon.ToolTipText = "EdgeVoice Agent - " + (notice ?? StateText(state));
     }
 
     public static string StateText(VoiceState state) => state switch
@@ -102,41 +123,10 @@ public sealed class TrayController : IDisposable
         VoiceState.Thinking => "생각 중",
         VoiceState.Speaking => "말하는 중",
         VoiceState.Error => "오류",
-        _ => "대기",
+        _ => "\"Hey Jarvis\" 대기",
     };
 
-    private async void ToggleTalk()
-    {
-        if (_toggling)
-        {
-            return;
-        }
-
-        _toggling = true;
-        try
-        {
-            if (_mic.IsStreaming)
-            {
-                _mic.Stop();
-            }
-            else
-            {
-                await _mic.StartAsync();
-            }
-        }
-        catch (Exception ex)
-        {
-            _mic.Stop();
-
-            // Avalonia 트레이는 풍선 알림이 없어 오버레이 라벨/툴팁에 3초간 표시한다
-            _error = "음성 연결 실패: " + ex.Message;
-            _errorUntil = DateTime.Now.AddSeconds(3);
-        }
-        finally
-        {
-            _toggling = false;
-        }
-    }
+    private void ToggleMute() => _alwaysOn.IsMuted = !_alwaysOn.IsMuted;
 
     private void ToggleOrb()
     {
@@ -154,7 +144,7 @@ public sealed class TrayController : IDisposable
     public void Dispose()
     {
         _timer.Stop();
-        _mic.Stop();
+        _alwaysOn.Dispose();
         _trayIcon.Dispose();
         _orb.Close();
     }

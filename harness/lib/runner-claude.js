@@ -144,7 +144,7 @@ async function run(o) {
   const mode = !o.sessionId ? 'per_call' : o.costMode || costModeFor(exe.version(bin, o.exePrefixArgs, o.env));
   try {
     // allowRules: 사용자가 준 추가 허용(go --allow · worker_allow) — allow 끝에 덧붙고 deny 는 그대로다.
-    fs.writeFileSync(settingsFile, JSON.stringify(policy.claudeSettings(o.allowCommands || [], o.allowRules || []), null, 2));
+    fs.writeFileSync(settingsFile, JSON.stringify(policy.claudeSettings(o.allowCommands || [], o.allowRules || [], o.workerPermissions || 'strict'), null, 2));
     const ver = exe.version(bin, o.exePrefixArgs, o.env);
     const promptsNone = o.promptsNone != null ? o.promptsNone : !!(ver && cmpVer(ver, [2, 1, 283]) >= 0);
     const args = [...(o.exePrefixArgs || []), ...buildArgs({ ...o, promptsNone }, settingsFile, sid)];

@@ -110,7 +110,18 @@ function checkAllowRules(list, where) {
 
 // allowCommands: ['node','npm',…] — 이름만. 규칙 문법을 깰 수 있는 이름(괄호·공백·경로)은 버린다.
 // extraAllow: 사용자가 준 규칙(go --allow · worker_allow) — 다시 검증해 금지 규칙은 버리고 allow 끝에 덧붙인다. deny 는 바꾸지 않는다.
-function claudeSettings(allowCommands, extraAllow) {
+// mode: 'strict'(이 함수의 기본 · 예전 허용 목록) | 'open'(작업 루프의 기본).
+//   [2026-10-16 사용자 지시 · 현장 감사] 허용 목록은 경계가 아니었다 — node · python 이 허용되면 무엇이든 돈다 — 그런데 정상 명령의 19% 를 막았다.
+//   open: Bash · PowerShell 은 전부 허용하고, git 쓰기 deny 는 그대로 두며, 되돌릴 수 없는 명령(저장소 밖 삭제 · 강제 reset 등)은
+//   대화형 세션과 같은 guard 훅이 거른다. push 와 이 저장소의 ref 변경은 git 수준(proc.noPushEnv · reference-transaction 훅)에서 따로 막힌다.
+const GUARD = require('node:path').join(__dirname, '..', 'hooks', 'guard.js');
+function claudeSettings(allowCommands, extraAllow, mode) {
+  if (mode === 'open') {
+    return {
+      permissions: { allow: ['Bash(*)', 'PowerShell(*)'], deny: rules(DENY_GIT), disableBypassPermissionsMode: 'disable' },
+      hooks: { PreToolUse: [{ matcher: 'Bash|PowerShell', hooks: [{ type: 'command', command: `node "${GUARD}" --worker`, timeout: 15 }] }] },
+    };
+  }
   const progs = [...new Set((allowCommands || []).map(String).filter(n => SAFE_NAME.test(n) && !isNeverAllowed(n)))];
   const base = [...rules(progs), ...rules(READONLY_GIT), ...rules(READONLY_FILTERS), ...rules(READONLY_TOOLS)];
   const extra = [...new Set((extraAllow || []).map(x => String(x).trim()).filter(x => !validateAllowRule(x) && !base.includes(x)))];
