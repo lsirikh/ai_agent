@@ -39,6 +39,52 @@ def strip_wake_phrase(text: str) -> str:
     return WAKE_PHRASE_PATTERN.sub("", text, count=1).strip()
 
 
+ORDINALS = [
+    "첫째", "둘째", "셋째", "넷째", "다섯째",
+    "여섯째", "일곱째", "여덟째", "아홉째", "열째",
+]
+LIST_NUMBER_AT_LINE_START = re.compile(r"^\s*(\d{1,2})[.)]\s+")
+LIST_NUMBER_AT_END = re.compile(r"\s+(\d{1,2})[.)]\s*$")
+BULLET_AT_LINE_START = re.compile(r"^\s*[-*•]\s+")
+MARKDOWN_MARKS = re.compile(r"\*\*|__|`|#+\s*")
+
+
+def _ordinal(number: int) -> str:
+    return ORDINALS[number - 1] if 1 <= number <= len(ORDINALS) else f"{number}번째"
+
+
+def to_speech(
+    sentence: str, pending_number: Optional[int]
+) -> tuple[str, Optional[int]]:
+    """
+    TTS 가 자연스럽게 읽도록 한 문장을 다듬는다.
+
+    - 줄 앞 번호 "1. " → "첫째, ", 글머리표·마크다운 기호 제거, ';' ':' → ','.
+    - 문장 나누기로 끝에 떨어진 번호("…좋겠네요: 1.")는 떼고 다음 문장 앞에 붙인다.
+    반환: (읽을 문장, 다음 문장 앞에 붙일 번호)
+    """
+    trailing = LIST_NUMBER_AT_END.search(sentence)
+    next_number = int(trailing.group(1)) if trailing else None
+    if trailing:
+        sentence = sentence[: trailing.start()]
+
+    lines = []
+    for line in sentence.splitlines():
+        line = BULLET_AT_LINE_START.sub("", line)
+        line = LIST_NUMBER_AT_LINE_START.sub(
+            lambda m: f"{_ordinal(int(m.group(1)))}, ", line
+        )
+        if line.strip():
+            lines.append(line.strip())
+    text = " ".join(lines)
+    if pending_number is not None:
+        text = f"{_ordinal(pending_number)}, {text}"
+    text = MARKDOWN_MARKS.sub("", text)
+    text = re.sub(r"\s*[;:]\s*", ", ", text)
+    text = re.sub(r",\s*$", ".", re.sub(r"\s{2,}", " ", text)).strip()
+    return text, next_number
+
+
 class Orchestrator:
     """
     음성 대화 오케스트레이터
@@ -135,6 +181,9 @@ class Orchestrator:
         # 이번 턴에 보냈지만 아직 완료되지 않은 TTS 문장 수
         self._pending_tts = 0
         self._tts_watchdog: Optional[asyncio.Task] = None
+
+        # 문장 끝에 떨어진 목록 번호(다음 문장 앞에 '첫째,' 처럼 붙인다)
+        self._pending_list_number: Optional[int] = None
         self._processing_task: Optional[asyncio.Task] = None
         self._is_running = False
 
@@ -391,6 +440,7 @@ class Orchestrator:
             text: 사용자 입력 텍스트
         """
         first_sentence_sent = False
+        self._pending_list_number = None
         full_response = ""
         llm_start_time = time.time()
 
@@ -524,7 +574,11 @@ class Orchestrator:
                 data={"message": f"Skipped non-Korean sentence: {sentence[:50]}"},
             )
             return
-        await self.publish_tts_request(sentence)
+        speech, self._pending_list_number = to_speech(
+            sentence, self._pending_list_number
+        )
+        if speech:
+            await self.publish_tts_request(speech)
 
     async def publish_tts_request(self, text: str) -> None:
         """
