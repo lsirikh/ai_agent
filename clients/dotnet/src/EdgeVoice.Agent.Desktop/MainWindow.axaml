@@ -84,6 +84,51 @@
             <Setter Property="Padding" Value="24,20,12,12" />
         </Style>
 
+        <!-- 빈 상태 안내 문구 (모든 페이지 공통) -->
+        <Style Selector="TextBlock.empty">
+            <Setter Property="Foreground" Value="{DynamicResource OfficeSubtleTextBrush}" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="TextAlignment" Value="Center" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="IsHitTestVisible" Value="False" />
+        </Style>
+        <!-- 도움말(필드 아래 작은 설명) -->
+        <Style Selector="TextBlock.help">
+            <Setter Property="Foreground" Value="{DynamicResource OfficeSubtleTextBrush}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,3,0,0" />
+        </Style>
+        <!-- "다시 시작 후 적용" 배지 -->
+        <Style Selector="Border.badge">
+            <Setter Property="Background" Value="{DynamicResource OfficeWarningBackgroundBrush}" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="10,6" />
+            <Setter Property="Margin" Value="0,0,12,12" />
+        </Style>
+        <Style Selector="Border.badge TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource OfficeWarningTextBrush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <!-- 표 머리글: 모든 표가 같은 굵기·색 -->
+        <Style Selector="DataGridColumnHeader">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource OfficeSubtleTextBrush}" />
+        </Style>
+        <!-- 로그 레벨 색 -->
+        <Style Selector="TextBlock.lvError">
+            <Setter Property="Foreground" Value="{DynamicResource OfficeErrorTextBrush}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style Selector="TextBlock.lvWarning">
+            <Setter Property="Foreground" Value="{DynamicResource OfficeWarningTextBrush}" />
+        </Style>
+        <Style Selector="TextBlock.lvDebug">
+            <Setter Property="Foreground" Value="{DynamicResource OfficeSubtleTextBrush}" />
+        </Style>
+
         <!-- 상단 앱 바 버튼 -->
         <Style Selector="Button.appBar">
             <Setter Property="Background" Value="Transparent" />
@@ -179,12 +224,16 @@
                                 <Border Grid.Row="3" Grid.ColumnSpan="2" Classes="card">
                                     <DockPanel>
                                         <TextBlock DockPanel.Dock="Top" Text="서비스" Classes="cardTitle" />
-                                        <DataGrid ItemsSource="{Binding Services}" AutoGenerateColumns="False" IsReadOnly="True">
-                                            <DataGrid.Columns>
-                                                <DataGridTextColumn Header="Service" Binding="{Binding Name}" Width="200" />
-                                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="*" />
-                                            </DataGrid.Columns>
-                                        </DataGrid>
+                                        <Panel>
+                                            <DataGrid ItemsSource="{Binding Services}" AutoGenerateColumns="False" IsReadOnly="True">
+                                                <DataGrid.Columns>
+                                                    <DataGridTextColumn Header="Service" Binding="{Binding Name}" Width="200" />
+                                                    <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="*" />
+                                                </DataGrid.Columns>
+                                            </DataGrid>
+                                            <TextBlock x:Name="DashboardEmpty" Classes="empty" IsVisible="{Binding !Services.Count}"
+                                                       Text="서비스 상태가 아직 없습니다. 백엔드에 연결되면 자동으로 채워집니다." />
+                                        </Panel>
                                     </DockPanel>
                                 </Border>
                             </Grid>
@@ -214,20 +263,24 @@
                             </DockPanel>
                         </Border>
                         <Border Classes="card">
-                            <ListBox x:Name="ChatMessages" ItemsSource="{Binding Messages}" Background="Transparent"
-                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <StackPanel Margin="0,4">
-                                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                                <TextBlock Text="{Binding Role}" FontWeight="SemiBold" Foreground="{DynamicResource OfficeAccentTextBrush}" />
-                                                <TextBlock Text="🎙 음성" IsVisible="{Binding IsVoice}" Opacity="0.7" ToolTip.Tip="음성으로 나눈 대화" />
+                            <Panel>
+                                <TextBlock x:Name="ChatEmpty" Classes="empty" IsVisible="{Binding !Messages.Count}"
+                                           Text="Hey Jarvis 라고 부르거나 메시지를 입력하세요" />
+                                <ListBox x:Name="ChatMessages" ItemsSource="{Binding Messages}" Background="Transparent"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Margin="0,4">
+                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                    <TextBlock Text="{Binding Role}" FontWeight="SemiBold" Foreground="{DynamicResource OfficeAccentTextBrush}" />
+                                                    <TextBlock Text="🎙 음성" IsVisible="{Binding IsVoice}" Opacity="0.7" ToolTip.Tip="음성으로 나눈 대화" />
+                                                </StackPanel>
+                                                <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap" />
                                             </StackPanel>
-                                            <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap" />
-                                        </StackPanel>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Panel>
                         </Border>
                     </DockPanel>
                 </Border>
@@ -241,23 +294,28 @@
                         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,12">
                             <Button Classes="accent" Content="문서 업로드..." Command="{Binding UploadCommand}" />
                             <Button Content="새로고침" Command="{Binding RefreshCommand}" />
+                            <TextBlock Text="{Binding SupportedFormats}" Classes="help" VerticalAlignment="Center" Margin="6,0,0,0" />
                         </StackPanel>
-                        <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="status" />
+                        <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="status" TextWrapping="Wrap" />
                         <Border Classes="card">
-                            <DataGrid ItemsSource="{Binding Documents}" AutoGenerateColumns="False" IsReadOnly="True">
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="파일" Binding="{Binding Filename}" Width="*" />
-                                    <DataGridTextColumn Header="정보" Binding="{Binding Meta}" Width="220" />
-                                    <DataGridTemplateColumn Width="80">
-                                        <DataGridTemplateColumn.CellTemplate>
-                                            <DataTemplate>
-                                                <Button Content="삭제" CommandParameter="{Binding}"
-                                                        Command="{Binding $parent[DataGrid].DataContext.DeleteCommand}" />
-                                            </DataTemplate>
-                                        </DataGridTemplateColumn.CellTemplate>
-                                    </DataGridTemplateColumn>
-                                </DataGrid.Columns>
-                            </DataGrid>
+                            <Panel>
+                                <DataGrid ItemsSource="{Binding Documents}" AutoGenerateColumns="False" IsReadOnly="True">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="파일" Binding="{Binding Filename}" Width="*" />
+                                        <DataGridTextColumn Header="조각 수 | 업로드 시각" Binding="{Binding Meta}" Width="260" />
+                                        <DataGridTemplateColumn Width="80">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <Button Content="삭제" CommandParameter="{Binding}"
+                                                            Command="{Binding $parent[DataGrid].DataContext.DeleteCommand}" />
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <TextBlock x:Name="KnowledgeEmpty" Classes="empty" IsVisible="{Binding !Documents.Count}"
+                                           Text="등록된 문서가 없습니다. '문서 업로드...' 로 추가하면 채팅의 RAG 답변에 쓰입니다." />
+                            </Panel>
                         </Border>
                     </DockPanel>
                 </Border>
@@ -269,52 +327,86 @@
                     <DockPanel>
                         <TextBlock DockPanel.Dock="Top" Text="설정" Classes="title" />
                         <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="status" />
+                        <!-- 콤보박스 선택값 = 실행 중인 서비스 값. 저장값과 다르면 배지 -->
+                        <Border x:Name="PendingBadge" DockPanel.Dock="Top" Classes="badge" IsVisible="{Binding HasPendingRestart}">
+                            <TextBlock Text="{Binding PendingRestart, StringFormat='다시 시작 후 적용: {0}'}" />
+                        </Border>
                         <ScrollViewer>
-                            <Border Classes="card" MaxWidth="680" HorizontalAlignment="Left" VerticalAlignment="Top">
+                            <Grid ColumnDefinitions="*,*" VerticalAlignment="Top">
                                 <StackPanel>
-                                    <TextBlock Text="모델" Classes="section" Margin="0" />
-                                    <TextBlock Text="TTS Engine" Classes="label" />
-                                    <ComboBox ItemsSource="{Binding TtsEngines}" DisplayMemberBinding="{Binding Label}"
-                                              SelectedValueBinding="{Binding Id}" SelectedValue="{Binding TtsEngine}" HorizontalAlignment="Stretch" />
-                                    <TextBlock Text="TTS Voice" Classes="label" />
-                                    <ComboBox ItemsSource="{Binding TtsVoices}" SelectedItem="{Binding TtsVoice}" HorizontalAlignment="Stretch" />
-                                    <TextBlock Text="STT Model" Classes="label" />
-                                    <ComboBox ItemsSource="{Binding SttModels}" DisplayMemberBinding="{Binding Label}"
-                                              SelectedValueBinding="{Binding Id}" SelectedValue="{Binding SttModel}" HorizontalAlignment="Stretch" />
-                                    <TextBlock Text="LLM Model" Classes="label" />
-                                    <ComboBox ItemsSource="{Binding LlmModels}" DisplayMemberBinding="{Binding Label}"
-                                              SelectedValueBinding="{Binding Id}" SelectedValue="{Binding LlmModel}" HorizontalAlignment="Stretch" />
-                                    <StackPanel Orientation="Horizontal" Margin="0,10,0,8">
-                                        <Button Classes="accent" Content="모델 적용" Command="{Binding ApplyModelsCommand}" />
-                                        <Button Content="LLM 재시작" Command="{Binding RestartLlmCommand}" />
-                                    </StackPanel>
-
-                                    <TextBlock Text="일반" Classes="section" />
-                                    <TextBlock Text="Wake Word" Classes="label" />
-                                    <DockPanel>
-                                        <Button DockPanel.Dock="Right" Content="등록" Command="{Binding RegisterWakeWordCommand}" Margin="6,0,0,0" />
-                                        <ComboBox ItemsSource="{Binding WakeWords}" SelectedItem="{Binding WakeWord}" HorizontalAlignment="Stretch" />
-                                    </DockPanel>
-                                    <TextBlock Text="Language" Classes="label" />
-                                    <ComboBox ItemsSource="{Binding Languages}" SelectedItem="{Binding Language}" HorizontalAlignment="Stretch" />
-                                    <TextBlock Classes="label" Text="{Binding VoiceSpeed, StringFormat='Voice Speed: {0:0.0}x'}" />
-                                    <Slider Minimum="0.5" Maximum="2.0" TickFrequency="0.1" IsSnapToTickEnabled="True" Value="{Binding VoiceSpeed}" />
-                                    <TextBlock Classes="label" Text="{Binding WakeWordThreshold, StringFormat='Wake Word Threshold: {0:0.00}'}" />
-                                    <Slider Minimum="0.1" Maximum="0.9" TickFrequency="0.05" IsSnapToTickEnabled="True" Value="{Binding WakeWordThreshold}" />
-                                    <TextBlock Classes="label" Text="{Binding EndPauseSeconds, StringFormat='End Pause: {0:0.0}s'}" />
-                                    <Slider Minimum="1" Maximum="10" TickFrequency="0.5" IsSnapToTickEnabled="True" Value="{Binding EndPauseSeconds}" />
-                                    <TextBlock Classes="label" Text="{Binding ListeningTimeoutSeconds, StringFormat='Listening Timeout: {0:0}s'}" />
-                                    <Slider Minimum="5" Maximum="60" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding ListeningTimeoutSeconds}" />
-                                    <Button Classes="accent" Content="일반 설정 저장" Command="{Binding SaveGeneralCommand}" HorizontalAlignment="Left" Margin="0,8,0,8" />
-
-                                    <TextBlock Text="LLM 컨텍스트" Classes="section" />
-                                    <CheckBox Content="대화 컨텍스트 사용" IsChecked="{Binding ContextEnabled}" Margin="0,6,0,0" />
-                                    <TextBlock Classes="label" Text="{Binding ContextWindowSize, StringFormat='Context Window: {0} messages'}" />
-                                    <Slider Minimum="5" Maximum="50" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding ContextWindowSize}" />
-                                    <TextBlock Text="{Binding EstimatedTokens}" Classes="status" Margin="0" />
-                                    <Button Classes="accent" Content="컨텍스트 설정 저장" Command="{Binding SaveContextCommand}" HorizontalAlignment="Left" Margin="0,8,0,0" />
+                                    <Border Classes="card">
+                                        <StackPanel>
+                                            <TextBlock Text="음성 인식" Classes="cardTitle" />
+                                            <TextBlock Text="음성 인식 모델 (STT)" Classes="label" />
+                                            <ComboBox x:Name="SttModelCombo" ItemsSource="{Binding SttModels}" DisplayMemberBinding="{Binding Label}"
+                                                      SelectedValueBinding="{Binding Id}" SelectedValue="{Binding SttModel}" HorizontalAlignment="Stretch" />
+                                            <TextBlock Text="호출어 (Wake Word)" Classes="label" />
+                                            <DockPanel>
+                                                <Button DockPanel.Dock="Right" Content="호출어 바로 바꾸기" Command="{Binding RegisterWakeWordCommand}" Margin="6,0,0,0"
+                                                        ToolTip.Tip="선택한 호출어를 웨이크워드 서비스에 바로 적용합니다" />
+                                                <ComboBox x:Name="WakeWordCombo" ItemsSource="{Binding WakeWords}" SelectedItem="{Binding WakeWord}" HorizontalAlignment="Stretch" />
+                                            </DockPanel>
+                                            <TextBlock Text="이 말을 들으면 듣기 시작합니다. '호출어 바로 바꾸기' 는 다른 일반 설정을 저장하지 않고 호출어만 바꿉니다." Classes="help" />
+                                            <TextBlock Classes="label" Text="{Binding WakeWordThreshold, StringFormat='호출어 민감도 (임계값): {0:0.00}'}" />
+                                            <Slider Minimum="0.1" Maximum="0.9" TickFrequency="0.05" IsSnapToTickEnabled="True" Value="{Binding WakeWordThreshold}" />
+                                            <TextBlock Text="낮을수록 잘 반응하고 잘못 깨어날 수도 있습니다. 웨이크워드 서비스가 지금 쓰는 값입니다." Classes="help" />
+                                            <TextBlock Classes="label" Text="{Binding EndPauseSeconds, StringFormat='말 끝 판단 무음: {0:0.0}초'}" />
+                                            <Slider Minimum="1" Maximum="10" TickFrequency="0.5" IsSnapToTickEnabled="True" Value="{Binding EndPauseSeconds}" />
+                                            <TextBlock Classes="label" Text="{Binding ListeningTimeoutSeconds, StringFormat='듣기 제한 시간: {0:0}초'}" />
+                                            <Slider Minimum="5" Maximum="30" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding ListeningTimeoutSeconds}" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Classes="card">
+                                        <StackPanel>
+                                            <TextBlock Text="답변 음성" Classes="cardTitle" />
+                                            <TextBlock Text="음성 엔진 (TTS)" Classes="label" />
+                                            <ComboBox x:Name="TtsEngineCombo" ItemsSource="{Binding TtsEngines}" DisplayMemberBinding="{Binding Label}"
+                                                      SelectedValueBinding="{Binding Id}" SelectedValue="{Binding TtsEngine}" HorizontalAlignment="Stretch" />
+                                            <TextBlock Text="음성" Classes="label" />
+                                            <ComboBox x:Name="TtsVoiceCombo" ItemsSource="{Binding TtsVoices}" SelectedItem="{Binding TtsVoice}" HorizontalAlignment="Stretch" />
+                                            <TextBlock Text="엔진마다 쓸 수 있는 음성이 다릅니다 (MeloTTS 는 KR 하나)." Classes="help" />
+                                            <TextBlock Classes="label" Text="{Binding VoiceSpeed, StringFormat='말하기 속도: {0:0.0}x'}" />
+                                            <Slider Minimum="0.5" Maximum="2.0" TickFrequency="0.1" IsSnapToTickEnabled="True" Value="{Binding VoiceSpeed}" />
+                                        </StackPanel>
+                                    </Border>
                                 </StackPanel>
-                            </Border>
+                                <StackPanel Grid.Column="1">
+                                    <Border Classes="card">
+                                        <StackPanel>
+                                            <TextBlock Text="언어 모델" Classes="cardTitle" />
+                                            <TextBlock Text="LLM 모델 (받아 둔 모델만)" Classes="label" />
+                                            <ComboBox x:Name="LlmModelCombo" ItemsSource="{Binding LlmModels}" DisplayMemberBinding="{Binding Label}"
+                                                      SelectedValueBinding="{Binding Id}" SelectedValue="{Binding LlmModel}" HorizontalAlignment="Stretch" />
+                                            <TextBlock Text="모델을 바꾸면 vLLM 을 다시 만들어야 적용됩니다 (docker compose up -d llm)." Classes="help" />
+                                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                                <Button Classes="accent" Content="모델 적용" Command="{Binding ApplyModelsCommand}"
+                                                        ToolTip.Tip="음성 인식·답변 음성·언어 모델 선택을 저장합니다" />
+                                                <Button Content="LLM 다시 만들기" Command="{Binding RestartLlmCommand}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Classes="card">
+                                        <StackPanel>
+                                            <TextBlock Text="대화 (컨텍스트)" Classes="cardTitle" />
+                                            <CheckBox Content="이전 대화를 기억해 답하기" IsChecked="{Binding ContextEnabled}" />
+                                            <TextBlock Classes="label" Text="{Binding ContextWindowSize, StringFormat='기억할 메시지 수: {0}'}" />
+                                            <Slider Minimum="5" Maximum="50" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding ContextWindowSize}" />
+                                            <TextBlock Text="{Binding EstimatedTokens}" Classes="help" />
+                                            <Button Classes="accent" Content="컨텍스트 설정 저장" Command="{Binding SaveContextCommand}" HorizontalAlignment="Left" Margin="0,10,0,0" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Classes="card">
+                                        <StackPanel>
+                                            <TextBlock Text="일반" Classes="cardTitle" />
+                                            <TextBlock Text="언어" Classes="label" />
+                                            <ComboBox x:Name="LanguageCombo" ItemsSource="{Binding Languages}" DisplayMemberBinding="{Binding Label}"
+                                                      SelectedValueBinding="{Binding Id}" SelectedValue="{Binding Language}" HorizontalAlignment="Stretch" />
+                                            <Button Classes="accent" Content="일반 설정 저장" Command="{Binding SaveGeneralCommand}" HorizontalAlignment="Left" Margin="0,10,0,0" />
+                                            <TextBlock Text="호출어·민감도·무음·제한 시간·말하기 속도·언어를 저장하고 서비스에 바로 반영합니다." Classes="help" />
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </Grid>
                         </ScrollViewer>
                     </DockPanel>
                 </Border>
@@ -331,13 +423,17 @@
                         </DockPanel>
                         <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="status" />
                         <Border Classes="card">
-                            <DataGrid ItemsSource="{Binding Items}" AutoGenerateColumns="False" IsReadOnly="True">
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="시간" Binding="{Binding Time}" Width="160" />
-                                    <DataGridTextColumn Header="질문" Binding="{Binding Query}" Width="*" />
-                                    <DataGridTextColumn Header="응답" Binding="{Binding Response}" Width="2*" />
-                                </DataGrid.Columns>
-                            </DataGrid>
+                            <Panel>
+                                <DataGrid ItemsSource="{Binding Items}" AutoGenerateColumns="False" IsReadOnly="True">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="시간" Binding="{Binding Time}" Width="160" />
+                                        <DataGridTextColumn Header="질문" Binding="{Binding Query}" Width="*" />
+                                        <DataGridTextColumn Header="응답" Binding="{Binding Response}" Width="2*" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <TextBlock x:Name="HistoryEmpty" Classes="empty" IsVisible="{Binding !Items.Count}"
+                                           Text="아직 대화 기록이 없습니다. 채팅이나 음성(Hey Jarvis)으로 나눈 대화가 여기에 쌓입니다." />
+                            </Panel>
                         </Border>
                     </DockPanel>
                 </Border>
@@ -349,8 +445,11 @@
                     <DockPanel>
                         <TextBlock DockPanel.Dock="Top" Text="로그" Classes="title" />
                         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
-                            <ComboBox ItemsSource="{Binding Services}" SelectedItem="{Binding ServiceFilter}" Width="130" Margin="0,0,6,0" />
-                            <ComboBox ItemsSource="{Binding Levels}" SelectedItem="{Binding LevelFilter}" Width="110" Margin="0,0,6,0" />
+                            <ComboBox x:Name="LogServiceCombo" ItemsSource="{Binding Services}" DisplayMemberBinding="{Binding Label}"
+                                      SelectedValueBinding="{Binding Id}" SelectedValue="{Binding ServiceFilter}" Width="150" Margin="0,0,6,0" />
+                            <ComboBox x:Name="LogLevelCombo" ItemsSource="{Binding Levels}" DisplayMemberBinding="{Binding Label}"
+                                      SelectedValueBinding="{Binding Id}" SelectedValue="{Binding LevelFilter}" Width="170" Margin="0,0,6,0"
+                                      ToolTip.Tip="기본 'INFO 이상' 은 VAD 확률 같은 고빈도 DEBUG 를 숨깁니다. 모두 보려면 '전체(DEBUG 포함)'" />
                             <Button Classes="accent" Content="조회" Command="{Binding RefreshCommand}" />
                             <ToggleButton Content="Live" IsChecked="{Binding IsLive, Mode=OneWay}" Command="{Binding ToggleLiveCommand}" Padding="12,5" Margin="0,0,6,0" />
                             <Button Content="지우기" Command="{Binding ClearCommand}" />
@@ -359,16 +458,27 @@
                         <TextBlock DockPanel.Dock="Top" Text="{Binding Stats}" Classes="kpiLabel" Margin="0,0,0,8" />
                         <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="status" />
                         <Border Classes="card">
-                            <DataGrid ItemsSource="{Binding Logs}" AutoGenerateColumns="False" IsReadOnly="True" FontFamily="Cascadia Mono, Consolas, DejaVu Sans Mono, monospace">
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Time" Binding="{Binding Time}" Width="100" />
-                                    <DataGridTextColumn Header="Level" Binding="{Binding Level}" Width="70" />
-                                    <DataGridTextColumn Header="Service" Binding="{Binding Service}" Width="100" />
-                                    <DataGridTextColumn Header="Stage" Binding="{Binding Stage}" Width="150" />
-                                    <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="*" />
-                                    <DataGridTextColumn Header="Duration" Binding="{Binding Duration}" Width="70" />
-                                </DataGrid.Columns>
-                            </DataGrid>
+                            <Panel>
+                                <DataGrid x:Name="LogGrid" ItemsSource="{Binding Logs}" AutoGenerateColumns="False" IsReadOnly="True" FontFamily="Cascadia Mono, Consolas, DejaVu Sans Mono, monospace">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Time" Binding="{Binding Time}" Width="150" />
+                                        <DataGridTemplateColumn Header="Level" Width="95">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding Level}" VerticalAlignment="Center" Margin="12,0,0,0"
+                                                               Classes.lvError="{Binding IsError}" Classes.lvWarning="{Binding IsWarning}" Classes.lvDebug="{Binding IsDebug}" />
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTextColumn Header="Service" Binding="{Binding Service}" Width="160" />
+                                        <DataGridTextColumn Header="Stage" Binding="{Binding Stage}" Width="210" />
+                                        <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="*" />
+                                        <DataGridTextColumn Header="Duration" Binding="{Binding Duration}" Width="105" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <TextBlock x:Name="LogsEmpty" Classes="empty" IsVisible="{Binding !Logs.Count}"
+                                           Text="표시할 로그가 없습니다. 필터를 '전체' 로 바꾸거나 Live 를 켜 두세요." />
+                            </Panel>
                         </Border>
                     </DockPanel>
                 </Border>

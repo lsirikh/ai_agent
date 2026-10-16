@@ -19,7 +19,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ..repositories.pipeline_log_repository import PipelineLogRepository
+from ..repositories.pipeline_log_repository import LOG_LEVELS, PipelineLogRepository
 from ..services.log_broadcaster import broadcast_log, LOGS_CHANNEL
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
@@ -35,7 +35,8 @@ def _get_redis_url() -> str:
 async def create_log_event_generator(
     pubsub: Optional[Any] = None,
     level: Optional[str] = None,
-    service: Optional[str] = None
+    service: Optional[str] = None,
+    min_level: Optional[str] = None
 ) -> AsyncGenerator[str, None]:
     """
     Redis Pub/Sub 기반 로그 이벤트 제너레이터
@@ -113,6 +114,11 @@ async def create_log_event_generator(
                         continue
                     if service and log_service != service:
                         continue
+                    floor = (min_level or "").upper()
+                    if floor in LOG_LEVELS and (
+                        log_level not in LOG_LEVELS[LOG_LEVELS.index(floor):]
+                    ):
+                        continue
 
                     yield f"event: log\ndata: {json.dumps(log_data)}\n\n"
 
@@ -179,7 +185,8 @@ async def list_logs(
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     level: Optional[str] = Query(default=None),
-    service: Optional[str] = Query(default=None)
+    service: Optional[str] = Query(default=None),
+    min_level: Optional[str] = Query(default=None)
 ):
     """
     List recent pipeline logs with optional filtering.
@@ -189,6 +196,7 @@ async def list_logs(
         offset: Number of logs to skip (for pagination)
         level: Filter by log level (DEBUG, INFO, WARNING, ERROR)
         service: Filter by service name
+        min_level: 이 레벨 이상만 (예: INFO 면 고빈도 DEBUG 제외)
 
     Returns:
         List of log entries
@@ -198,7 +206,8 @@ async def list_logs(
         limit=limit,
         offset=offset,
         level=level,
-        service=service
+        service=service,
+        min_level=min_level
     )
     return logs
 
@@ -206,7 +215,8 @@ async def list_logs(
 @router.get("/stream")
 async def stream_logs(
     level: Optional[str] = Query(default=None),
-    service: Optional[str] = Query(default=None)
+    service: Optional[str] = Query(default=None),
+    min_level: Optional[str] = Query(default=None)
 ):
     """
     Stream logs in real-time via Server-Sent Events (SSE).
@@ -221,7 +231,7 @@ async def stream_logs(
         SSE stream of new log entries
     """
     return StreamingResponse(
-        create_log_event_generator(level=level, service=service),
+        create_log_event_generator(level=level, service=service, min_level=min_level),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

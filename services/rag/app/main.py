@@ -231,7 +231,8 @@ async def list_documents_pg() -> List[Dict[str, Any]]:
             "metadata": json.loads(row["metadata"]) if isinstance(row["metadata"], str) else (row["metadata"] or {}),
             "chunk_count": row["chunk_count"] or 0,
             "filename": row["filename"],
-            "status": row["status"]
+            "status": row["status"],
+            "uploaded_at": row["indexed_at"].isoformat() if row["indexed_at"] else None
         }
         for row in rows
     ]

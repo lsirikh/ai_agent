@@ -10,7 +10,15 @@ using Prism.Commands;
 
 namespace EdgeVoice.Agent.Desktop.ViewModels;
 
-public sealed record LogItem(string Time, string Level, string Service, string Stage, string Message, string Duration);
+public sealed record LogItem(string Time, string Level, string Service, string Stage, string Message, string Duration)
+{
+    // 레벨 색 구분용 (MainWindow 의 TextBlock.lvError/lvWarning/lvDebug)
+    public bool IsError => Level is "ERROR" or "CRITICAL";
+
+    public bool IsWarning => Level == "WARNING";
+
+    public bool IsDebug => Level == "DEBUG";
+}
 
 /// <summary>파이프라인 로그: 필터 조회, 실시간 스트림(Live/Paused), 통계.</summary>
 public sealed class LogsViewModel : PageViewModel
@@ -19,8 +27,11 @@ public sealed class LogsViewModel : PageViewModel
 
     private readonly EdgeVoiceApiClient _api;
     private CancellationTokenSource? _live;
+    private const string InfoAndAbove = "INFO+";
+
     private string _serviceFilter = "";
-    private string _levelFilter = "";
+    // 기본 "INFO 이상": VAD 확률 같은 고빈도 DEBUG 는 숨기고, "전체" 를 고르면 보인다
+    private string _levelFilter = InfoAndAbove;
     private string _stats = "";
 
     public LogsViewModel(EdgeVoiceApiClient api)
@@ -37,9 +48,15 @@ public sealed class LogsViewModel : PageViewModel
 
     public ObservableCollection<LogItem> Logs { get; } = new();
 
-    public IReadOnlyList<string> Services { get; } = new[] { "", "orchestrator", "stt", "llm", "tts", "wake_word" };
+    public IReadOnlyList<OptionItem> Services { get; } = new[] { new OptionItem("", "전체 서비스") }
+        .Concat(new[] { "orchestrator", "audio_gateway", "wake_word", "stt", "llm", "tts", "rag" }.Select(s => new OptionItem(s, s)))
+        .ToArray();
 
-    public IReadOnlyList<string> Levels { get; } = new[] { "", "DEBUG", "INFO", "WARNING", "ERROR" };
+    public IReadOnlyList<OptionItem> Levels { get; } = new[]
+    {
+        new OptionItem(InfoAndAbove, "INFO 이상"), new OptionItem("", "전체(DEBUG 포함)"),
+        new OptionItem("DEBUG", "DEBUG"), new OptionItem("INFO", "INFO"), new OptionItem("WARNING", "WARNING"), new OptionItem("ERROR", "ERROR"),
+    };
 
     public DelegateCommand RefreshCommand { get; }
 
@@ -58,7 +75,8 @@ public sealed class LogsViewModel : PageViewModel
         get => _serviceFilter;
         set
         {
-            if (SetProperty(ref _serviceFilter, value))
+            // 콤보박스가 항목을 다시 그리는 동안 잠깐 보내는 null 은 무시한다
+            if (value is not null && SetProperty(ref _serviceFilter, value))
             {
                 OnFilterChanged();
             }
@@ -70,7 +88,7 @@ public sealed class LogsViewModel : PageViewModel
         get => _levelFilter;
         set
         {
-            if (SetProperty(ref _levelFilter, value))
+            if (value is not null && SetProperty(ref _levelFilter, value))
             {
                 OnFilterChanged();
             }
@@ -78,7 +96,12 @@ public sealed class LogsViewModel : PageViewModel
     }
 
     private string Query =>
-        (ServiceFilter.Length > 0 ? $"&service={ServiceFilter}" : "") + (LevelFilter.Length > 0 ? $"&level={LevelFilter}" : "");
+        (ServiceFilter.Length > 0 ? $"&service={ServiceFilter}" : "") + LevelFilter switch
+        {
+            "" => "",
+            InfoAndAbove => "&min_level=INFO",
+            _ => $"&level={LevelFilter}",
+        };
 
     private void OnFilterChanged()
     {
