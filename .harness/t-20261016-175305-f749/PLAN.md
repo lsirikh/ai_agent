@@ -17,6 +17,7 @@
 - `/api/dashboard/stream` 은 orchestrator 상태를 5초마다만 보냄 → 트레이 상태는 1초 주기 `/api/status/stream` 사용
 - 오디오 WS 는 TTS 오디오를 돌려주지 않음(재생은 서버측) → "말하는 중"은 orchestrator `tts_processing` 상태로 판단
 - 루트 pytest 베이스라인 실패(`tests/test_project_structure.py` 등)는 이번 작업과 무관
+- `pytest tests/` 는 변경 전부터 시간 초과로 끝남(하네스 기준선 "실패 1, 통과 0"). 변경 후 결과도 같음. 하드웨어 오디오/외부 서비스가 필요한 테스트(`tests/audio_gateway/...` 등)에서 멈추는 것으로 보이며, 이번 작업은 Python 파일을 바꾸지 않았으므로 원인이 아님
 
 ## 남은 작업
 - 실제 빌드/실행 확인 (`cd clients/dotnet && dotnet build`), 컴파일 오류 시 수정
