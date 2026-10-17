@@ -221,6 +221,10 @@ class WakeWordDetector:
         if best_confidence >= self.confidence_threshold:
             self._last_detection_time = time.time()
             self._is_in_cooldown = True
+            # 버퍼에 남은 이 호출어로 다시 감지되지 않게 비운다
+            # (실측: 질문 인식 직후 재감지)
+            if hasattr(self.model, "reset"):
+                self.model.reset()
 
             return {
                 "detected": True,
