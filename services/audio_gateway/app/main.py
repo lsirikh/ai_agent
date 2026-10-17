@@ -889,9 +889,9 @@ async def microphone_stream_task() -> None:
                         level="debug"
                     )
             else:
-                # IDLE 모드: VAD 음성 감지 시에만 Wake Word 서비스로 전달
-                # Phase 44: VAD is_speech=True인 경우에만 Redis 발행
-                if redis_client and vad_result.get("is_speech"):
+                # IDLE 모드: 소리를 끊지 않고 Wake Word 서비스로 전달
+                # (VAD 로 조각만 보내면 웨이크워드 점수가 떨어진다 — 실측 99.9% → 40.7%)
+                if redis_client:
                     try:
                         await redis_client.publish(
                             AUDIO_OUTPUT_CHANNEL,
@@ -1203,9 +1203,9 @@ async def websocket_audio_stream(websocket: WebSocket):
                         level="debug"
                     )
             else:
-                # IDLE 모드: VAD 음성 감지 시에만 Wake Word 서비스로 전달
-                # Phase 44: VAD is_speech=True인 경우에만 Redis 발행
-                if redis_client and vad_result.get("is_speech"):
+                # IDLE 모드: 소리를 끊지 않고 Wake Word 서비스로 전달
+                # (VAD 로 조각만 보내면 웨이크워드 점수가 떨어진다 — 실측 99.9% → 40.7%)
+                if redis_client:
                     try:
                         await redis_client.publish(
                             AUDIO_OUTPUT_CHANNEL,
@@ -1214,7 +1214,7 @@ async def websocket_audio_stream(websocket: WebSocket):
 
                         # 50 청크마다 로그 (약 5초)
                         if chunk_count % 50 == 0:
-                            print(f"[WS] Published {chunk_count} speech chunks to Redis ({AUDIO_OUTPUT_CHANNEL})")
+                            print(f"[WS] Published {chunk_count} chunks to Redis ({AUDIO_OUTPUT_CHANNEL})")
 
                         # 100 청크마다 로그 (약 10초)
                         # Phase 43: log() 메서드 사용
