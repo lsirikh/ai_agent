@@ -35,3 +35,9 @@
 - chosen: 체크박스는 바로 저장(MCP 는 바로 다시 연결). 추가·수정은 편집 칸 + 버튼.
 - why: "체크박스로 켜고 끄게" 요청 — 켠 즉시 반영되는 쪽이 기대에 맞다.
 - effect: 바꾸려면 항목의 `Changed` 콜백 대신 저장 버튼을 두면 된다.
+
+## 7. '사용하지 않음'으로 표시된 extensions.py 함수들을 지울까
+- options: 지운다 / 그대로 둔다
+- chosen: 그대로 둔다 — `get_mcp_servers`·`add_mcp_server`·`update_mcp_server`·`delete_mcp_server`·`get_skills`·`update_skills`, 그리고 `_needs_target`·`_unique_names`.
+- why: 앞의 6개는 `@router.get/post/put/delete` 로 등록된 FastAPI 엔드포인트라서, 코드에서 이름으로 부르지 않고 HTTP 요청이 오면 FastAPI 가 부른다. 데스크톱 앱(`SettingsViewModel.Extensions.cs`)이 이 엔드포인트를 쓴다. 뒤의 2개는 `@model_validator`·`@field_validator` 로 등록된 pydantic 검증기로, 요청 본문을 검사할 때 pydantic 이 부른다. 정적 검사기는 데코레이터로 등록된 함수를 호출되지 않는 것으로 본다. 실제로 쓰인다는 것은 tests/backend/test_extension_settings.py 가 확인한다(엔드포인트 호출, 422 응답).
+- effect: 지우면 설정 화면의 MCP·스킬 API 와 입력 검증이 사라진다.
