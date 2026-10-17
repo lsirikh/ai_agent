@@ -205,6 +205,9 @@ async def handle_wake_word_event(event_data: Dict[str, Any]) -> None:
     # 사용자가 "헤이 자비스, 오늘 날씨 어때?" 처럼 연속 발화 시
     # speech_started 이벤트 없이도 녹음이 시작되어야 함
     global _is_recording, _last_speech_time, _question_wait_until
+    # 말하는 도중의 호출어 = 끼어들기: 재생을 끝내고 듣는다
+    barge_in_detector.set_playback_state(PlaybackState.IDLE)
+    aec.clear_playback_reference()
     if not _is_recording:
         await on_speech_started()
         _is_recording = True
@@ -414,6 +417,9 @@ async def tts_state_subscriber() -> None:
                 data = json.loads(message["data"])
                 event = data.get("event")
 
+                if event == "tts_started" and _listening_mode:
+                    # 끼어들어 듣는 중에 남은 문장이 합성돼도 재생 상태로 바꾸지 않는다
+                    continue
                 if event == "tts_started":
                     barge_in_detector.set_playback_state(PlaybackState.PLAYING)
                     await _logger.info(
@@ -467,8 +473,20 @@ def unregister_playback_client(websocket: Any) -> None:
     _playback_clients.discard(websocket)
 
 
+async def publish_for_wake_word(processed: np.ndarray) -> None:
+    """마이크 소리를 웨이크워드 서비스로 보낸다(실패해도 오디오 처리는 이어 간다)."""
+    if redis_client is None:
+        return
+    try:
+        await redis_client.publish(AUDIO_OUTPUT_CHANNEL, processed.tobytes())
+    except Exception as e:
+        await _logger.warning("wake_publish_failed", f"Wake publish error: {e}")
+
+
 async def forward_tts_audio(audio_bytes: bytes) -> None:
     """TTS 오디오(float32 24kHz mono)를 연결된 클라이언트에 바이너리 프레임으로 보낸다."""
+    if _listening_mode:
+        return  # 끼어들어 듣는 중: 남은 답 음성은 틀지 않는다
     for client in list(_playback_clients):
         try:
             await client.send_bytes(audio_bytes)
@@ -508,6 +526,10 @@ async def tts_audio_subscriber() -> None:
                 # TTS 오디오 바이트를 float32 배열로 변환
                 audio_bytes = message["data"]
                 audio_data = np.frombuffer(audio_bytes, dtype=np.float32)
+
+                if _listening_mode:
+                    # 끼어들어 듣는 중: 틀지 않으므로 에코 기준으로도 쓰지 않는다
+                    continue
 
                 # AEC playback reference로 설정
                 aec.set_playback_reference(audio_data)
@@ -882,8 +904,9 @@ async def microphone_stream_task() -> None:
 
             # 조건부 라우팅
             if barge_in_detector.playback_state == PlaybackState.PLAYING:
-                # TTS 재생 중: Barge-in 감지 활성화
+                # TTS 재생 중: Barge-in 감지 활성화 + '헤이 자비스' 끼어들기
                 await barge_in_detector.detect_and_publish(processed)
+                await publish_for_wake_word(processed)
             elif _listening_mode:
                 # Phase 49: Listening 모드: Wake Word로 전달하지 않음
                 # 음성 녹음은 handle_vad_result()에서 처리됨
@@ -1197,7 +1220,9 @@ async def websocket_audio_stream(websocket: WebSocket):
                 # TTS 재생 중: Barge-in 감지 활성화
                 barge_in_result = await barge_in_detector.detect_and_publish(processed)
                 vad_result["barge_in"] = barge_in_result
-                # Wake Word 채널로는 전송하지 않음
+                # 말하는 도중 '헤이 자비스' 로 끼어들 수 있게 웨이크워드로도 보낸다
+                # (에너지 끼어들기는 스피커 소리가 마이크로 다시 들어와 동작하지 않았다)
+                await publish_for_wake_word(processed)
             elif _listening_mode:
                 # Phase 49: Listening 모드: Wake Word로 전달하지 않음
                 # 음성 녹음은 handle_vad_result()에서 처리됨

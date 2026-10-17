@@ -53,22 +53,22 @@ class TestWakeWordHandling:
             assert orchestrator.state_machine.current_state == State.LISTENING
 
     @pytest.mark.asyncio
-    async def test_wake_word_ignored_when_not_idle(self):
-        """IDLE이 아닌 상태에서 Wake Word가 무시되어야 한다"""
+    async def test_wake_word_ignored_while_already_listening(self):
+        """이미 듣는 중에 들어온 Wake Word 는 무시한다.
+
+        답을 만들거나 말하는 중의 Wake Word 는 끼어들기로 바뀌었다
+        (사용자 요청 2026-10-17, tests/orchestrator/test_wake_barge_in.py).
+        """
         from services.orchestrator.app.orchestrator import Orchestrator
         from services.orchestrator.app.state_machine import State
 
         with patch.object(Orchestrator, "_setup_redis", return_value=AsyncMock()):
             orchestrator = Orchestrator()
-            # Phase 32: LISTENING → STT_PROCESSING → LLM_PROCESSING
             orchestrator.state_machine.transition_to(State.LISTENING)
-            orchestrator.state_machine.transition_to(State.STT_PROCESSING)
-            orchestrator.state_machine.transition_to(State.LLM_PROCESSING)
 
             result = await orchestrator.handle_wake_word()
 
-            # Phase 32: LLM_PROCESSING 상태 유지 (PROCESSING은 LLM_PROCESSING 별칭)
-            assert orchestrator.state_machine.current_state == State.LLM_PROCESSING
+            assert orchestrator.state_machine.current_state == State.LISTENING
             assert result is False
 
 

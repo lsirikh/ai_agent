@@ -359,6 +359,18 @@ class Orchestrator:
         Returns:
             처리 성공 여부
         """
+        # 답을 만들거나 말하는 중의 호출어 = 끼어들기: 그 답을 멈추고 바로 듣는다
+        # (사용자 요청 — 에너지 끼어들기는 스피커 소리가 마이크로 다시 들어와
+        # 동작하지 않았다)
+        if self.state_machine.current_state in (
+            State.STT_PROCESSING, State.LLM_PROCESSING,
+            State.TTS_PROCESSING, State.SPEAKING,
+        ):
+            if not await self.handle_barge_in():
+                return False
+            self._start_listening_timeout()
+            return True
+
         # Phase 32: IDLE → READY 별칭이므로 READY도 허용
         if self.state_machine.current_state not in (State.IDLE, State.READY):
             await self._logger.log(
