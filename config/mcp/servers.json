@@ -13,8 +13,24 @@
         "browser_close"
       ],
       "trusted": true,
-      "always_confirm": ["browser_click", "browser_type"],
+      "always_confirm": [
+        "browser_click",
+        "browser_type"
+      ],
       "timeout": 60
+    },
+    {
+      "name": "desktop",
+      "url": "http://host.docker.internal:8932/mcp",
+      "allowed_tools": [
+        "open_app",
+        "write_document",
+        "list_test_files",
+        "read_test_file"
+      ],
+      "trusted": true,
+      "always_confirm": [],
+      "timeout": 120
     }
   ]
 }

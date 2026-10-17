@@ -556,3 +556,25 @@ class TestCannotDoWithoutTool:
 
         assert opened == [{"url": "https://daum.net"}]
         assert spoken[-1] == "다음 사이트를 열었어요."
+
+
+@pytest.mark.parametrize(
+    "name, arguments, expected",
+    [
+        (
+            "desktop__write_document",
+            '{"app_name": "notepad", "filename": "장보기", "content": "우유"}',
+            "메모장에 장보기 을 저장할까요?",
+        ),
+        ("desktop__open_app", '{"app_name": "excel"}', "엑셀 을 실행할까요?"),
+        (
+            "browser__browser_navigate",
+            '{"url": "https://www.naver.com"}',
+            "naver.com 을 열까요?",
+        ),
+    ],
+)
+def test_confirm_question_says_what_will_happen(name, arguments, expected) -> None:
+    from services.orchestrator.app.orchestrator import confirm_question
+
+    assert confirm_question(name, arguments).startswith(expected)

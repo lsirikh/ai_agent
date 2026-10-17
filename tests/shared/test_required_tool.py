@@ -79,6 +79,48 @@ def test_should_not_block_questions_that_are_not_open_requests(question) -> None
     assert unavailable_action_reply(question, ALL) is None
 
 
+DESKTOP = ALL + ["desktop__open_app", "desktop__write_document"]
+
+
+@pytest.mark.parametrize(
+    "question, expected",
+    [
+        ("메모장 열어 줘", "desktop__open_app"),
+        ("엑셀 실행해 줘", "desktop__open_app"),
+        ("워드 켜줘", "desktop__open_app"),
+        ("메모장에 장보기 목록 써서 저장해 줘", "desktop__write_document"),
+        ("엑셀로 가계부 만들어서 저장해", "desktop__write_document"),
+        ("워드에 회의록 작성해 줘", "desktop__write_document"),
+    ],
+)
+def test_should_use_desktop_tools_for_programs(question, expected) -> None:
+    # 사용자 요청: 로컬 LLM 이 메모장·워드·엑셀을 실행하고 저장한다
+    assert required_tool(question, DESKTOP) == expected
+    assert unavailable_action_reply(question, DESKTOP) is None
+
+
+FILES = DESKTOP + ["desktop__list_test_files", "desktop__read_test_file"]
+
+
+@pytest.mark.parametrize(
+    "question, expected",
+    [
+        ("Tests 폴더에 저장된 파일 목록 알려 줘", "desktop__list_test_files"),
+        ("저장된 파일 뭐 있어?", "desktop__list_test_files"),
+        ("할일목록.txt 내용 읽어 줘", "desktop__read_test_file"),
+        ("매출표.xlsx 파일 내용 보여 줘", "desktop__read_test_file"),
+    ],
+)
+def test_should_check_saved_files_with_tools(question, expected) -> None:
+    # 실측: 도구 없이 파일 목록을 지어냈다(있는 장보기.txt 가 빠짐)
+    assert required_tool(question, FILES) == expected
+
+
+def test_should_admit_it_cannot_save_without_desktop_tools() -> None:
+    reply = unavailable_action_reply("메모장에 장보기 목록 저장해 줘", ALL)
+    assert reply and "없" in reply
+
+
 def test_should_not_require_tool_that_is_not_offered() -> None:
     # 인터넷 도구가 꺼져 있으면 날씨·검색 도구가 없다
     assert required_tool("오늘 서울 날씨 어때?", ["get_time"]) is None

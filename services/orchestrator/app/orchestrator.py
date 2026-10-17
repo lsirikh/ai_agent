@@ -52,6 +52,11 @@ YES_PATTERN = re.compile(
 )
 NO_PATTERN = re.compile(r"^\s*(아니|아뇨|취소|하지\s*마|싫어|no\b)", re.IGNORECASE)
 CANCELLED_REPLY = "알겠어요, 실행하지 않을게요."
+# 데스크톱 MCP 의 app_name → 말할 이름
+PROGRAM_NAMES = {
+    "notepad": "메모장", "word": "워드", "excel": "엑셀",
+    "powerpoint": "파워포인트", "calculator": "계산기", "paint": "그림판",
+}
 # TTS 음성: float32(4바이트) · 24kHz mono
 TTS_BYTES_PER_SECOND = 4 * 24000
 
@@ -69,8 +74,15 @@ def confirm_question(name: str, arguments: Any) -> str:
     url = args.get("url") if isinstance(args, dict) else None
     # 소리로 읽기 좋게 사이트 이름만 (https://www.daum.net → daum.net)
     site = urlsplit(url).netloc.removeprefix("www.") if url else ""
+    args = args if isinstance(args, dict) else {}
+    program = PROGRAM_NAMES.get(str(args.get("app_name", "")).lower())
+    program = program or args.get("app_name")
     if url:
         action = f"{site or url} 을 열까요?"
+    elif args.get("filename") and program:
+        action = f"{program}에 {args['filename']} 을 저장할까요?"
+    elif program:
+        action = f"{program} 을 실행할까요?"
     else:
         action = f"{name.split('__')[-1]} 을 실행할까요?"
     return f"{action} 네 또는 아니오로 답해 주세요."

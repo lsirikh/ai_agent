@@ -183,11 +183,22 @@ _ACTION = re.compile(
     r"|(열어|켜|실행해|접속해|들어가)\s*[.?!~]*$"
 )
 _BROWSER = re.compile(r"크롬|브라우저|사이트|홈페이지|웹\s*페이지|네이버|구글|유튜브")
+# MCP 데스크톱(서버__open_app · 서버__write_document)
+_PROGRAM = re.compile(r"메모장|노트패드|워드|엑셀|파워\s*포인트|피피티|계산기|그림판")
+_WRITE = re.compile(r"저장|작성|써|적어|만들어|기록")
 _WEATHER = re.compile(r"날씨|기온|우산|비\s*(와|오|올|가)|눈\s*(와|오|올|이)")
 _SEARCH = re.compile(r"검색|인터넷|뉴스|최신")
 
 # 질문이 이렇다면 그 도구가 분명히 필요하다 (앞쪽이 우선)
+_SAVED_FILE = re.compile(r"\.(txt|docx|xlsx|pptx)\b")
+_READ = re.compile(r"내용|읽어|열람")
+_FILE_LIST = re.compile(r"(파일|폴더).*(목록|뭐|무엇|있어|보여|알려)|저장된\s*파일")
+
 _REQUIRED_TOOLS = [
+    ("read_test_file", lambda q: _SAVED_FILE.search(q) and _READ.search(q)),
+    ("list_test_files", _FILE_LIST.search),
+    ("write_document", lambda q: _PROGRAM.search(q) and _WRITE.search(q)),
+    ("open_app", lambda q: _PROGRAM.search(q) and _ACTION.search(q)),
     ("get_weather", _WEATHER.search),
     # MCP 브라우저(서버__browser_navigate)
     ("browser_navigate", lambda q: _BROWSER.search(q) and _ACTION.search(q)),
@@ -227,6 +238,10 @@ def unavailable_action_reply(question: str, offered) -> Optional[str]:
     도구 없이 맡기면 "크롬을 열었습니다" 라고 지어냈다(프롬프트로 막아도 8/12, 실측).
     """
     question = question or ""
+    if _PROGRAM.search(question) and (
+        _ACTION.search(question) or _WRITE.search(question)
+    ):
+        return None if required_tool(question, offered) else CANNOT_DO_REPLY
     if not _ACTION.search(question):
         return None
     if _BROWSER.search(question):
