@@ -250,16 +250,16 @@ class WindowsScreen:
         import comtypes.client
 
         comtypes.client.GetModule("UIAutomationCore.dll")
-        from comtypes.gen import UIAutomationClient as uia_client
+        from comtypes.gen import UIAutomationClient
 
         uia = comtypes.client.CreateObject(
-            uia_client.CUIAutomation, interface=uia_client.IUIAutomation
+            UIAutomationClient.CUIAutomation, interface=UIAutomationClient.IUIAutomation
         )
         root = uia.ElementFromHandle(hwnd)
         pencil = root.FindFirst(
-            uia_client.TreeScope_Descendants,
+            UIAutomationClient.TreeScope_Descendants,
             uia.CreatePropertyCondition(
-                uia_client.UIA_AutomationIdPropertyId, PENCIL_ID
+                UIAutomationClient.UIA_AutomationIdPropertyId, PENCIL_ID
             ),
         )
         if not pencil:
