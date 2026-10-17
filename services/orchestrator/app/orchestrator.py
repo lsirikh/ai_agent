@@ -11,8 +11,8 @@ import re
 import time
 from typing import Any, Optional
 
-from shared.tool_calling import wrap_untrusted
 import shared.tools as tools
+from shared.tool_calling import wrap_untrusted
 from shared.tools import ToolRegistry, build_registry, load_tool_settings
 
 from .backend_client import BackendClient
@@ -27,9 +27,10 @@ HAN_CHARACTER_PATTERN = re.compile(r"[㐀-䶿一-鿿]")
 
 # 문구에 민감하다: "2~3문장", "목록 기호·마크다운 금지" 같은 형식 제한을 넣으면
 # Qwen2.5-7B 가 도구를 부르지 않고 시각을 지어냈다(실측 0/15 → 이 문구 15/15).
+# '반드시 한국어로만' 은 시각 근거가 붙을 때 중국어로 답하는 것을 막는다(3/20 → 0/20).
 # 목록 기호는 to_speech, 한자 문장은 HAN_CHARACTER_PATTERN 이 TTS 직전에 처리한다.
 DEFAULT_VOICE_SYSTEM_PROMPT = (
-    "당신은 EdgeVoice 음성 비서입니다. 한국어로 짧게 답하세요. "
+    "당신은 EdgeVoice 음성 비서입니다. 반드시 한국어로만 짧게 답하세요. "
     "오늘 날짜나 지금 시각 같은 필요한 정보는 도구로 확인하세요."
 )
 
@@ -138,6 +139,11 @@ class Orchestrator:
     RAG_URL = os.getenv("RAG_SERVICE_URL", "http://rag:8006")
     RAG_MIN_SCORE = float(os.getenv("RAG_MIN_SCORE", "0.52"))
 
+    # 답이 모두 걸러져 읽을 문장이 없을 때 대신 말하는 안내
+    NOTHING_SPOKEN_REPLY = (
+        "죄송해요, 답을 제대로 만들지 못했어요. 다시 한 번 말씀해 주세요."
+    )
+
     # 마지막 TTS 요청 후 완료 신호를 기다리는 최대 시간
     TTS_COMPLETE_TIMEOUT_SECONDS = 60.0
 
@@ -201,6 +207,8 @@ class Orchestrator:
 
         # 문장 끝에 떨어진 목록 번호(다음 문장 앞에 '첫째,' 처럼 붙인다)
         self._pending_list_number: Optional[int] = None
+        # 이번 턴에 TTS 로 보낸 문장 수
+        self._spoken_this_turn = 0
         self._processing_task: Optional[asyncio.Task] = None
         self._is_running = False
 
@@ -489,6 +497,7 @@ class Orchestrator:
         """
         first_sentence_sent = False
         self._pending_list_number = None
+        self._spoken_this_turn = 0
         full_response = ""
         llm_start_time = time.time()
         web_sources: list = []
@@ -538,7 +547,8 @@ class Orchestrator:
                 registry = await self._build_tools()
                 # 채팅과 같은 지식 베이스에서 근거를 찾아 이번 질문에 붙인다
                 rag_context = await self._relevant_knowledge(text)
-            # 세션 기록의 옛 시각 답을 따라 하지 않도록 지금 시각을 근거로 붙인다(뒤쪽이라 캐시 유지)
+            # 세션 기록의 옛 시각 답을 따라 하지 않도록 지금 시각을 근거로 붙인다
+            # (질문 뒤쪽이라 접두사 캐시 유지)
             rag_context = (rag_context or []) + [
                 {"content": f"지금 시각: {tools.current_time_text()}", "source": "시계"}
             ]
@@ -571,6 +581,11 @@ class Orchestrator:
             remaining = self.queue_manager.flush()
             if remaining and len(remaining.strip()) > 0:
                 await speak_sentence(remaining)
+
+            # 답 문장이 모두 걸러져(예: 전부 중국어) 아무 말도 못 했으면
+            # 침묵 대신 안내한다
+            if full_response.strip() and self._spoken_this_turn == 0:
+                await speak_sentence(self.NOTHING_SPOKEN_REPLY)
 
             # 어시스턴트 응답을 컨텍스트에 추가
             if hasattr(self.llm_client, 'add_to_context') and full_response:
@@ -710,6 +725,7 @@ class Orchestrator:
             sentence, self._pending_list_number
         )
         if speech:
+            self._spoken_this_turn += 1
             await self.publish_tts_request(speech)
 
     async def publish_tts_request(self, text: str) -> None:

@@ -49,3 +49,30 @@ def test_should_ask_korean_and_tool_use_in_voice_prompt() -> None:
 
     assert "한국어" in DEFAULT_VOICE_SYSTEM_PROMPT
     assert "도구" in DEFAULT_VOICE_SYSTEM_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_should_say_retry_prompt_when_whole_reply_is_chinese() -> None:
+    # 실측: 답 전체가 중국어("现在的小时是9点03分…")라 모두 걸러져 아무 말도 하지 않았다
+    from services.orchestrator.app.orchestrator import Orchestrator
+
+    with patch.object(Orchestrator, "_setup_redis", return_value=AsyncMock()):
+        orchestrator = Orchestrator(redis_client=AsyncMock())
+
+    async def fake_stream_request(messages, **kwargs):
+        for token in ["现在的小时是9点03分。", "请注意，这是韩国时间。"]:
+            yield {"choices": [{"delta": {"content": token}, "finish_reason": None}]}
+        yield {"choices": [{"delta": {}, "finish_reason": "stop"}]}
+
+    orchestrator.llm_client._make_stream_request = fake_stream_request
+    spoken: list[str] = []
+
+    async def capture(text: str) -> None:
+        spoken.append(text)
+
+    orchestrator.publish_tts_request = capture
+    await orchestrator.handle_wake_word()
+
+    await orchestrator.handle_stt_result("지금 몇 시야?")
+
+    assert spoken == [Orchestrator.NOTHING_SPOKEN_REPLY]
