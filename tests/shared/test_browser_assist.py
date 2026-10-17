@@ -296,3 +296,68 @@ async def test_failed_tool_is_disclosed_when_answer_claims_success() -> None:
 
     assert text.startswith("다음에서 검색했습니다.")
     assert "실패" in text and "ERR_NAME_NOT_RESOLVED" in text
+
+
+def test_type_target_is_fixed_to_a_real_input_on_the_current_page() -> None:
+    # 실측: 다음에서 '[ref=e60]'(네이버 기억), 유튜브에서 '#search-box'(없는 요소)로
+    # 입력해 실패
+    from shared.browser_assist import BrowserState
+
+    state = BrowserState()
+    state.update(SNAPSHOT)
+
+    assert (
+        state.fix_type_target({"target": "[ref=e60]", "text": "x"})["target"] == "e60"
+    )
+    assert (
+        state.fix_type_target({"target": "#search-box", "text": "x"})["target"] == "e60"
+    )
+    assert state.fix_type_target({"target": "e90", "text": "x"})["target"] == "e90"
+
+
+def test_click_target_only_drops_ref_brackets() -> None:
+    from shared.browser_assist import BrowserState
+
+    state = BrowserState()
+    state.update(SNAPSHOT)
+
+    assert state.fix_click_target({"target": "[ref=e90]"})["target"] == "e90"
+    assert state.fix_click_target({"target": "a.cafe"})["target"] == "a.cafe"
+
+
+@pytest.mark.asyncio
+async def test_page_elements_update_browser_state() -> None:
+    from shared.browser_assist import BrowserState, with_page_elements
+    from shared.tools import ToolResult
+
+    state = BrowserState()
+
+    async def snapshot():
+        return ToolResult(SNAPSHOT)
+
+    await with_page_elements("browser_navigate", ToolResult("ok"), snapshot, state)
+
+    assert state.inputs == ["e60"] and "e90" in state.refs
+
+
+def test_submit_keeps_the_target_fix() -> None:
+    from shared.browser_assist import adapt_to_question
+    from shared.tools import Tool, ToolRegistry, ToolResult
+
+    async def run(args):
+        return ToolResult("ok")
+
+    registry = ToolRegistry(
+        [
+            Tool(
+                "browser__browser_type",
+                "입력",
+                {"type": "object"},
+                run,
+                normalize=lambda a: {**a, "target": "e60"},
+            )
+        ]
+    )
+    typed = adapt_to_question(registry, "검색해 줘").get("browser__browser_type")
+
+    assert typed.normalize({"target": "#x"}) == {"target": "e60", "submit": True}

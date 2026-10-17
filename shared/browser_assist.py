@@ -86,13 +86,57 @@ def compact_snapshot(content: str) -> str:
     return "\n".join(header + elements)
 
 
+_REF_TARGET = re.compile(r"^\[?\s*ref\s*=\s*(e\d+)\s*\]?$")
+
+
+class BrowserState:
+    """지금 페이지의 ref 들(마지막으로 찍은 구조).
+
+    모델이 고른 입력·클릭 대상을 바로잡는 데 쓴다.
+    """
+
+    def __init__(self):
+        self.refs: set = set()
+        self.inputs: list = []
+
+    def update(self, snapshot: str) -> None:
+        refs, inputs = set(), []
+        for line in snapshot.splitlines():
+            match = _ELEMENT.match(line)
+            if not match:
+                continue
+            role, _, ref = match.groups()
+            refs.add(ref)
+            if role in ("combobox", "searchbox", "textbox"):
+                inputs.append(ref)
+        self.refs, self.inputs = refs, inputs
+
+    @staticmethod
+    def _bare(target: str) -> str:
+        match = _REF_TARGET.match((target or "").strip())
+        return match.group(1) if match else (target or "").strip()
+
+    def fix_type_target(self, args: dict) -> dict:
+        """
+        입력 대상: '[ref=e60]' → 'e60'. 지금 페이지에 없는 대상이면 첫 입력칸으로
+        (실측: 다음에서 '[ref=e60]', 유튜브에서 '#search-box' 로 입력해 실패).
+        """
+        target = self._bare(args.get("target", ""))
+        if target not in self.refs and self.inputs:
+            target = self.inputs[0]
+        return {**args, "target": target}
+
+    def fix_click_target(self, args: dict) -> dict:
+        return {**args, "target": self._bare(args.get("target", ""))}
+
+
 # 페이지가 바뀌는 도구: 결과에 새 페이지의 요소를 붙인다
 PAGE_CHANGING_TOOLS = (
     "browser_navigate", "browser_navigate_back", "browser_click", "browser_type"
 )
 
 
-async def with_page_elements(tool_name: str, result, take_snapshot):
+async def with_page_elements(tool_name: str, result, take_snapshot, state=None):
     """
     브라우저 도구 결과에 다룰 수 있는 요소(ref)를 붙인다.
     - browser_snapshot: 거대한 구조를 요약으로 바꾼다
@@ -101,6 +145,8 @@ async def with_page_elements(tool_name: str, result, take_snapshot):
     if result.is_error:
         return result
     if tool_name == "browser_snapshot":
+        if state is not None:
+            state.update(result.content)
         body = compact_snapshot(result.content)
     elif tool_name in PAGE_CHANGING_TOOLS:
         try:
@@ -109,6 +155,8 @@ async def with_page_elements(tool_name: str, result, take_snapshot):
             return result
         if snapshot.is_error:
             return result
+        if state is not None:
+            state.update(snapshot.content)
         body = f"{result.content.strip()}\n\n{compact_snapshot(snapshot.content)}"
     else:
         return result
@@ -163,6 +211,12 @@ def adapt_to_question(registry, question: str):
 
             tool = replace(tool, normalize=navigate)
         elif name.endswith("browser_type") and submit:
-            tool = replace(tool, normalize=lambda a: {**a, "submit": True})
+            # 대상 보정은 그대로 두고 제출만 더한다
+            base = tool.normalize or (lambda a: a)
+
+            def submit_typed(args, base=base):
+                return {**base(args), "submit": True}
+
+            tool = replace(tool, normalize=submit_typed)
         adapted.add(tool)
     return adapted

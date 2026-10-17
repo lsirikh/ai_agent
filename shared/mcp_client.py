@@ -164,6 +164,8 @@ class MCPManager:
 
     def __init__(self, configs: list):
         self.servers = [_Server(config) for config in configs]
+        # 브라우저 MCP 의 지금 페이지 ref (입력·클릭 대상을 바로잡는다)
+        self.browser = browser_assist.BrowserState()
         # LLM 에 보인 이름 → (서버 이름, 원래 도구 이름)
         self.name_map: dict = {}
 
@@ -221,6 +223,7 @@ class MCPManager:
                 result = await browser_assist.with_page_elements(
                     tool.name, result,
                     lambda: self.call(server, "browser_snapshot", {}),
+                    self.browser,
                 )
             return result
 
@@ -228,6 +231,10 @@ class MCPManager:
         if tool.name == "browser_navigate":
             def normalize(a):
                 return {**a, "url": browser_assist.normalize_url(a.get("url", ""))}
+        elif tool.name == "browser_type":
+            normalize = self.browser.fix_type_target
+        elif tool.name == "browser_click":
+            normalize = self.browser.fix_click_target
 
         return Tool(
             name=name,
