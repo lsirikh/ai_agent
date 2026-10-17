@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Platform;
@@ -15,6 +17,11 @@ namespace EdgeVoice.Agent.Desktop.Tray;
 public sealed class TrayController : IDisposable
 {
     private const int IconSize = 32;
+    private const string RestartText = "다시 시작";
+
+    /// <summary>트레이 메뉴의 고정 항목 문구(테스트용).</summary>
+    public static IReadOnlyList<string> MenuTexts { get; } =
+        new[] { "마이크 음소거", "화면 파형 표시", "EdgeVoice 창 열기", RestartText, "종료" };
 
     // 창·exe 와 같은 앱 아이콘 (Assets/edgevoice.ico)
     private static readonly WindowIcon AppIcon = new(
@@ -49,13 +56,19 @@ public sealed class TrayController : IDisposable
         _orbItem.Click += (_, _) => ToggleOrb();
         var openItem = new NativeMenuItem("EdgeVoice 창 열기");
         openItem.Click += (_, _) => openMainWindow();
+        // 설정·연결을 새로 읽도록 앱을 다시 띄운다
+        var restartItem = new NativeMenuItem(RestartText);
+        restartItem.Click += (_, _) => AppRestart.Restart(Process.Start, exit);
         var exitItem = new NativeMenuItem("종료");
         exitItem.Click += (_, _) => exit();
 
         _trayIcon = new TrayIcon
         {
             ToolTipText = "EdgeVoice Agent",
-            Menu = new NativeMenu { _muteItem, _orbItem, openItem, new NativeMenuItemSeparator(), exitItem },
+            Menu = new NativeMenu
+            {
+                _muteItem, _orbItem, openItem, new NativeMenuItemSeparator(), restartItem, exitItem,
+            },
             IsVisible = true,
         };
         _trayIcon.Clicked += (_, _) => ToggleMute();
