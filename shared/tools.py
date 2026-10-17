@@ -197,6 +197,23 @@ _PROGRAM = re.compile(r"메모장|노트패드|워드|엑셀|파워\s*포인트|
 _WRITE = re.compile(r"저장|작성|써|적어|만들어|기록")
 _WEATHER = re.compile(r"날씨|기온|우산|비\s*(와|오|올|가)|눈\s*(와|오|올|이)")
 _SEARCH = re.compile(r"검색|인터넷|뉴스|최신")
+# 구체적인 사실(장소·가게·시장 등)을 묻는 질문은 검색 뒤 답한다
+# (실측: 검색 없이 '원당시장(동작구 원당동)' 이라고 지어냈다)
+_PLACE = re.compile(
+    r"시장|마트|가게|식당|맛집|카페|병원|학교|회사|공원|아파트|동네|호텔|백화점|상가|"
+    r"도서관|박물관|대학|역(?=\s|$|[?.!]|에|근처|앞)"
+)
+_ASK_INFO = re.compile(r"알아|아세요|알고\s*있|알려|어디|뭐야|뭐예요|어때|정보|소개|설명|있어|있나")
+_ASK_KNOW = re.compile(r"알아\s*[?]|아세요|알고\s*있어")
+_PERSONAL = re.compile(r"(^|\s)(내|나|저|제|우리|너|네가|당신)(\s|$|의|가|는|를|한테|랑)")
+
+
+def _asks_specific_fact(question: str) -> bool:
+    if _PERSONAL.search(question):
+        return False
+    return bool(_ASK_INFO.search(question)) and bool(
+        _PLACE.search(question) or _ASK_KNOW.search(question)
+    )
 
 # 질문이 이렇다면 그 도구가 분명히 필요하다 (앞쪽이 우선)
 _SAVED_FILE = re.compile(r"\.(txt|docx|xlsx|pptx)\b")
@@ -215,7 +232,7 @@ _REQUIRED_TOOLS = [
     # (실측: '네이버 검색창에 오늘 날씨를 입력해' 가 날씨 도구로 갔다)
     ("browser_navigate", lambda q: _BROWSER.search(q) and _BROWSER_ACTION.search(q)),
     ("get_weather", _WEATHER.search),
-    ("web_search", _SEARCH.search),
+    ("web_search", lambda q: _SEARCH.search(q) or _asks_specific_fact(q)),
 ]
 
 CANNOT_DO_REPLY = (

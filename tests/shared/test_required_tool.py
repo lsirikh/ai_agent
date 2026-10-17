@@ -187,6 +187,28 @@ async def test_tool_loop_follows_the_plan_round_by_round() -> None:
     assert llm.choices == ["get_weather", "get_weather", None]
 
 
+@pytest.mark.parametrize(
+    "question, expected",
+    [
+        # 실측: 검색 없이 '원당시장(동작구 원당동)' 이라고 지어냈다. '알아?' 질문은
+        # 프롬프트 규칙을 더해도 1/4 만 검색했다
+        ("원당시장에 있는 세계로마트 알아?", "web_search"),
+        ("원당 시장에 대해 알려줘", "web_search"),
+        ("고양시 화정역 근처 맛집 알려줘", "web_search"),
+        ("이 근처 병원 어디 있어?", "web_search"),
+        # 검색하지 않는다: 일반 상식·개인 질문·인사·말버릇
+        ("파이썬이 뭐야?", None),
+        ("내 이름 뭐야?", None),
+        ("너 나 알아?", None),
+        ("안녕, 반가워", None),
+        ("역시 대단해", None),
+        ("오늘 날씨 알려줘", "get_weather"),
+    ],
+)
+def test_specific_facts_are_searched_before_answering(question, expected) -> None:
+    assert required_tool(question, ALL) == expected
+
+
 def test_should_not_require_tool_that_is_not_offered() -> None:
     # 인터넷 도구가 꺼져 있으면 날씨·검색 도구가 없다
     assert required_tool("오늘 서울 날씨 어때?", ["get_time"]) is None

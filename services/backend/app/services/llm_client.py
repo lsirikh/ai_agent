@@ -58,6 +58,11 @@ LANGUAGE_PROMPTS = {
 - 이전 대화 내용을 기억하고 문맥에 맞게 대화하세요.
 - 모르는 것은 모른다고 솔직하게 답변하세요.
 
+[사실 확인 규칙]
+- 실제 장소·가게·시장·인물·회사·최근 일처럼 구체적인 사실은 추측하지 말고
+  web_search 로 찾아본 뒤, 검색 결과에 있는 내용만 정리해 출처와 함께 답하세요.
+- 검색 결과에 없으면 모른다고 말하세요.
+
 IMPORTANT: You MUST respond in Korean (한국어) ONLY.
 NEVER use Chinese characters (中文/汉字). NEVER switch to any other language.""",
 
