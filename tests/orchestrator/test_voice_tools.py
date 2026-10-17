@@ -99,7 +99,11 @@ def make(responses, model=MODEL, registry=None):
 
     async def fake_stream_request(messages, **kwargs):
         requests.append(
-            {"messages": [dict(m) for m in messages], "tools": kwargs.get("tools")}
+            {
+                "messages": [dict(m) for m in messages],
+                "tools": kwargs.get("tools"),
+                "tool_choice": kwargs.get("tool_choice"),
+            }
         )
         item = script.pop(0)
         if callable(item):
@@ -396,3 +400,27 @@ class TestVoiceConfirmation:
             )
             >= 0
         )
+
+
+class TestRequiredTool:
+    @pytest.mark.asyncio
+    async def test_news_question_forces_web_search_on_first_request(self):
+        # 같은 질문에 도구 없이 답한 기록이 있으면 auto 에서는 뉴스를 지어냈다(실측)
+        provider = FakeProvider()
+        registry = build_registry({"internet_enabled": True}, search_provider=provider)
+        orchestrator, _, requests, spoken = make(
+            [
+                [call_chunk(("web_search", '{"query": "오늘 주요 뉴스"}'))],
+                [text_chunk("오늘 주요 뉴스는 이렇습니다.")],
+            ],
+            registry=registry,
+        )
+
+        await voice_turn(orchestrator, "인터넷에서 오늘 주요 뉴스 찾아 줘")
+
+        assert provider.queries == ["오늘 주요 뉴스"]
+        assert requests[0]["tool_choice"] == {
+            "type": "function",
+            "function": {"name": "web_search"},
+        }
+        assert requests[1]["tool_choice"] == "auto"

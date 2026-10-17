@@ -350,3 +350,40 @@ class TestToolSettingsApi:
         # 인터넷을 켜면 날씨(get_weather, 기본 켜짐)도 함께 노출된다
         assert after["tools"] == ["get_time", "get_weather", "web_fetch", "web_search"]
         assert client.get("/api/settings/tools").json()["internet_enabled"] is True
+
+
+def _weather_tool(asked):
+    async def weather(args):
+        asked.append(args)
+        return ToolResult("부산 현재 날씨: 약한 비")
+
+    return Tool("get_weather", "날씨", {"type": "object"}, weather)
+
+
+class TestRequiredTool:
+    @pytest.mark.asyncio
+    async def test_weather_question_forces_weather_tool_on_first_request(self, db):
+        # 같은 질문에 도구 없이 답한 기록이 있으면 auto 에서는 옛 답을 베꼈다(실측)
+        from services.backend.app.services.chat_service import ChatService
+
+        llm, requests = scripted_vllm(
+            [tool_call_chunk("get_weather", '{"location": "부산"}')],
+            [text_chunk("부산은 지금 약한 비가 와요.")],
+        )
+        asked = []
+
+        async def tools():
+            return ToolRegistry([_weather_tool(asked)])
+
+        service = ChatService(llm_client=llm, tool_provider=tools)
+        session_id = await conversation.get_active_session_id()
+
+        events = await run_chat(service, session_id, "부산은 지금 비 와?")
+
+        assert asked == [{"location": "부산"}]
+        assert requests[0]["tool_choice"] == {
+            "type": "function",
+            "function": {"name": "get_weather"},
+        }
+        assert requests[1]["tool_choice"] == "auto"
+        assert events[-1]["content"] == "부산은 지금 약한 비가 와요."

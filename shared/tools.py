@@ -177,6 +177,27 @@ async def current_time_reference(redis: Any) -> str:
     return f"지금 시각: {current_time_text(settings.get('timezone'))}"
 
 
+# 질문에 이 말이 있으면 그 도구가 분명히 필요하다 (앞쪽이 우선)
+_REQUIRED_TOOL_WORDS = [
+    (
+        "get_weather",
+        re.compile(r"날씨|기온|우산|비\s*(와|오|올|가)|눈\s*(와|오|올|이)"),
+    ),
+    ("web_search", re.compile(r"검색|인터넷|뉴스|최신")),
+]
+
+
+def required_tool(question: str, offered) -> Optional[str]:
+    """
+    분명히 도구가 필요한 질문이면 그 도구 이름. 같은 질문에 도구 없이 답한 기록이
+    있으면 Qwen2.5-7B 는 auto 에서 도구를 부르지 않고 옛 답을 베낀다(실측).
+    """
+    for name, words in _REQUIRED_TOOL_WORDS:
+        if name in offered and words.search(question or ""):
+            return name
+    return None
+
+
 def tool_parser_for(model: Optional[str]) -> Optional[str]:
     """
     모델에 맞는 vLLM --tool-call-parser. 모르는 모델이면 None → 도구를 끈다.

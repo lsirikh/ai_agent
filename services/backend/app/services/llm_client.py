@@ -19,8 +19,13 @@ from shared.context_builder import (
     input_budget,
     vllm_tokenize,
 )
-from shared.tool_calling import Confirm, schema_tokens, stream_with_tools
-from shared.tools import ToolRegistry, tool_parser_for
+from shared.tool_calling import (
+    Confirm,
+    schema_tokens,
+    stream_with_tools,
+    tool_choice_for,
+)
+from shared.tools import ToolRegistry, required_tool, tool_parser_for
 
 
 class LLMError(Exception):
@@ -201,7 +206,9 @@ class SimpleLLMClient:
             tokenize=lambda m: vllm_tokenize(self.base_url, model_name, m),
         )
 
-        async def request(request_messages: list, schemas: Optional[list]):
+        async def request(
+            request_messages: list, schemas: Optional[list], tool_choice=None
+        ):
             payload = {
                 "model": model_name,
                 "messages": request_messages,
@@ -215,7 +222,8 @@ class SimpleLLMClient:
                 return
             try:
                 async for chunk in self._stream_chunks(
-                    {**payload, "tools": schemas, "tool_choice": "auto"}
+                    {**payload, "tools": schemas,
+                     "tool_choice": tool_choice_for(tool_choice)}
                 ):
                     yield chunk
             except LLMError as e:
@@ -232,6 +240,7 @@ class SimpleLLMClient:
             tools,
             input_budget=input_budget(self.max_model_len, max_tokens),
             confirm=confirm,
+            required=required_tool(prompt, tools.names()) if tools else None,
         ):
             yield item
 

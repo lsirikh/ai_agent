@@ -18,8 +18,13 @@ from shared.context_builder import (
     input_budget,
     vllm_tokenize,
 )
-from shared.tool_calling import Confirm, schema_tokens, stream_with_tools
-from shared.tools import ToolRegistry, tool_parser_for
+from shared.tool_calling import (
+    Confirm,
+    schema_tokens,
+    stream_with_tools,
+    tool_choice_for,
+)
+from shared.tools import ToolRegistry, required_tool, tool_parser_for
 
 from .pipeline_logger import PipelineLogger
 
@@ -441,7 +446,9 @@ class LLMClient:
                 tokenize=self._tokenize,
             )
 
-        async def request(request_messages: list, schemas: Optional[list]):
+        async def request(
+            request_messages: list, schemas: Optional[list], tool_choice=None
+        ):
             if not schemas:
                 async for chunk in self._make_stream_request(
                     request_messages, **kwargs
@@ -450,7 +457,10 @@ class LLMClient:
                 return
             try:
                 async for chunk in self._make_stream_request(
-                    request_messages, tools=schemas, tool_choice="auto", **kwargs
+                    request_messages,
+                    tools=schemas,
+                    tool_choice=tool_choice_for(tool_choice),
+                    **kwargs,
                 ):
                     yield chunk
             except httpx.HTTPStatusError as e:
@@ -486,6 +496,9 @@ class LLMClient:
                 tools,
                 input_budget=input_budget(self.max_model_len, max_tokens),
                 confirm=confirm,
+                required=(
+                    required_tool(user_message, tools.names()) if tools else None
+                ),
             ):
                 if isinstance(item, str):
                     total_tokens += 1

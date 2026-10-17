@@ -32,7 +32,8 @@ RESULT_NOTICE = (
 )
 
 # request(messages, tools) → OpenAI 스트리밍 청크(dict) 들
-StreamRequest = Callable[[list, Optional[list]], AsyncIterator[dict]]
+# (messages, tools 또는 None[, tool_choice=도구 이름]) → 스트리밍 청크
+StreamRequest = Callable[..., AsyncIterator[dict]]
 # confirm(이벤트) → 실행해도 되면 True
 Confirm = Callable[[dict], Awaitable[bool]]
 
@@ -116,6 +117,13 @@ def schema_tokens(tools: Optional[list]) -> int:
     return estimate_tokens(json.dumps(tools, ensure_ascii=False)) if tools else 0
 
 
+def tool_choice_for(name: Optional[str]) -> Any:
+    """vLLM tool_choice: 이름이 있으면 그 도구를 반드시 부르게, 없으면 auto."""
+    if not name:
+        return "auto"
+    return {"type": "function", "function": {"name": name}}
+
+
 async def stream_with_tools(
     request: StreamRequest,
     messages: list,
@@ -124,6 +132,7 @@ async def stream_with_tools(
     input_budget: Optional[int] = None,
     confirm: Optional[Confirm] = None,
     max_rounds: int = MAX_TOOL_ROUNDS,
+    required: Optional[str] = None,
 ) -> AsyncIterator[Any]:
     """
     도구 왕복을 처리하며 답 텍스트와 도구 이벤트를 내보낸다.
@@ -135,8 +144,11 @@ async def stream_with_tools(
         input_budget: 프롬프트 토큰 한도. 도구 결과가 이 안에 들도록 자르고,
             모자라면 도구 없이 최종 답을 받는다.
         confirm: 확인이 필요한 도구를 실행해도 되는지 묻는다(없으면 실행하지 않는다)
+        required: 첫 요청에서 반드시 부를 도구 이름(request 에 tool_choice 로 준다)
     """
     tools = registry.schemas() if registry else None
+    if required and required not in (registry.names() if registry else []):
+        required = None
     messages = list(messages)
     for round_index in range(max_rounds + 1):
         offer = tools if round_index < max_rounds else None
@@ -150,7 +162,9 @@ async def stream_with_tools(
         assembler = ToolCallAssembler()
         guard = ToolTextGuard()
         text = ""
-        async for chunk in request(messages, offer):
+        forced = {"tool_choice": required} if offer and required else {}
+        required = None
+        async for chunk in request(messages, offer, **forced):
             choices = chunk.get("choices") or []
             if not choices:
                 continue
