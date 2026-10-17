@@ -7,6 +7,7 @@ Phase 17.2: Service Heartbeat Logging (10초 간격)
 """
 import asyncio
 import json
+from collections import deque
 import os
 import time
 from contextlib import asynccontextmanager
@@ -21,6 +22,7 @@ from .aec import AcousticEchoCanceller
 from .audio_io import AudioIOManager
 from .audio_recorder import AudioRecorder
 from .barge_in import BargeInDetector, PlaybackState
+from .speech_barge_in import PlaybackTracker, SpeechBargeIn
 from .pipeline_logger import get_logger, HEARTBEAT_INTERVAL
 from .stt_client import STTClient
 from .vad import VoiceActivityDetector
@@ -34,6 +36,11 @@ barge_in_detector = BargeInDetector(vad=vad)
 audio_io_manager = AudioIOManager()
 # Phase 35.7: STT 연동 컴포넌트
 audio_recorder = AudioRecorder()
+# 말소리로 끼어들기: 앱으로 보낸 답 음성의 실제 재생 구간과, 에코보다 큰 목소리 감지
+playback_tracker = PlaybackTracker()
+speech_barge = SpeechBargeIn()
+# 끼어든 첫마디가 녹음에서 빠지지 않게 최근 마이크 소리를 들고 있는다(0.8초)
+_recent_chunks: deque = deque(maxlen=8)
 stt_client = STTClient()
 
 # Redis 클라이언트
@@ -473,6 +480,25 @@ def unregister_playback_client(websocket: Any) -> None:
     _playback_clients.discard(websocket)
 
 
+async def start_speech_barge_in() -> None:
+    """
+    답을 말하는 도중 사용자가 말했다: 끼어들기를 알리고(오케스트레이터가 답을 멈춤)
+    바로 듣기·녹음. 감지하느라 지나간 첫마디(최근 0.8초)도 녹음에 넣는다.
+    """
+    pre_roll = list(_recent_chunks)
+    playback_tracker.clear()
+    speech_barge.reset()
+    if redis_client is not None:
+        event = {
+            "type": "barge_in_detected", "source": "speech", "timestamp": time.time()
+        }
+        await redis_client.publish(barge_in_detector.redis_channel, json.dumps(event))
+    await handle_wake_word_event({"type": "barge_in", "keyword": "speech"})
+    for chunk in pre_roll:
+        audio_recorder.add_chunk(chunk)
+    await _logger.info("speech_barge_in", "말소리 끼어들기 — 답을 멈추고 듣는다")
+
+
 async def publish_for_wake_word(processed: np.ndarray) -> None:
     """마이크 소리를 웨이크워드 서비스로 보낸다(실패해도 오디오 처리는 이어 간다)."""
     if redis_client is None:
@@ -487,6 +513,9 @@ async def forward_tts_audio(audio_bytes: bytes) -> None:
     """TTS 오디오(float32 24kHz mono)를 연결된 클라이언트에 바이너리 프레임으로 보낸다."""
     if _listening_mode:
         return  # 끼어들어 듣는 중: 남은 답 음성은 틀지 않는다
+    usable = len(audio_bytes) - len(audio_bytes) % 4  # float32 단위만
+    if _playback_clients and usable:
+        playback_tracker.add(np.frombuffer(audio_bytes[:usable], dtype=np.float32))
     for client in list(_playback_clients):
         try:
             await client.send_bytes(audio_bytes)
@@ -1172,6 +1201,13 @@ async def websocket_audio_stream(websocket: WebSocket):
 
             processed = aec.process(audio)
             vad_result = vad.detect(processed)
+            _recent_chunks.append(processed)
+            if not _listening_mode and playback_tracker.playing():
+                rms = float(np.sqrt(np.mean(processed**2))) if len(processed) else 0.0
+                if speech_barge.feed(
+                    rms, vad_result.get("probability", 0.0), playback_tracker.level()
+                ):
+                    await start_speech_barge_in()
 
             # 10 청크마다 VAD 확률 로그 (콘솔 + Pipeline Log)
             if chunk_count % 10 == 0:

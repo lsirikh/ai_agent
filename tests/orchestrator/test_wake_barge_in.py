@@ -89,3 +89,26 @@ async def test_interrupted_answer_is_saved_so_it_is_not_repeated() -> None:
     saved = [m for m in backend.saved if m["role"] == "assistant"]
     assert saved and saved[-1]["content"].startswith("봄은 따뜻합니다.")
     assert "끼어들어 중단" in saved[-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_speech_barge_in_stops_answer_and_starts_listening_timer() -> None:
+    # 말소리 끼어들기(게이트웨이 barge_in 신호): 답을 멈추고 듣는다. 말이 없으면
+    # 듣기 제한 시간 뒤 대기로 돌아가야 하므로 타이머도 켠다
+    from services.orchestrator.app.state_machine import State
+
+    orchestrator = _orchestrator()
+    for state in (State.LISTENING, State.STT_PROCESSING, State.LLM_PROCESSING,
+                  State.TTS_PROCESSING):
+        orchestrator.state_machine.transition_to(state)
+    answering = asyncio.create_task(asyncio.sleep(30))
+    orchestrator._processing_task = answering
+
+    await orchestrator._handle_message(
+        orchestrator.CHANNELS["barge_in"], {"type": "barge_in_detected"}
+    )
+    await asyncio.sleep(0)
+
+    assert orchestrator.state_machine.current_state == State.LISTENING
+    assert answering.cancelled()
+    assert orchestrator._listening_task is not None

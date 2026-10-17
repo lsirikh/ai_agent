@@ -986,7 +986,9 @@ class Orchestrator:
                 self._stt_task = asyncio.create_task(self.handle_stt_result(text))
 
         elif channel == self.CHANNELS["barge_in"]:
-            await self.handle_barge_in()
+            # 말소리 끼어들기: 답을 멈추고 듣는다(말이 없으면 제한 시간 뒤 대기로)
+            if await self.handle_barge_in():
+                self._start_listening_timeout()
 
         elif channel == self.CHANNELS["tts_complete"]:
             # audio_length: float32 24kHz 바이트 수
