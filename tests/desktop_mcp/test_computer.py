@@ -108,3 +108,23 @@ def test_draw_picture_needs_at_least_one_shape() -> None:
 
     with pytest.raises(ValueError):
         draw_picture([{"type": "star"}], screen=FakeScreen())
+
+
+def test_canvas_is_found_even_with_drawing_on_it() -> None:
+    # 실측: 이미 그린 선이 지나는 열을 흰 칸으로 보지 않아 캔버스를 좁게 잡았다
+    from services.desktop_mcp.computer import find_canvas
+
+    image = np.full((600, 800, 3), 243, dtype=np.uint8)
+    image[100:500, 150:650] = 255
+    image[150:450, 300:302] = 0  # 세로 선
+    image[300:302, 200:600] = 0  # 가로 선
+    image[200:400, 400:500] = 0  # 칠한 곳
+
+    assert find_canvas(image) == (150, 100, 650, 500)
+
+
+def test_drawing_area_is_square_so_circles_stay_round() -> None:
+    from services.desktop_mcp.computer import square_area
+
+    assert square_area((100, 100, 1100, 600)) == (350, 100, 850, 600)
+    assert square_area((0, 0, 400, 800)) == (0, 200, 400, 600)

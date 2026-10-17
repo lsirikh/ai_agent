@@ -78,7 +78,9 @@ def draw_picture(shapes: list[dict]) -> str:
     예) 웃는 얼굴: [{"type":"circle","x":500,"y":500,"r":300},
       {"type":"circle","x":400,"y":420,"r":30},{"type":"circle","x":600,"y":420,"r":30},
       {"type":"arc","x":500,"y":520,"r":150,"start":20,"end":160}]
-    강아지처럼 복잡한 것은 머리·귀·눈·코·입·몸·다리·꼬리를 각각 모양으로 나눠 그린다."""
+    강아지처럼 복잡한 것은 머리·귀·눈·코·입·몸·다리·꼬리를 각각 모양으로 나눠
+    12개 이상으로 그리고, 캔버스(0~1000)를 넓게 쓴다. 부분끼리 서로 닿게 놓는다
+    (예: 몸통 타원 위에 머리 원, 머리 위 양옆에 귀 타원, 몸통 아래에 다리 선 4개)."""
     try:
         return computer.draw_picture(shapes, screen=computer.WindowsScreen())
     except (ValueError, RuntimeError) as e:

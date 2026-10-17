@@ -99,21 +99,34 @@ def find_canvas(image: np.ndarray) -> Optional[tuple]:
     # (얇은 흰 도구 막대는 세로로 짧아 빠진다)
     cols = white.sum(axis=0)
     tall = np.where(cols >= 0.5 * cols.max())[0]
-    ys = _longest_run(np.where(white[:, tall].sum(axis=1) >= 0.9 * len(tall))[0])
+    # 이미 그린 선·칠이 있어도 캔버스로 보도록 절반 넘게 흰 줄·칸을 센다
+    ys = _longest_run(np.where(white[:, tall].sum(axis=1) >= 0.5 * len(tall))[0])
     if not len(ys):
         return None
-    xs = _longest_run(np.where(white[ys].sum(axis=0) >= 0.9 * len(ys))[0])
+    xs = _longest_run(np.where(white[ys].sum(axis=0) >= 0.5 * len(ys))[0])
     if not len(xs):
         return None
     return (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
 
 
+def square_area(rect: tuple) -> tuple:
+    """가운데 정사각형 영역 — 0~1000 좌표의 원이 찌그러지지 않게."""
+    left, top, right, bottom = rect
+    side = min(right - left, bottom - top)
+    x = left + (right - left - side) // 2
+    y = top + (bottom - top - side) // 2
+    return (x, y, x + side, y + side)
+
+
+RUN_GAP = 12  # 이보다 좁은 틈(그려 둔 선)은 이어진 것으로 본다
+
+
 def _longest_run(indices: np.ndarray) -> np.ndarray:
-    """이어진 번호 중 가장 긴 구간(떨어진 흰 막대를 뺀다)."""
+    """이어진 번호 중 가장 긴 구간(떨어진 흰 막대를 뺀다, 그려 둔 선은 넘는다)."""
     if not len(indices):
         return indices
-    runs = np.split(indices, np.where(np.diff(indices) != 1)[0] + 1)
-    return max(runs, key=len)
+    runs = np.split(indices, np.where(np.diff(indices) > RUN_GAP)[0] + 1)
+    return max(runs, key=lambda run: run[-1] - run[0])
 
 
 def parse_keys(keys: str) -> list:
@@ -218,10 +231,10 @@ class WindowsScreen:
             raise RuntimeError("그림판의 흰 캔버스를 찾지 못했습니다")
         cl, ct, cr, cb = canvas
         mx, my = (cr - cl) * CANVAS_MARGIN, (cb - ct) * CANVAS_MARGIN
-        return (
+        return square_area((
             round(left + cl + mx), round(top + ct + my),
             round(left + cr - mx), round(top + cb - my),
-        )
+        ))
 
     # ── 마우스 ──────────────────────────────────────────
     def _mouse(self, flag: int) -> None:
@@ -246,11 +259,12 @@ class WindowsScreen:
         self.move(*points[0])
         time.sleep(0.03)
         self._mouse(0x0002)
+        # 너무 빨리 움직이면 그림판이 중간 점을 건너뛰어 원이 다각형이 됐다(실측)
         for (x0, y0), (x1, y1) in zip(points, points[1:]):
-            steps = max(1, int(math.hypot(x1 - x0, y1 - y0) // 6))
+            steps = max(1, int(math.hypot(x1 - x0, y1 - y0) // 3))
             for i in range(1, steps + 1):
                 self.move(x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps)
-                time.sleep(0.004)
+                time.sleep(0.008)
         self._mouse(0x0004)
         time.sleep(0.03)
 
