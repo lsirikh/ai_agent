@@ -23,6 +23,17 @@ def _chunk(rms):
     return np.full(1600, rms, dtype=np.float32)
 
 
+def _clock():
+    """조각마다 0.1초씩 가는 시계 (time.time() 해상도가 낮아 같은 값이 나온다)."""
+    import time
+    from unittest.mock import MagicMock
+
+    fake = MagicMock(wraps=time)
+    ticks = iter(1000.0 + 0.1 * i for i in range(10_000))
+    fake.time.side_effect = lambda: next(ticks)
+    return fake
+
+
 def test_background_much_quieter_than_voice_is_not_voice() -> None:
     from app.speech_end import VoiceLevel
 
@@ -52,7 +63,7 @@ async def test_question_ends_when_only_quieter_background_remains() -> None:
     main.voice_level.reset()
     speech = {"is_speech": True, "probability": 0.9}
 
-    with patch.object(main, "_logger") as logger:
+    with patch.object(main, "_logger") as logger, patch.object(main, "time", _clock()):
         logger.log = AsyncMock()
         logger.info = AsyncMock()
         for _ in range(10):  # 사용자 질문
@@ -79,3 +90,46 @@ def test_vad_tail_and_background_do_not_lower_the_voice_level() -> None:
 
     assert not any(tail)
     assert sum(background) <= 3  # 가끔 큰 음절 정도만
+
+
+@pytest.mark.asyncio
+async def test_single_loud_syllable_in_background_does_not_extend_question() -> None:
+    # E2E 실측: 배경 말소리의 큰 음절 하나(0.1초)가 말 끝을 1.4초 늦췄다
+    from app import main
+
+    main._listening_mode = True
+    main._is_recording = True
+    main.voice_level.reset()
+    speech = {"is_speech": True, "probability": 0.9}
+
+    with patch.object(main, "_logger") as logger, patch.object(main, "time", _clock()):
+        logger.log = AsyncMock()
+        for _ in range(10):
+            await main.handle_vad_result(speech, "s", _chunk(0.1))
+        spoke_at = main._last_speech_time
+        for rms in [0.015, 0.015, 0.1, 0.015, 0.015]:
+            await main.handle_vad_result(speech, "s", _chunk(rms))
+
+    assert main._last_speech_time == spoke_at
+    main._listening_mode = False
+    main._is_recording = False
+
+
+@pytest.mark.asyncio
+async def test_audio_after_the_question_is_not_sent_to_stt() -> None:
+    # 말 끝 뒤의 배경 소리까지 받아 적었다 → 마지막 목소리 0.5초 뒤까지만 보낸다
+    import time
+
+    from app import main
+
+    main._is_recording = True
+    main._last_speech_time = time.time() - 2.0
+    with (
+        patch.object(main, "on_speech_ended", AsyncMock()) as ended,
+        patch.object(main, "_logger") as logger,
+    ):
+        logger.info = AsyncMock()
+        await main.process_speech_timeout()
+
+    trim = ended.await_args.kwargs["trim_seconds"]
+    assert 1.4 <= trim <= 1.6

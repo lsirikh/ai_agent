@@ -21,6 +21,7 @@ class VoiceLevel:
         self.min_chunks = min_chunks
         self.learn_ratio = learn_ratio
         self._levels: deque = deque(maxlen=200)  # 사용자 목소리로 본 조각의 크기
+        self.last = ""  # 최근 판정 기록(V 목소리 · . 아님), 로그용
 
     def level(self) -> float:
         """이번 질문의 사용자 목소리 크기(크기 순 70% 지점)."""
@@ -28,6 +29,11 @@ class VoiceLevel:
 
     def is_voice(self, rms: float, vad_speech: bool) -> bool:
         """사용자가 아직 말하는 중인 조각인지."""
+        heard = self._judge(rms, vad_speech)
+        self.last = (self.last + ("V" if heard else "."))[-10:]
+        return heard
+
+    def _judge(self, rms: float, vad_speech: bool) -> bool:
         if not vad_speech or rms < MIN_VOICE_RMS:
             return False
         if len(self._levels) < self.min_chunks:
@@ -41,5 +47,16 @@ class VoiceLevel:
             self._levels.append(rms)
         return True
 
+    @property
+    def steady(self) -> bool:
+        """두 조각(0.2초) 넘게 목소리가 이어지는지 — 배경의 큰 음절 하나는 아니다."""
+        return self.last.endswith("VV")
+
+    def describe(self) -> str:
+        """로그용: 익힌 목소리 크기와 최근 판정."""
+        known = f"{self.level():.3f}" if self._levels else "-"
+        return f"{known} last={self.last}"
+
     def reset(self) -> None:
         self._levels.clear()
+        self.last = ""

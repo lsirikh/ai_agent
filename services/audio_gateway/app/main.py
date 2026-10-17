@@ -82,6 +82,8 @@ _last_speech_time: Optional[float] = None  # 마지막 음성 감지 시간
 # 이 안에서는 무음이어도 녹음을 끝내지 않는다
 # (호출어를 말하는 도중에 감지되면 바로 '말 끝' 이 돼 질문 전에 녹음이 끝났다 — 실측)
 WAIT_FOR_QUESTION_SECONDS = 4.0
+# STT 로 보낼 때 마지막 목소리 뒤로 남길 길이(말끝이 잘리지 않을 만큼)
+QUESTION_TAIL_SECONDS = 0.5
 _question_wait_until: Optional[float] = None
 
 # Phase 46: 녹음 진행 추적
@@ -143,9 +145,12 @@ async def process_speech_timeout() -> Optional[str]:
         }
     )
 
-    # 녹음 종료 및 STT 호출
+    # 녹음 종료 및 STT 호출. 마지막 목소리 뒤 배경 소리는 받아 적지 않게 잘라 낸다
     _is_recording = False
-    result = await on_speech_ended(session_id=session_id)
+    trim = 0.0
+    if _last_speech_time is not None:
+        trim = max(0.0, time.time() - _last_speech_time - QUESTION_TAIL_SECONDS)
+    result = await on_speech_ended(session_id=session_id, trim_seconds=trim)
 
     # 세션 리셋
     await reset_session()
@@ -659,7 +664,8 @@ async def handle_vad_result(
         heard = is_speech  # 소리 크기를 모르면 VAD 만 본다
     else:
         rms = float(np.sqrt(np.mean(audio_chunk**2)))
-        heard = voice_level.is_voice(rms, is_speech)
+        # 목소리가 0.2초 이어질 때만 말하는 중으로 본다(배경의 큰 음절 하나는 아니다)
+        heard = voice_level.is_voice(rms, is_speech) and voice_level.steady
     if heard and _is_recording:
         _last_speech_time = time.time()
 
@@ -679,7 +685,10 @@ async def handle_vad_result(
             await _logger.log(
                 event="recording_progress",
                 data={
-                    "message": f"Recording: {_recording_total_samples} samples ({duration_ms}ms)",
+                    "message": (
+                        f"Recording: {_recording_total_samples} samples "
+                        f"({duration_ms}ms) voice={voice_level.describe()}"
+                    ),
                     "samples": _recording_total_samples,
                     "duration_ms": duration_ms,
                     "chunk_count": _recording_chunk_count
@@ -719,7 +728,9 @@ async def on_speech_started() -> None:
     )
 
 
-async def on_speech_ended(session_id: str) -> Optional[str]:
+async def on_speech_ended(
+    session_id: str, trim_seconds: float = 0.0
+) -> Optional[str]:
     """
     음성 감지 종료 이벤트 핸들러 (Phase 35.7.3)
 
@@ -736,6 +747,9 @@ async def on_speech_ended(session_id: str) -> Optional[str]:
     """
     # 녹음 중지 및 오디오 데이터 획득
     audio_data = audio_recorder.stop()
+    trim = int(trim_seconds * 16000)
+    if 0 < trim < len(audio_data):
+        audio_data = audio_data[:-trim]  # 질문 뒤 소리(무음·배경)는 보내지 않는다
 
     if len(audio_data) == 0:
         await _logger.warning(
