@@ -13,16 +13,15 @@
         "browser_close"
       ],
       "trusted": true,
-      "always_confirm": [
-        "browser_click"
-      ],
+      "always_confirm": [],
       "timeout": 60,
       "no_confirm": [
         "browser_navigate",
         "browser_navigate_back",
         "browser_type",
         "browser_snapshot",
-        "browser_tabs"
+        "browser_tabs",
+        "browser_click"
       ]
     },
     {

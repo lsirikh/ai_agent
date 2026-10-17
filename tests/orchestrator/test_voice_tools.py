@@ -581,3 +581,36 @@ def test_confirm_question_says_what_will_happen(name, arguments, expected) -> No
     from services.orchestrator.app.orchestrator import confirm_question
 
     assert confirm_question(name, arguments).startswith(expected)
+
+
+def test_click_question_names_the_element() -> None:
+    # 실측: "browser_click 을 실행할까요?" 라고 물어 무엇을 누르는지 알 수 없었다
+    from services.orchestrator.app.orchestrator import confirm_question
+
+    question = confirm_question(
+        "browser__browser_click", '{"element": "아이유 좋은 날 MV", "target": "e123"}'
+    )
+
+    assert question.startswith("아이유 좋은 날 MV 을 누를까요?")
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "네", "응 해줘", "하라고 하라고 클릭하라고 클릭해", "눌러", "그래 열어",
+        "실행해", "빨리 해",
+    ],
+)
+def test_imperative_answers_count_as_yes(answer) -> None:
+    # 실측: '하라고 하라고 클릭하라고 클릭해' 를 '네' 로 알아듣지 못했다
+    from services.orchestrator.app.orchestrator import NO_PATTERN, YES_PATTERN
+
+    assert not NO_PATTERN.search(answer)
+    assert YES_PATTERN.search(answer)
+
+
+@pytest.mark.parametrize("answer", ["아니오", "아니 하지 마", "취소해", "하지마"])
+def test_refusals_are_still_no(answer) -> None:
+    from services.orchestrator.app.orchestrator import NO_PATTERN
+
+    assert NO_PATTERN.search(answer)
