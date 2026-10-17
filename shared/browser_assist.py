@@ -34,7 +34,10 @@ _DOMAIN = re.compile(r"^[\w.-]+\.[a-z]{2,}(/\S*)?$", re.IGNORECASE)
 _INPUT_ROLES = ("combobox", "searchbox", "textbox", "checkbox", "radio")
 _ACTION_ROLES = ("button", "tab", "menuitem", "option")
 _OTHER_ROLES = ("link",)
-_ELEMENT = re.compile(r'^\s*-\s+(\w+)\s+"([^"]*)"(?:\s+\[[^\]]*\])*?.*?\[ref=(e\d+)\]')
+# ref 는 'e60' 또는 'f57e2'(같은 브라우저를 여러 연결이 쓸 때) 꼴
+_ELEMENT = re.compile(
+    r'^\s*-\s+(\w+)\s+"([^"]*)"(?:\s+\[[^\]]*\])*?.*?\[ref=([a-z0-9]*e\d+)\]'
+)
 MAX_ELEMENTS = 70
 
 REF_HINT = (
@@ -86,7 +89,7 @@ def compact_snapshot(content: str) -> str:
     return "\n".join(header + elements)
 
 
-_REF_TARGET = re.compile(r"^\[?\s*ref\s*=\s*(e\d+)\s*\]?$")
+_REF_TARGET = re.compile(r"^\[?\s*ref\s*=\s*([a-z0-9]*e\d+)\s*\]?$")
 
 
 class BrowserState:

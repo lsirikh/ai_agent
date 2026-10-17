@@ -318,6 +318,22 @@ def test_type_target_is_fixed_to_a_real_input_on_the_current_page() -> None:
     assert state.fix_type_target({"target": "e90", "text": "x"})["target"] == "e60"
 
 
+def test_frame_prefixed_refs_are_understood() -> None:
+    # 실측: 같은 브라우저를 여러 연결이 쓰자 ref 가 'e60' 이 아니라 'f57e2' 꼴로 나왔고,
+    # 'e숫자' 만 알아보던 요약이 비어 입력 대상 보정도 동작하지 않았다
+    from shared.browser_assist import BrowserState
+
+    snapshot = SNAPSHOT.replace("[ref=e", "[ref=f57e")
+    state = BrowserState()
+    state.update(snapshot)
+
+    combobox = '- combobox "검색어를 입력해 주세요." [ref=f57e60]'
+    assert combobox in compact_snapshot(snapshot)
+    assert state.inputs == ["f57e60"]
+    assert state.fix_type_target({"target": "[ref=f57e60]"})["target"] == "f57e60"
+    assert state.fix_type_target({"target": "e60"})["target"] == "f57e60"
+
+
 def test_click_target_only_drops_ref_brackets() -> None:
     from shared.browser_assist import BrowserState
 
