@@ -227,3 +227,42 @@ class TestStdioServer:
             assert await mcp.tools() == []
         finally:
             await mcp.close()
+
+
+class TestReconnect:
+    """
+    실측(2026-10-18): 브라우저 MCP 세션이 한 번 끊기면('Session terminated')
+    그 뒤 모든 호출이 실패해 '유튜브 열어 줘' 도 못 했다 → 다시 연결해 한 번 더 부른다.
+    """
+
+    @pytest.mark.asyncio
+    async def test_should_reconnect_and_retry_when_session_is_terminated(self, manager):
+        from mcp.shared.exceptions import MCPError
+
+        registry = ToolRegistry(await manager.tools())
+        server = manager.servers[0]
+        old_client = server.client
+        original = old_client.call_tool
+
+        async def terminated(*args, **kwargs):
+            raise MCPError(-32600, "Session terminated")
+
+        old_client.call_tool = terminated
+        try:
+            result = await registry.execute("ironwall__status", "{}")
+        finally:
+            old_client.call_tool = original
+
+        assert result.is_error is False and "정상" in result.content
+        assert server.client is not None and server.client is not old_client
+
+    @pytest.mark.asyncio
+    async def test_should_reconnect_when_server_was_disconnected(self, manager):
+        registry = ToolRegistry(await manager.tools())
+        server = manager.servers[0]
+        await server.stop()
+        assert server.client is None
+
+        result = await registry.execute("ironwall__status", "{}")
+
+        assert result.is_error is False and "정상" in result.content

@@ -149,6 +149,18 @@ class _Server:
         if self._task:
             await asyncio.wait({self._task}, timeout=self.config.timeout)
 
+    async def reconnect(self) -> bool:
+        """연결을 새로 연다(세션이 끊겼거나 서버가 늦게 떴을 때). 되면 True."""
+        await self.stop()
+        self._ready, self._stop = asyncio.Event(), asyncio.Event()
+        self.error, self.stale = None, True
+        try:
+            await self.start()
+        except Exception as e:
+            audit_log.warning("mcp reconnect failed (%s): %s", self.config.name, e)
+            return False
+        return True
+
     async def list_tools(self) -> list:
         """페이지를 끝까지 받는다."""
         tools, cursor = [], None
@@ -251,7 +263,7 @@ class MCPManager:
 
     async def call(self, server: _Server, tool_name: str, args: dict) -> ToolResult:
         record = {"server": server.config.name, "tool": tool_name, "arguments": args}
-        if server.client is None:
+        if server.client is None and not await server.reconnect():
             audit_log.info(
                 json.dumps({**record, "outcome": "disconnected"}, ensure_ascii=False)
             )
@@ -260,9 +272,23 @@ class MCPManager:
                 is_error=True,
             )
         try:
-            result = await asyncio.wait_for(
-                server.client.call_tool(tool_name, args), server.config.timeout
-            )
+            try:
+                result = await asyncio.wait_for(
+                    server.client.call_tool(tool_name, args), server.config.timeout
+                )
+            except asyncio.TimeoutError:
+                raise
+            except Exception as e:
+                # 세션이 끊기면('Session terminated') 그 뒤 호출이 모두 실패했다(실측)
+                # → 다시 연결해 한 번 더 부른다
+                audit_log.info(
+                    json.dumps({**record, "outcome": f"retry: {e}"}, ensure_ascii=False)
+                )
+                if not await server.reconnect():
+                    raise
+                result = await asyncio.wait_for(
+                    server.client.call_tool(tool_name, args), server.config.timeout
+                )
         except asyncio.TimeoutError:
             audit_log.info(
                 json.dumps({**record, "outcome": "timeout"}, ensure_ascii=False)
