@@ -266,3 +266,74 @@ class TestReconnect:
         result = await registry.execute("ironwall__status", "{}")
 
         assert result.is_error is False and "정상" in result.content
+
+
+class FakeRedis:
+    def __init__(self, values=None):
+        self.values = dict(values or {})
+
+    async def get(self, key):
+        return self.values.get(key)
+
+
+class TestSettings:
+    """설정 화면에서 MCP 서버를 켜고 끄고 고친다 (사용자 요청 2026-10-18)."""
+
+    @pytest.mark.asyncio
+    async def test_saved_servers_win_over_config_file(self, tmp_path, monkeypatch):
+        from shared.mcp_client import MCP_SETTINGS_KEY, load_mcp_servers
+
+        path = tmp_path / "mcp.json"
+        path.write_text(json.dumps({"servers": [{"name": "file", "url": "http://f/mcp"}]}))
+        monkeypatch.setenv("MCP_CONFIG_PATH", str(path))
+        saved = [{"name": "saved", "url": "http://s/mcp", "enabled": False}]
+
+        from_file = await load_mcp_servers(FakeRedis())
+        from_redis = await load_mcp_servers(
+            FakeRedis({MCP_SETTINGS_KEY: json.dumps(saved)})
+        )
+
+        assert [s.name for s in from_file] == ["file"] and from_file[0].enabled
+        assert [s.name for s in from_redis] == ["saved"]
+        assert from_redis[0].enabled is False
+
+    @pytest.mark.asyncio
+    async def test_apply_connects_only_enabled_servers(self):
+        mcp = MCPManager([])
+        try:
+            await mcp.apply([config(), config(name="off", enabled=False)])
+            names = sorted(t.name for t in await mcp.tools())
+        finally:
+            await mcp.close()
+
+        assert names == ["ironwall__restart", "ironwall__status"]
+
+    @pytest.mark.asyncio
+    async def test_apply_keeps_unchanged_servers_and_reconnects_changed(self):
+        mcp = MCPManager([])
+        try:
+            await mcp.apply([config(), config(name="other")])
+            kept, changed = (s.client for s in mcp.servers)
+
+            await mcp.apply([config(), config(name="other", allowed_tools=["status"])])
+            names = sorted(t.name for t in await mcp.tools())
+            assert mcp.servers[0].client is kept
+            assert mcp.servers[1].client is not changed
+        finally:
+            await mcp.close()
+
+        assert names == ["ironwall__restart", "ironwall__status", "other__status"]
+
+    @pytest.mark.asyncio
+    async def test_apply_closes_disabled_and_removed_servers(self):
+        mcp = MCPManager([])
+        try:
+            await mcp.apply([config(), config(name="other")])
+            other = mcp.servers[1]
+
+            await mcp.apply([config(enabled=False)])
+
+            assert mcp.servers == [] and other.client is None
+            assert await mcp.tools() == []
+        finally:
+            await mcp.close()

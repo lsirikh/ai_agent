@@ -12,8 +12,12 @@ MCP 클라이언트 (Python mcp SDK 2.x — stdio · streamable HTTP)
         "trusted": true,                          # read-only 도구는 바로 실행
         "always_confirm": ["restart"],            # 항상 확인 (자동 조치 등)
         "no_confirm": ["status_page"],            # 확인 없이 (always_confirm 이 우선)
-        "timeout": 30
+        "timeout": 30,
+        "enabled": true                           # 끄면 연결 안 함 (설정 화면)
     }]}
+
+- 설정 화면에서 저장한 목록(Redis, MCP_SETTINGS_KEY)이 있으면 파일보다 우선한다.
+  두 서비스는 턴마다 MCPManager.apply 로 바뀐 서버만 다시 연결한다.
 
 - 이름은 `서버__도구` 를 ^[a-zA-Z0-9_-]{1,64}$ 로 정리하고 역매핑을 둔다.
 - 신뢰 서버가 read-only 로 표시한 도구만 확인 없이 실행한다.
@@ -40,6 +44,8 @@ NAME_PATTERN = re.compile(r"[^a-zA-Z0-9_-]")
 NAME_MAX = 64
 DEFAULT_TIMEOUT_SECONDS = 30.0
 MAX_LIST_PAGES = 50
+# 설정 화면(백엔드 API)이 쓰고 두 서비스가 턴마다 읽는다 (없으면 MCP_CONFIG_PATH)
+MCP_SETTINGS_KEY = "edgevoice:settings:mcp"
 
 
 @dataclass
@@ -56,6 +62,7 @@ class MCPServerConfig:
     # (Playwright MCP 는 열기·입력에도 destructive 를 붙인다). always_confirm 이 더 우선
     no_confirm: list = field(default_factory=list)
     timeout: float = DEFAULT_TIMEOUT_SECONDS
+    enabled: bool = True
 
 
 def load_mcp_config(path: Optional[str] = None) -> list:
@@ -66,6 +73,18 @@ def load_mcp_config(path: Optional[str] = None) -> list:
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     return [MCPServerConfig(**server) for server in data.get("servers", [])]
+
+
+async def load_mcp_servers(redis: Any) -> list:
+    """설정 화면에서 저장한 서버 목록(Redis) → 없으면 MCP_CONFIG_PATH 파일."""
+    if redis is not None:
+        try:
+            raw = await redis.get(MCP_SETTINGS_KEY)
+        except Exception:
+            raw = None
+        if raw:
+            return [MCPServerConfig(**server) for server in json.loads(raw)]
+    return load_mcp_config()
 
 
 def sanitize_tool_name(server: str, tool: str, taken: Optional[set] = None) -> str:
@@ -184,6 +203,7 @@ class MCPManager:
         self.browser = browser_assist.BrowserState()
         # LLM 에 보인 이름 → (서버 이름, 원래 도구 이름)
         self.name_map: dict = {}
+        self._apply_lock = asyncio.Lock()
 
     async def start(self) -> None:
         for server in self.servers:
@@ -195,6 +215,31 @@ class MCPManager:
     async def close(self) -> None:
         for server in self.servers:
             await server.stop()
+
+    async def apply(self, configs: list) -> None:
+        """
+        설정에 연결을 맞춘다: 켜진 서버 중 새것·바뀐 것만 연결하고
+        꺼지거나 빠진 서버는 닫는다(그대로인 서버의 세션은 유지).
+        """
+        async with self._apply_lock:
+            current = {server.config.name: server for server in self.servers}
+            servers = []
+            for config in configs:
+                if not config.enabled:
+                    continue
+                server = current.pop(config.name, None)
+                if server is None or server.config != config:
+                    if server is not None:
+                        await server.stop()
+                    server = _Server(config)
+                    try:
+                        await server.start()
+                    except Exception as e:
+                        audit_log.warning("mcp connect failed: %s", e)
+                servers.append(server)
+            for server in current.values():
+                await server.stop()
+            self.servers = servers
 
     async def tools(self) -> list:
         """허용 목록 안의 도구들 (list_changed 뒤에는 다시 받는다)."""
@@ -313,11 +358,8 @@ class MCPManager:
         return ToolResult(text or "(빈 결과)", is_error=bool(result.is_error))
 
 
-async def start_mcp_from_env() -> Optional[MCPManager]:
-    """MCP_CONFIG_PATH 가 있으면 연결한 MCPManager, 없으면 None."""
-    configs = load_mcp_config()
-    if not configs:
-        return None
-    manager = MCPManager(configs)
-    await manager.start()
+async def start_mcp_from_env(redis: Any = None) -> MCPManager:
+    """저장한 서버 목록(없으면 MCP_CONFIG_PATH)의 켜진 서버에 연결한 MCPManager."""
+    manager = MCPManager([])
+    await manager.apply(await load_mcp_servers(redis))
     return manager

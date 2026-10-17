@@ -22,6 +22,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 
 from .context_builder import _truncate_to_tokens
+from .skills import load_skills
 
 # 백엔드 설정 API 가 쓰고 두 서비스가 턴마다 읽는다 (없으면 환경변수 기본값)
 TOOL_SETTINGS_KEY = "edgevoice:settings:tools"
@@ -160,8 +161,12 @@ def default_tool_settings() -> dict:
 
 
 async def load_tool_settings(redis: Any) -> dict:
-    """설정 API 로 바꾼 값(Redis) → 없으면 환경변수 기본값."""
+    """
+    설정 API 로 바꾼 값(Redis) → 없으면 환경변수 기본값.
+    설정 화면에서 끈 내장 스킬(disabled_tools)도 함께 싣는다.
+    """
     settings = default_tool_settings()
+    settings["disabled_tools"] = (await load_skills(redis))["disabled_tools"]
     if redis is None:
         return settings
     try:
@@ -703,16 +708,24 @@ def build_registry(
 ) -> ToolRegistry:
     """
     이번 턴에 쓸 도구. 인터넷 도구는 설정이 켜져 있고 검색 제공자가 있을 때만 넣는다.
+    설정 화면에서 끈 내장 스킬(disabled_tools)은 넣지 않는다.
     """
-    # learn_note(학습 노트)는 지식 베이스에 쓰는 오프라인 로컬 도구라 항상 넣는다
-    registry = ToolRegistry(
-        [get_time_tool(settings.get("timezone")), learn_note_tool()]
-    )
+    registry = ToolRegistry()
+    disabled = set(settings.get("disabled_tools") or [])
+
+    def add(tool: Tool) -> None:
+        if tool.name not in disabled:
+            registry.add(tool)
+
+    # learn_note(학습 노트)는 지식 베이스에 쓰는 오프라인 로컬 도구라
+    # (스킬에서 끄지 않았으면) 항상 넣는다
+    add(get_time_tool(settings.get("timezone")))
+    add(learn_note_tool())
     # 날씨는 인터넷(Open-Meteo)을 쓰므로 인터넷 도구가 켜져 있을 때만 (오프라인 원칙)
     if settings.get("internet_enabled") and settings.get("weather_enabled"):
         from .weather import weather_tool
 
-        registry.add(
+        add(
             weather_tool(
                 default_location=settings.get("location") or "서울",
                 timezone_name=settings.get("timezone") or DEFAULT_TIMEZONE,
@@ -723,8 +736,8 @@ def build_registry(
             settings.get("search_provider", "searxng")
         )
         if provider is not None:
-            registry.add(web_search_tool(provider))
-            registry.add(web_fetch_tool())
+            add(web_search_tool(provider))
+            add(web_fetch_tool())
     for tool in extra_tools or []:
         registry.add(tool)
     return registry

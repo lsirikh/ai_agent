@@ -15,6 +15,8 @@ from urllib.parse import urlsplit
 import shared.tools as tools
 from shared.knowledge_filter import relevant_results
 from shared.korean_numbers import read_numbers
+from shared.mcp_client import load_mcp_servers
+from shared.skills import load_skills, with_skills
 from shared.tool_calling import wrap_untrusted
 from shared.tools import ToolRegistry, build_registry, load_tool_settings
 
@@ -242,6 +244,8 @@ class Orchestrator:
             environment=environment,
             system_prompt=os.getenv("VOICE_SYSTEM_PROMPT", DEFAULT_VOICE_SYSTEM_PROMPT),
         )
+        # 설정 화면에서 켠 프롬프트 스킬은 턴마다 이 프롬프트 뒤에 붙인다
+        self._voice_prompt = self.llm_client.system_prompt
 
         # Redis 클라이언트 (lazy initialization)
         self.redis = redis_client
@@ -664,6 +668,9 @@ class Orchestrator:
                     "source": "시계",
                 }
             ]
+            self.llm_client.set_system_prompt(
+                with_skills(self._voice_prompt, await load_skills(self.redis))
+            )
             async for token in self.llm_client.generate_stream(
                 text, history=history, summary=summary, rag_context=rag_context,
                 tools=registry, confirm=self._defer_confirm
@@ -783,11 +790,14 @@ class Orchestrator:
             return None, None
 
     async def _build_tools(self) -> ToolRegistry:
-        """이번 턴에 쓸 도구: 설정(인터넷 토글) + 연결된 MCP 서버의 허용 도구."""
+        """이번 턴에 쓸 도구: 설정(인터넷 토글·스킬) + 연결된 MCP 서버의 허용 도구."""
         settings = await load_tool_settings(self.redis)
         mcp_tools = []
         if self.mcp:
             try:
+                # 설정 화면에서 켜고 끈 MCP 서버를 재시작 없이 맞춘다
+                # (바뀐 서버만 다시 연결)
+                await self.mcp.apply(await load_mcp_servers(self.redis))
                 mcp_tools = await self.mcp.tools()
             except Exception:
                 mcp_tools = []

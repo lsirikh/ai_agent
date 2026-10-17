@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from .routes import chat, dashboard, debug, history, knowledge, logs, orchestrator, sessions, settings, status
+from .routes import chat, dashboard, debug, extensions, history, knowledge, logs, orchestrator, sessions, settings, status
 from .routes.settings import (
     load_all_settings_from_db,
     propagate_all_settings_to_services,
@@ -139,7 +139,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[Backend] LLM loading monitor start failed: {e}")
 
-    # 7. MCP 서버 연결 (MCP_CONFIG_PATH 가 있을 때만)
+    # 7. MCP 서버 연결 (설정 화면에서 저장한 목록, 없으면 MCP_CONFIG_PATH)
     try:
         await chat.start_mcp()
     except Exception as e:
@@ -200,6 +200,7 @@ app.add_middleware(
 app.include_router(status.router)
 app.include_router(settings.router)
 app.include_router(settings.services_router)  # Phase 13.6: Service restart endpoints
+app.include_router(extensions.router)  # 설정: MCP 서버·스킬
 app.include_router(knowledge.router)
 app.include_router(history.router)
 app.include_router(debug.router)

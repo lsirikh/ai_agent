@@ -11,8 +11,8 @@ namespace EdgeVoice.Agent.Desktop.ViewModels;
 
 public sealed record OptionItem(string Id, string Label);
 
-/// <summary>설정: 모델 선택/적용·LLM 재시작, 일반 설정, Wake Word 바꾸기, LLM 컨텍스트. 선택값은 실행 중인 서비스 값.</summary>
-public sealed class SettingsViewModel : PageViewModel
+/// <summary>설정: 모델 선택/적용·LLM 재시작, 일반 설정, Wake Word 바꾸기, LLM 컨텍스트, MCP·스킬. 선택값은 실행 중인 서비스 값.</summary>
+public sealed partial class SettingsViewModel : PageViewModel
 {
     // 저장값과 실행값이 다를 때 배지에 보일 이름
     private static readonly Dictionary<string, string> PendingNames = new()
@@ -58,6 +58,7 @@ public sealed class SettingsViewModel : PageViewModel
         RegisterWakeWordCommand = new DelegateCommand(RegisterWakeWord);
         SaveContextCommand = new DelegateCommand(SaveContext);
         SaveToolsCommand = new DelegateCommand(SaveTools);
+        CreateExtensionCommands();
         Load();
     }
 
@@ -224,6 +225,8 @@ public sealed class SettingsViewModel : PageViewModel
                 ShowTools(await _api.SendAsync(HttpMethod.Put, "api/settings/tools", ToolSettingsBody()));
             }
         });
+
+        await LoadExtensions();
     }
 
     private void ShowTools(JsonNode? tools)
