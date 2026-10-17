@@ -1,0 +1,20 @@
+{
+  "servers": [
+    {
+      "name": "browser",
+      "url": "http://host.docker.internal:8931/mcp",
+      "allowed_tools": [
+        "browser_navigate",
+        "browser_navigate_back",
+        "browser_snapshot",
+        "browser_click",
+        "browser_type",
+        "browser_tabs",
+        "browser_close"
+      ],
+      "trusted": true,
+      "always_confirm": ["browser_click", "browser_type"],
+      "timeout": 60
+    }
+  ]
+}
