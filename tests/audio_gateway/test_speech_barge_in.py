@@ -45,6 +45,19 @@ def test_tracker_knows_real_playback_time_and_level() -> None:
     assert not tracker.playing()
 
 
+def test_tracker_keeps_current_level_when_long_answer_is_queued() -> None:
+    # 실측: 긴 답은 합성이 재생보다 빨라 1분 넘게 쌓였고, 개수 한도(600 조각)
+    # 때문에 지금 재생 중인 앞 조각이 지워져 재생 크기가 0 으로 보였다
+    from app.speech_barge_in import PlaybackTracker
+
+    clock = Clock()
+    tracker = PlaybackTracker(clock=clock)
+    tracker.add(_tone(90.0, 0.3))
+
+    clock.now += 1.0
+    assert tracker.level() > 0.15
+
+
 def test_echo_alone_never_interrupts() -> None:
     from app.speech_barge_in import SpeechBargeIn
 

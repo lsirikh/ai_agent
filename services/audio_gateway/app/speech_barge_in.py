@@ -18,6 +18,7 @@ from typing import Callable
 import numpy as np
 
 SEGMENT_SECONDS = 0.1
+KEEP_SECONDS = 5.0  # 재생이 끝난 조각을 들고 있는 시간(에코 지연 대비)
 
 
 class PlaybackTracker:
@@ -27,11 +28,15 @@ class PlaybackTracker:
         self.sample_rate = sample_rate
         self.clock = clock
         self._until = 0.0
-        self._segments: deque = deque(maxlen=600)  # (시작, 끝, 크기) 최근 1분
+        # (시작, 끝, 크기). 개수로 자르지 않는다 — 긴 답은 1분 넘게 미리 쌓인다
+        self._segments: deque = deque()
 
     def add(self, samples: np.ndarray) -> None:
         """앱으로 보낸 음성(float32). 앞서 보낸 것 뒤에 이어서 재생된다."""
-        start = max(self.clock(), self._until)
+        now = self.clock()
+        while self._segments and self._segments[0][1] < now - KEEP_SECONDS:
+            self._segments.popleft()  # 이미 재생이 끝난 것
+        start = max(now, self._until)
         step = int(self.sample_rate * SEGMENT_SECONDS)
         for i in range(0, len(samples), step):
             piece = samples[i : i + step]
