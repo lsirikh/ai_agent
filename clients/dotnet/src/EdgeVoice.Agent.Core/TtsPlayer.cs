@@ -18,13 +18,37 @@ public sealed class TtsPlayer : IDisposable
         ReadFully = true,
     };
 
-    private readonly IWavePlayer _output;
+    private readonly Func<IWavePlayer> _outputFactory;
+    private IWavePlayer? _output;
 
     public TtsPlayer(Func<IWavePlayer>? outputFactory = null)
     {
-        _output = (outputFactory ?? (() => new WaveOutEvent { DesiredLatency = 150 }))();
-        _output.Init(_buffer);
-        _output.Play();
+        _outputFactory = outputFactory ?? (() => new WaveOutEvent { DesiredLatency = 150 });
+        EnsureOutput();
+    }
+
+    /// <summary>
+    /// 출력 장치를 연다. 장치가 없으면(원격 데스크톱이 끊겨 '원격 오디오' 가 사라짐 → BadDeviceId)
+    /// 앱을 죽이지 않고, 다음 음성이 올 때 다시 시도한다.
+    /// </summary>
+    private void EnsureOutput()
+    {
+        if (_output is not null)
+        {
+            return;
+        }
+
+        try
+        {
+            var output = _outputFactory();
+            output.Init(_buffer);
+            output.Play();
+            _output = output;
+        }
+        catch (Exception)
+        {
+            _output = null;
+        }
     }
 
     /// <summary>아직 재생되지 않고 남은 음성 길이.</summary>
@@ -32,6 +56,7 @@ public sealed class TtsPlayer : IDisposable
 
     public void Enqueue(byte[] float32Pcm)
     {
+        EnsureOutput();
         var usable = float32Pcm.Length - float32Pcm.Length % sizeof(float);
         if (usable > 0)
         {
@@ -44,7 +69,7 @@ public sealed class TtsPlayer : IDisposable
 
     public void Dispose()
     {
-        _output.Stop();
-        _output.Dispose();
+        _output?.Stop();
+        _output?.Dispose();
     }
 }

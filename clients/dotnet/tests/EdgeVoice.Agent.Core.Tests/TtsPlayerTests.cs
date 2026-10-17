@@ -92,4 +92,24 @@ public class TtsPlayerTests
 
         Assert.Equal(TimeSpan.Zero, player.Buffered);
     }
+
+    [Fact]
+    public void NoOutputDevice_DoesNotThrow_AndOpensWhenDeviceReturns()
+    {
+        // 실측: 원격 데스크톱이 끊겨 '원격 오디오' 가 사라지면 waveOutOpen 이 BadDeviceId 로 실패해
+        // 앱이 시작하자마자 죽었다. 재생기는 장치가 돌아올 때 다시 연다.
+        var output = new FakeOutput();
+        var deviceReady = false;
+        var player = new TtsPlayer(() => deviceReady ? output : throw new InvalidOperationException("BadDeviceId"));
+
+        player.Enqueue(Samples(10));
+        Assert.Null(output.Source);
+
+        deviceReady = true;
+        player.Enqueue(Samples(10));
+
+        Assert.NotNull(output.Source);
+        Assert.Equal(1, output.PlayCalls);
+        player.Dispose();
+    }
 }
