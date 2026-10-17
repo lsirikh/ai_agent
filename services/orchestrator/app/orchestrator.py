@@ -12,6 +12,7 @@ import time
 from typing import Any, Optional
 
 import shared.tools as tools
+from shared.knowledge_filter import relevant_results
 from shared.tool_calling import wrap_untrusted
 from shared.tools import ToolRegistry, build_registry, load_tool_settings
 
@@ -138,9 +139,8 @@ class Orchestrator:
     # 듣기 상태에서 발화·end_pause·STT 처리를 기다리는 여유 시간
     UTTERANCE_GRACE_SECONDS = 30.0
 
-    # 지식 베이스(RAG). 실측: 관련 질문 0.53~0.70, 인사말 0.49~0.50
+    # 지식 베이스(RAG). 근거 거르기 기준은 shared/knowledge_filter.py
     RAG_URL = os.getenv("RAG_SERVICE_URL", "http://rag:8006")
-    RAG_MIN_SCORE = float(os.getenv("RAG_MIN_SCORE", "0.52"))
 
     # 답이 모두 걸러져 읽을 문장이 없을 때 대신 말하는 안내
     NOTHING_SPOKEN_REPLY = (
@@ -480,15 +480,14 @@ class Orchestrator:
             return []
 
     async def _relevant_knowledge(self, query: str) -> list[dict[str, Any]]:
-        """기준 점수 이상인 근거만 LLM 형식({content, source})으로."""
-        results = await self._search_knowledge(query)
+        """질문과 관련 있는 근거만 LLM 형식({content, source})으로."""
+        results = relevant_results(query, await self._search_knowledge(query))
         return [
             {
                 "content": r.get("content", ""),
                 "source": (r.get("metadata") or {}).get("filename", "문서"),
             }
             for r in results
-            if r.get("score", 0) >= self.RAG_MIN_SCORE
         ]
 
     async def _process_llm_stream(self, text: str) -> None:

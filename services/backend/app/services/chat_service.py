@@ -8,6 +8,7 @@ import asyncio
 from typing import Any, AsyncIterator, Awaitable, Callable, List, Optional, Tuple
 
 import shared.tools as tools
+from shared.knowledge_filter import relevant_results
 
 from . import conversation
 from .llm_client import LANGUAGE_PROMPTS
@@ -275,6 +276,8 @@ class ChatService:
             else:
                 results = []
 
+            # 점수가 애매한 무관 조각(예: '오늘 날씨' 에 카메라 weather_mode)은 버린다
+            results = relevant_results(query, results)
             if not results:
                 return None
 
