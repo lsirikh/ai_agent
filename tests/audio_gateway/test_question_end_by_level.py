@@ -64,3 +64,18 @@ async def test_question_ends_when_only_quieter_background_remains() -> None:
     assert main._last_speech_time == spoke_at  # 배경 소리는 말 끝 시간을 늦추지 않는다
     main._listening_mode = False
     main._is_recording = False
+
+
+def test_vad_tail_and_background_do_not_lower_the_voice_level() -> None:
+    # E2E 실측: 호출어 뒤 VAD 가 잠시 '말소리' 라고 한 아주 작은 소리를 목소리로 익혀
+    # 기준이 낮아졌고, 배경 말소리(목소리의 약 1/4)를 질문으로 이어 받아 적었다
+    from app.speech_end import VoiceLevel
+
+    level = VoiceLevel()
+    tail = [level.is_voice(0.002, True) for _ in range(5)]  # 호출어 뒤 VAD 꼬리
+    for _ in range(10):
+        level.is_voice(0.1, True)  # 질문
+    background = [level.is_voice(rms, True) for rms in [0.03, 0.035, 0.028] * 20]
+
+    assert not any(tail)
+    assert sum(background) <= 3  # 가끔 큰 음절 정도만
