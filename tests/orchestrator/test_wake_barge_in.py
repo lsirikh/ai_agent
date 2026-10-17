@@ -112,3 +112,36 @@ async def test_speech_barge_in_stops_answer_and_starts_listening_timer() -> None
     assert orchestrator.state_machine.current_state == State.LISTENING
     assert answering.cancelled()
     assert orchestrator._listening_task is not None
+
+
+@pytest.mark.asyncio
+async def test_turn_does_not_end_while_answer_is_still_being_written() -> None:
+    # 실측: 앞 문장 TTS 가 다음 문장보다 먼저 끝나 답하는 중에 READY 가 됐고,
+    # 그 사이 끼어들기를 무시했다
+    from services.orchestrator.app.state_machine import State
+
+    orchestrator = _orchestrator()
+    for state in (State.LISTENING, State.STT_PROCESSING, State.LLM_PROCESSING,
+                  State.TTS_PROCESSING):
+        orchestrator.state_machine.transition_to(state)
+    orchestrator._processing_task = asyncio.create_task(asyncio.sleep(30))  # 답 쓰는 중
+    orchestrator._pending_tts = 1
+
+    await orchestrator.handle_speaking_complete()
+
+    assert orchestrator.state_machine.current_state == State.TTS_PROCESSING
+    orchestrator._processing_task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_speech_barge_in_while_ready_still_listens() -> None:
+    from services.orchestrator.app.state_machine import State
+
+    orchestrator = _orchestrator()
+
+    await orchestrator._handle_message(
+        orchestrator.CHANNELS["barge_in"], {"type": "barge_in_detected"}
+    )
+
+    assert orchestrator.state_machine.current_state == State.LISTENING
+    assert orchestrator._listening_task is not None

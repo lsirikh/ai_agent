@@ -492,7 +492,11 @@ class Orchestrator:
         # TTS 는 문장마다 완료를 알린다 → 마지막 문장이 끝날 때 READY
         if self.state_machine.current_state in (State.SPEAKING, State.TTS_PROCESSING):
             self._pending_tts = max(0, self._pending_tts - 1)
-            if self._pending_tts == 0:
+            # 답을 아직 쓰는 중이면 끝내지 않는다(앞 문장 TTS 가 다음 문장보다
+            # 먼저 끝나 답하는 도중 READY 가 됐다 — 실측).
+            # 다 쓰면 _process_llm_stream 이 끝낸다
+            answering = self._processing_task and not self._processing_task.done()
+            if self._pending_tts == 0 and not answering:
                 return self._finish_turn()
         return False
 
@@ -986,9 +990,12 @@ class Orchestrator:
                 self._stt_task = asyncio.create_task(self.handle_stt_result(text))
 
         elif channel == self.CHANNELS["barge_in"]:
-            # 말소리 끼어들기: 답을 멈추고 듣는다(말이 없으면 제한 시간 뒤 대기로)
+            # 말소리 끼어들기: 답을 멈추고 듣는다(말이 없으면 제한 시간 뒤 대기로).
+            # 게이트웨이는 이미 녹음 중이므로 대기 상태였어도 듣기로 넘어간다
             if await self.handle_barge_in():
                 self._start_listening_timeout()
+            else:
+                await self.handle_wake_word()
 
         elif channel == self.CHANNELS["tts_complete"]:
             # audio_length: float32 24kHz 바이트 수
