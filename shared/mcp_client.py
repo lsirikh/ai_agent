@@ -32,8 +32,10 @@ import json
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
+from urllib.parse import quote_plus
 
 from . import browser_assist
 from .tools import Tool, ToolResult
@@ -46,6 +48,9 @@ DEFAULT_TIMEOUT_SECONDS = 30.0
 MAX_LIST_PAGES = 50
 # 설정 화면(백엔드 API)이 쓰고 두 서비스가 턴마다 읽는다 (없으면 MCP_CONFIG_PATH)
 MCP_SETTINGS_KEY = "edgevoice:settings:mcp"
+# 브라우저 서버가 이 도구들을 내주면 play_youtube 도 만든다
+RECONNECT_INTERVAL_SECONDS = 30.0
+PLAY_YOUTUBE_NEEDS = {"browser_navigate", "browser_snapshot", "browser_click"}
 
 
 @dataclass
@@ -109,6 +114,25 @@ def result_text(result: Any) -> str:
     return "\n".join(parts)
 
 
+def parse_json_arguments(args: dict, schema: Optional[dict]) -> dict:
+    """
+    목록·객체여야 할 인자가 JSON 글로 오면 풀어 준다.
+    실측: 로컬 LLM 이 shapes 를 '[{"type": ...}]' 글로 넘겨 검증 오류가 났다.
+    """
+    properties = (schema or {}).get("properties") or {}
+    fixed = dict(args)
+    for key, value in args.items():
+        expected = (properties.get(key) or {}).get("type")
+        if expected in ("array", "object") and isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except ValueError:
+                continue
+            if isinstance(parsed, list if expected == "array" else dict):
+                fixed[key] = parsed
+    return fixed
+
+
 class _Server:
     """한 MCP 서버 연결. 연결은 전용 태스크 안에서 열고 닫는다(anyio 취소 범위 규칙)."""
 
@@ -121,6 +145,7 @@ class _Server:
         self._stop = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
         self.error: Optional[BaseException] = None
+        self.retry_after = 0.0  # 이 시각(monotonic) 전에는 다시 연결해 보지 않는다
 
     def _target(self) -> Any:
         from mcp import StdioServerParameters
@@ -246,7 +271,7 @@ class MCPManager:
         result, taken = [], set()
         self.name_map = {}
         for server in self.servers:
-            if server.client is None:
+            if server.client is None and not await self._retry_connect(server):
                 continue
             if server.stale:
                 try:
@@ -255,7 +280,13 @@ class MCPManager:
                     audit_log.warning(
                         "mcp list_tools failed (%s): %s", server.config.name, e
                     )
-                    continue
+                    # 세션이 끊겼으면(서버를 다시 띄움) 다시 연결해 한 번 더 받는다
+                    try:
+                        if not await self._retry_connect(server):
+                            continue
+                        await server.list_tools()
+                    except Exception:
+                        continue
             allowed = set(server.config.allowed_tools)
             for tool in server.tools:
                 if tool.name not in allowed:
@@ -264,7 +295,79 @@ class MCPManager:
                 taken.add(name)
                 self.name_map[name] = (server.config.name, tool.name)
                 result.append(self._wrap(server, tool, name))
+            if PLAY_YOUTUBE_NEEDS <= allowed & {t.name for t in server.tools}:
+                name = sanitize_tool_name(server.config.name, "play_youtube", taken)
+                taken.add(name)
+                result.append(self._play_youtube_tool(server, name))
         return result
+
+    def _play_youtube_tool(self, server: "_Server", name: str) -> Tool:
+        """
+        유튜브 검색 결과의 첫 동영상을 연다. 실측: 로컬 LLM 이 동영상 대신 바로 뒤의
+        '채널로 이동' 링크를 눌렀다 → LLM 은 검색어만 고르고 고르기·누르기는 여기서.
+        """
+
+        async def run(args: dict) -> ToolResult:
+            query = str(args.get("query") or "").strip()
+            if not query:
+                return ToolResult("무엇을 틀지 query 로 알려 주세요", is_error=True)
+            url = "https://www.youtube.com/results?search_query=" + quote_plus(query)
+            opened = await self.call(server, "browser_navigate", {"url": url})
+            if opened.is_error:
+                return opened
+            ref = title = None
+            for _ in range(3):  # 결과가 늦게 그려질 수 있다
+                snapshot = await self.call(server, "browser_snapshot", {})
+                ref, title = browser_assist.first_video(snapshot.content)
+                if ref:
+                    break
+                await asyncio.sleep(1.0)
+            if not ref:
+                return ToolResult(
+                    f"유튜브에서 '{query}' 검색 결과의 동영상을 찾지 못했습니다",
+                    is_error=True,
+                )
+            clicked = await self.call(
+                server, "browser_click", {"element": title, "target": ref}
+            )
+            if clicked.is_error:
+                return clicked
+            if "watch" not in clicked.content and "/shorts/" not in clicked.content:
+                return ToolResult(
+                    f"'{title}' 을(를) 눌렀지만 동영상이 열리지 않았습니다",
+                    is_error=True,
+                )
+            return ToolResult(f"유튜브에서 '{title}' 을(를) 틀었습니다.")
+
+        return Tool(
+            name=name,
+            description=(
+                "유튜브에서 노래·영상을 검색해 첫 번째 동영상을 크롬에서 재생한다. "
+                "'유튜브에서 ○○ 틀어 줘' 같은 요청에 쓴다."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string", "description": "검색어 (예: 아이유 좋은 날)"
+                    }
+                },
+                "required": ["query"],
+            },
+            run=run,
+            announce="유튜브에서 찾아 틀어 볼게요.",
+        )
+
+    async def _retry_connect(self, server: "_Server") -> bool:
+        """
+        끊긴 서버를 다시 연결해 본다(서버를 다시 띄운 뒤 도구가 사라졌다 — 실측).
+        죽은 서버로 요청마다 기다리지 않게 RECONNECT_INTERVAL 초에 한 번만.
+        """
+        now = time.monotonic()
+        if now < server.retry_after:
+            return False
+        server.retry_after = now + RECONNECT_INTERVAL_SECONDS
+        return await server.reconnect()
 
     def _wrap(self, server: _Server, tool: Any, name: str) -> Tool:
         config = server.config
@@ -287,14 +390,18 @@ class MCPManager:
                 )
             return result
 
-        normalize = None
+        fix = None
         if tool.name == "browser_navigate":
-            def normalize(a):
+            def fix(a):
                 return {**a, "url": browser_assist.normalize_url(a.get("url", ""))}
         elif tool.name == "browser_type":
-            normalize = self.browser.fix_type_target
+            fix = self.browser.fix_type_target
         elif tool.name == "browser_click":
-            normalize = self.browser.fix_click_target
+            fix = self.browser.fix_click_target
+
+        def normalize(a, fix=fix, schema=tool.input_schema):
+            a = parse_json_arguments(a, schema)
+            return fix(a) if fix else a
 
         return Tool(
             name=name,

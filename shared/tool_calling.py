@@ -26,6 +26,7 @@ from .tools import TOOL_RESULT_MAX_TOKENS, Tool, ToolRegistry, ToolResult
 # 브라우저 작업은 열기 → (요소 보기) → 입력 → 클릭 → 결과 확인처럼 여러 번 왕복한다
 # (3번 한도에서는 입력하기 전에 끝났다 — 실측)
 MAX_TOOL_ROUNDS = 8
+MIN_TOOL_RESULT_TOKENS = 128
 TOOL_CALL_TAG = "<tool_call>"
 RESULT_BEGIN = "<<도구 결과 시작: {name}>>"
 RESULT_END = "<<도구 결과 끝>>"
@@ -231,7 +232,9 @@ async def stream_with_tools(
         room = TOOL_RESULT_MAX_TOKENS
         if input_budget is not None:
             spare = input_budget - prompt_tokens(messages) - schema_tokens(tools)
-            room = max(0, min(room, spare // len(calls) - 64))
+            # 짧은 결과('그렸습니다')는 늘 남긴다 — 예산이 0 이 되면 빈 결과를 받은
+            # 모델이 '실행되지 않았다' 고 답했다(실측). 다음 요청은 도구 없이 간다
+            room = max(MIN_TOOL_RESULT_TOKENS, min(room, spare // len(calls) - 64))
 
         for call in calls:
             name = call["function"]["name"]

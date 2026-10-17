@@ -23,10 +23,14 @@
 - [x] orchestrator: 턴마다 MCP 맞추기 + 스킬 프롬프트 + 테스트 (tests/orchestrator/test_voice_extensions.py)
 - [x] .NET: VM(SettingsViewModel.Extensions.cs) + XAML 카드 2개 + 헤드리스 테스트 (ExtensionSettingsScenarioTests, 6개)
 - [x] ruff (바꾼 파일 오류 수 늘지 않음, 새 파일 0), 관련 테스트
+- [x] 최신 master(1a3649c) 반영: master 에서만 바뀐 파일은 master 내용 그대로, 둘 다 바뀐 4개(shared/mcp_client.py · shared/tools.py · services/orchestrator/app/orchestrator.py · tests/shared/test_mcp_client.py)는 `git merge-file` 로 3-way 병합. 충돌 2곳(상수 블록, 테스트 클래스 뒤)은 양쪽 모두 살림.
+  - master 동작(retry_after·_retry_connect·reconnect, parse_json_arguments, play_youtube, draw_picture 규칙 등)은 서버별로 tools()/call() 안에서 돌아서 apply 로 다시 만든 서버에도 그대로 걸린다 → 테스트 `test_server_turned_back_on_still_reconnects_when_listing`.
+  - 새 데스크톱 도구가 설정 목록에 보이는지: `test_project_config_offers_new_desktop_tools`, `test_settings_list_shows_new_desktop_tools_from_project_config`.
+  - .NET FakeBackend 에 /api/settings/mcp·skills 기본 응답 추가 (없으면 404 가 상태줄을 덮어 PageConsistency 테스트가 때때로 실패).
 
 ## 남은 일
 - 없음. (선택) 연결 실패한 서버를 '연결 상태 새로고침' 때 다시 연결 시도 — 지금은 끄고 켜거나 도구 호출 때 다시 연결된다.
-- 전체 pytest 의 기존 실패 4개는 이 작업과 무관: test_chat_router_exists(FastAPI 0.137 `_IncludedRouter`), test_chat_context(`reference` 인자), test_postgres_container_exists(pgvector 이미지), test_end_pause_default(xdist 에서만 실패, 단독 통과).
+- 전체 pytest 의 기존 실패 4개는 이 작업과 무관: test_chat_router_exists(FastAPI 0.137 `_IncludedRouter`), test_chat_context(`reference` 인자), test_postgres_container_exists(pgvector 이미지), test_end_pause_default(tests/orchestrator 와 한 번에 돌리면 `from app import main` 이 오케스트레이터 app 을 잡아 실패 — master 에서도 같음, tests/shared 만 돌리면 통과).
 
 ## 발견
 - servers.json 은 컨테이너에 `:ro` 로 마운트된다 → 파일 갱신 대신 Redis 저장.

@@ -41,3 +41,9 @@
 - chosen: 그대로 둔다 — `get_mcp_servers`·`add_mcp_server`·`update_mcp_server`·`delete_mcp_server`·`get_skills`·`update_skills`, 그리고 `_needs_target`·`_unique_names`.
 - why: 앞의 6개는 `@router.get/post/put/delete` 로 등록된 FastAPI 엔드포인트라서, 코드에서 이름으로 부르지 않고 HTTP 요청이 오면 FastAPI 가 부른다. 데스크톱 앱(`SettingsViewModel.Extensions.cs`)이 이 엔드포인트를 쓴다. 뒤의 2개는 `@model_validator`·`@field_validator` 로 등록된 pydantic 검증기로, 요청 본문을 검사할 때 pydantic 이 부른다. 정적 검사기는 데코레이터로 등록된 함수를 호출되지 않는 것으로 본다. 실제로 쓰인다는 것은 tests/backend/test_extension_settings.py 가 확인한다(엔드포인트 호출, 422 응답).
 - effect: 지우면 설정 화면의 MCP·스킬 API 와 입력 검증이 사라진다.
+
+## 8. 최신 master 를 어떻게 반영할까 (git merge 는 하네스가 막는다)
+- options: BLOCKED 로 멈춘다 / 작업 트리에 master 내용을 옮기고 겹친 파일은 `git merge-file` 로 3-way 병합해 하네스가 일반 커밋으로 남기게 한다
+- chosen: 뒤쪽. 기준점 6dca181, 대상 master 1a3649c.
+- why: git 쓰기(merge·checkout) 없이 결과 내용을 master 위에 올린 것과 같게 만들 수 있다. 겹친 hunk 는 양쪽 모두 덧붙이는 변경이라 둘 다 살렸다.
+- effect: 이 브랜치 이력에는 병합 커밋이 없고 master 내용이 일반 커밋으로 들어간다. accept 때 같은 줄 변경은 양쪽이 같아 깨끗이 합쳐질 것으로 보지만, 충돌이 나면 master 쪽 줄과 이 브랜치 줄이 같은지만 확인하면 된다.

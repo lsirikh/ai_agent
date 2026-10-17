@@ -199,3 +199,32 @@ async def test_chat_system_prompt_gets_enabled_prompt_skills(monkeypatch):
         pass
 
     assert "항상 존댓말로 답한다." in prompts[0]
+
+
+def test_settings_list_shows_new_desktop_tools_from_project_config(monkeypatch):
+    # 실제 config/mcp/servers.json 을 연결 없이 목록으로만 보여 준다
+    from services.backend.app.routes import chat, extensions
+    from shared.mcp_client import MCPManager
+
+    root = os.path.join(os.path.dirname(__file__), os.pardir, os.pardir)
+    monkeypatch.setenv(
+        "MCP_CONFIG_PATH", os.path.join(root, "config", "mcp", "servers.json")
+    )
+    monkeypatch.setattr(conversation, "_get_redis", lambda: FakeRedis())
+
+    async def offline():
+        return MCPManager([])
+
+    monkeypatch.setattr(chat, "sync_mcp", offline)
+    app = FastAPI()
+    app.include_router(extensions.router)
+
+    servers = {
+        s["name"]: s for s in TestClient(app).get("/api/settings/mcp").json()["servers"]
+    }
+
+    desktop = servers["desktop"]
+    new_tools = ("draw_picture", "mouse_click", "mouse_drag", "type_text", "press_keys")
+    for tool in new_tools:
+        assert tool in desktop["allowed_tools"] and tool in desktop["no_confirm"]
+    assert desktop["enabled"] is True and desktop["status"] == "disconnected"

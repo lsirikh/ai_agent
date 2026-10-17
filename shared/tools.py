@@ -178,10 +178,20 @@ async def load_tool_settings(redis: Any) -> dict:
     return settings
 
 
+TIME_REFERENCE_RULE = (
+    "(참고용: 사용자가 시각·날짜·요일을 물을 때만 쓰고, "
+    "그 밖의 답에는 시각·날짜를 말하지 마세요.)"
+)
+
+
 async def current_time_reference(redis: Any) -> str:
     """매 턴 이번 질문에 붙이는 시각 근거 — 설정한 시간대로."""
     settings = await load_tool_settings(redis)
-    return f"지금 시각: {current_time_text(settings.get('timezone'))}"
+    # 쓸 때를 정해 주지 않으면 묻지 않은 답에도 '현재 시각은 …' 으로 시작했다(실측)
+    return (
+        f"지금 시각: {current_time_text(settings.get('timezone'))}\n"
+        f"{TIME_REFERENCE_RULE}"
+    )
 
 
 # 열기·켜기·접속처럼 무언가를 해 달라는 요청 (질문 끝이나 '…해 줘' 꼴)
@@ -197,6 +207,9 @@ _BROWSER_ACTION = re.compile(
 )
 # 그중 검색 도구로는 대신할 수 없는 일(열기·접속·누르기)
 _BROWSER_OPEN = re.compile(r"열|켜|들어가|접속|이동|띄워|클릭|눌러|틀어")
+_YOUTUBE = re.compile(r"유튜브|youtube", re.IGNORECASE)
+_DRAW = re.compile(r"그려|그리고\s*싶|드로잉|스케치")
+_PLAY = re.compile(r"틀어|재생|플레이|들려|틀\s*수")
 # MCP 데스크톱(서버__open_app · 서버__write_document)
 _PROGRAM = re.compile(r"메모장|노트패드|워드|엑셀|파워\s*포인트|피피티|계산기|그림판")
 _WRITE = re.compile(r"저장|작성|써|적어|만들어|기록")
@@ -209,8 +222,11 @@ _PLACE = re.compile(
     r"도서관|박물관|대학|역(?=\s|$|[?.!]|에|근처|앞)"
 )
 _ASK_INFO = re.compile(
-    r"알아|아세요|알고\s*있|알려|어디|뭐야|뭐예요|어때|정보|소개|설명|있어|있나"
+    r"알아|아세요|알고\s*있|알려|어디|뭐야|뭐예요|어때|정보|소개|설명|있어|있나|어떤"
 )
+# 노래·영화·책·인물처럼 기억으로 답하면 지어내기 쉬운 것
+# (실측: '좋은 날' 을 '2008년 5월 8일 발매한 10번째 싱글' 이라고 지어냈다)
+_MEDIA = re.compile(r"노래|곡|앨범|가수|영화|드라마|배우|감독|책|작가|멤버|그룹")
 _ASK_KNOW = re.compile(r"알아\s*[?]|아세요|알고\s*있어")
 _PERSONAL = re.compile(
     r"(^|\s)(내|나|저|제|우리|너|네가|당신)(\s|$|의|가|는|를|한테|랑)"
@@ -221,7 +237,9 @@ def _asks_specific_fact(question: str) -> bool:
     if _PERSONAL.search(question):
         return False
     return bool(_ASK_INFO.search(question)) and bool(
-        _PLACE.search(question) or _ASK_KNOW.search(question)
+        _PLACE.search(question)
+        or _MEDIA.search(question)
+        or _ASK_KNOW.search(question)
     )
 
 # 질문이 이렇다면 그 도구가 분명히 필요하다 (앞쪽이 우선)
@@ -233,10 +251,14 @@ _REMEMBER = re.compile(r"기억해|학습해|학습\s*시켜|외워")
 
 _REQUIRED_TOOLS = [
     ("learn_note", _REMEMBER.search),
+    # 그림 그리기(그림판을 열어 마우스로 그린다) — '그림판 열어' 보다 먼저
+    ("draw_picture", _DRAW.search),
     ("read_test_file", lambda q: _SAVED_FILE.search(q) and _READ.search(q)),
     ("list_test_files", _FILE_LIST.search),
     ("write_document", lambda q: _PROGRAM.search(q) and _WRITE.search(q)),
     ("open_app", lambda q: _PROGRAM.search(q) and _ACTION.search(q)),
+    # 유튜브에서 틀기는 전용 도구로(실측: 동영상 대신 '채널로 이동' 을 눌렀다)
+    ("play_youtube", lambda q: _YOUTUBE.search(q) and _PLAY.search(q)),
     # MCP 브라우저(서버__browser_navigate). 크롬·사이트를 직접 말했으면 날씨보다 먼저
     # (실측: '네이버 검색창에 오늘 날씨를 입력해' 가 날씨 도구로 갔다)
     ("browser_navigate", lambda q: _BROWSER.search(q) and _BROWSER_ACTION.search(q)),

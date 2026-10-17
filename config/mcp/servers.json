@@ -13,16 +13,15 @@
         "browser_close"
       ],
       "trusted": true,
-      "always_confirm": [
-        "browser_click"
-      ],
+      "always_confirm": [],
       "timeout": 60,
       "no_confirm": [
         "browser_navigate",
         "browser_navigate_back",
         "browser_type",
         "browser_snapshot",
-        "browser_tabs"
+        "browser_tabs",
+        "browser_click"
       ]
     },
     {
@@ -32,11 +31,23 @@
         "open_app",
         "write_document",
         "list_test_files",
-        "read_test_file"
+        "read_test_file",
+        "draw_picture",
+        "mouse_click",
+        "mouse_drag",
+        "type_text",
+        "press_keys"
       ],
       "trusted": true,
       "always_confirm": [],
-      "timeout": 120
+      "timeout": 120,
+      "no_confirm": [
+        "draw_picture",
+        "mouse_click",
+        "mouse_drag",
+        "type_text",
+        "press_keys"
+      ]
     }
   ]
 }

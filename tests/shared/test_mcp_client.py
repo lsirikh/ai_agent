@@ -337,3 +337,93 @@ class TestSettings:
             assert await mcp.tools() == []
         finally:
             await mcp.close()
+
+    @pytest.mark.asyncio
+    async def test_server_turned_back_on_still_reconnects_when_listing(self):
+        # 켜기/끄기로 다시 만든 서버도 끊기면 목록 받을 때 다시 연결한다 (master 동작)
+        mcp = MCPManager([])
+        try:
+            await mcp.apply([config(enabled=False)])
+            await mcp.apply([config()])
+            server = mcp.servers[0]
+            await server.stop()
+
+            names = [t.name for t in await mcp.tools()]
+        finally:
+            await mcp.close()
+
+        assert "ironwall__status" in names
+
+
+def test_project_config_offers_new_desktop_tools():
+    # 설정 화면의 MCP 목록은 이 파일을 처음 값으로 보여 준다
+    root = os.path.join(os.path.dirname(__file__), "..", "..")
+    path = os.path.join(root, "config", "mcp", "servers.json")
+    servers = {s.name: s for s in load_mcp_config(path)}
+
+    desktop = servers["desktop"]
+    new_tools = {"draw_picture", "mouse_click", "mouse_drag", "type_text", "press_keys"}
+    assert new_tools <= set(desktop.allowed_tools) and desktop.enabled
+    assert new_tools <= set(desktop.no_confirm)
+    assert "browser_click" in servers["browser"].no_confirm
+
+
+class TestReconnectOnListing:
+    """
+    실측(2026-10-18): 브라우저 MCP 를 다시 띄운 뒤 연결이 끊긴 서버를 도구 목록에서
+    빼 버려 '네이버 열어 줘' 에 '도구가 연결되어 있지 않다' 고 답했다.
+    """
+
+    @pytest.mark.asyncio
+    async def test_disconnected_server_is_reconnected_when_listing(self, manager):
+        server = manager.servers[0]
+        await server.stop()
+        assert server.client is None
+
+        names = [t.name for t in await manager.tools()]
+
+        assert "ironwall__status" in names
+
+    @pytest.mark.asyncio
+    async def test_dead_server_is_not_retried_on_every_request(self):
+        dead = config(
+            command=sys.executable, args=["-c", "raise SystemExit(1)"], timeout=10
+        )
+        mcp = MCPManager([dead])
+        await mcp.start()
+        server = mcp.servers[0]
+        attempts = []
+        original = server.reconnect
+
+        async def counted(*args, **kwargs):
+            attempts.append(1)
+            return await original(*args, **kwargs)
+
+        server.reconnect = counted
+        try:
+            await mcp.tools()
+            await mcp.tools()
+        finally:
+            await mcp.close()
+
+        assert len(attempts) == 1
+
+
+@pytest.mark.asyncio
+async def test_listing_reconnects_when_session_is_terminated(manager):
+    # 실측: 서버를 다시 띄운 뒤 'mcp list_tools failed (browser): Session terminated'
+    from mcp.shared.exceptions import MCPError
+
+    server = manager.servers[0]
+    old_client = server.client
+    server.stale = True
+
+    async def terminated(*args, **kwargs):
+        raise MCPError(-32600, "Session terminated")
+
+    old_client.list_tools = terminated
+
+    names = [t.name for t in await manager.tools()]
+
+    assert "ironwall__status" in names
+    assert server.client is not old_client

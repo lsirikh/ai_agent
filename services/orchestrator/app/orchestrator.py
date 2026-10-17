@@ -51,11 +51,14 @@ WAKE_PHRASE_PATTERN = re.compile(
 )
 
 
-# "실행할까요?" 다음 턴의 예/아니오
+# "실행할까요?" 다음 턴의 예/아니오 (아니오를 먼저 본다).
+# 실측: '하라고 하라고 클릭하라고 클릭해' 를 '네' 로 알아듣지 못했다 → 시키는 말도 '네'
 YES_PATTERN = re.compile(
-    r"^\s*(네|예|응|그래|좋아|실행|해\s*줘|오케이|yes|ok)", re.IGNORECASE
+    r"^\s*(네|예|응|그래|좋아|오케이|yes|ok)"
+    r"|해\s*줘|해\s*[.!~]*$|하라고|해라|실행|클릭|눌러|열어|틀어|진행|부탁",
+    re.IGNORECASE,
 )
-NO_PATTERN = re.compile(r"^\s*(아니|아뇨|취소|하지\s*마|싫어|no\b)", re.IGNORECASE)
+NO_PATTERN = re.compile(r"아니|아뇨|취소|하지\s*마|싫어|그만|\bno\b", re.IGNORECASE)
 CANCELLED_REPLY = "알겠어요, 실행하지 않을게요."
 # 말하는 도중 끼어들어 끊긴 답 뒤에 붙인다(대화 기록용)
 INTERRUPTED_NOTE = "…(사용자가 끼어들어 중단됨)"
@@ -92,6 +95,8 @@ def confirm_question(name: str, arguments: Any) -> str:
         action = f"{program}에 {args['filename']} 을 저장할까요?"
     elif program:
         action = f"{program} 을 실행할까요?"
+    elif args.get("element"):
+        action = f"{args['element']} 을 누를까요?"
     else:
         action = f"{name.split('__')[-1]} 을 실행할까요?"
     return f"{action} 네 또는 아니오로 답해 주세요."
@@ -644,7 +649,7 @@ class Orchestrator:
             rag_context = None
             pending, self._pending_confirm = self._pending_confirm, None
             if pending:
-                if NO_PATTERN.match(text):
+                if NO_PATTERN.search(text):
                     await speak_sentence(CANCELLED_REPLY)
                     await self._save_voice_message("assistant", CANCELLED_REPLY)
                     if self._pending_tts <= 0:
@@ -652,7 +657,7 @@ class Orchestrator:
                     else:
                         self._start_tts_watchdog()
                     return
-                if YES_PATTERN.match(text):
+                if YES_PATTERN.search(text):
                     rag_context = [await self._run_confirmed_tool(pending)]
 
             registry = None

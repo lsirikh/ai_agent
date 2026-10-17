@@ -1,0 +1,246 @@
+- Page URL: https://www.youtube.com/results?search_query=%EC%95%84%EC%9D%B4%EC%9C%A0
+- Page Title: 아이유 좋은 날 - YouTube
+- generic [ref=e2]:
+  - banner [ref=e4]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - button "가이드" [active] [ref=e9] [cursor=pointer]
+        - generic [ref=e11]:
+          - link "YouTube 홈" [ref=e12] [cursor=pointer]:
+            - /url: /
+          - generic [ref=e16]: KR
+        - button "탐색 건너뛰기" [ref=e20] [cursor=pointer]
+      - generic [ref=e24]:
+        - search [ref=e25]:
+          - generic [ref=e27]:
+            - generic [ref=e28]:
+              - combobox "검색" [expanded] [ref=e30]: 아이유 좋은 날
+              - button [ref=e33] [cursor=pointer]
+              - button "검색어 삭제" [ref=e35] [cursor=pointer]
+            - button "Search" [ref=e40] [cursor=pointer]
+        - generic [ref=e43]:
+          - button "음성으로 검색" [ref=e45] [cursor=pointer]
+          - tooltip "tooltip"
+  - navigation [ref=e54]
+  - main [ref=e56]:
+    - generic [ref=e57]:
+      - generic [ref=e59]:
+        - tablist [ref=e64]:
+          - tab "전체" [selected] [ref=e67] [cursor=pointer]
+          - tab "Shorts" [ref=e72] [cursor=pointer]
+          - tab "시청하지 않음" [ref=e77] [cursor=pointer]
+          - tab "동영상" [ref=e82] [cursor=pointer]
+          - tab "최근에 업로드된 동영상" [ref=e87] [cursor=pointer]
+          - tab "라이브" [ref=e92] [cursor=pointer]
+        - generic [ref=e96]:
+          - button "검색 필터" [ref=e98] [cursor=pointer]:
+            - generic: 필터
+          - tooltip "tooltip"
+      - generic [ref=e107]:
+        - generic [ref=e109]:
+          - link [aria-hidden] [ref=e111] [cursor=pointer]:
+            - /url: /watch?v=jeqdYqsrsA0&list=RDjeqdYqsrsA0&start_radio=1&pp=ygUU7JWE7J207JygIOyii-ydgCDrgqCgBwE%3D
+            - img [ref=e116]:
+              - generic [aria-hidden] [ref=e118]: 5:58
+            - generic: 지금 재생 중
+          - generic [ref=e119] [cursor=pointer]:
+            - generic [ref=e120]:
+              - heading [level=3] [ref=e122]:
+                - link "IU (아이유) _ Good Day (좋은 날) _ MV 5분 58초" [ref=e123]:
+                  - /url: /watch?v=jeqdYqsrsA0&list=RDjeqdYqsrsA0&start_radio=1&pp=ygUU7JWE7J207JygIOyii-ydgCDrgqCgBwE%3D
+                  - text: IU (아이유) _ Good Day (좋은 날) _ MV
+              - generic [ref=e126]:
+                - generic [ref=e127]: 6855만
+                - generic [ref=e128]: •15년 전
+            - generic [ref=e129]:
+              - link "1theK (원더케이) 채널로 이동" [ref=e130]:
+                - /url: /@1theK
+              - generic [ref=e132]:
+                - link "1theK (원더케이)" [ref=e136]:
+                  - /url: /@1theK
+                - img "인증됨" [ref=e141]
+            - generic [ref=e143]:
+              - text: "Download ] iTunes : http://itunes.apple.com/us/album/real/id409076726 Melon ..."
+              - tooltip "tooltip"
+        - generic [ref=e145]:
+          - link [aria-hidden] [ref=e147] [cursor=pointer]:
+            - /url: /watch?v=LYm7CIn1K58&list=RDLYm7CIn1K58&start_radio=1&pp=ygUU7JWE7J207JygIOyii-ydgCDrgqCgBwE%3D
+            - img [ref=e152]:
+              - generic [aria-hidden] [ref=e154]: 4:16
+            - generic: 지금 재생 중
+          - generic [ref=e155] [cursor=pointer]:
+            - generic [ref=e156]:
+              - heading [level=3] [ref=e158]:
+                - link "아이유 - 좋은 날 [유희열의 스케치북/You Heeyeol’s Sketchbook] | KBS 200918 방송 4분 16초" [ref=e159]:
+                  - /url: /watch?v=LYm7CIn1K58&list=RDLYm7CIn1K58&start_radio=1&pp=ygUU7JWE7J207JygIOyii-ydgCDrgqCgBwE%3D
+                  - text: 아이유 - 좋은 날 [유희열의 스케치북/You Heeyeol’s Sketchbook] | KBS 200918 방송
+              - generic [ref=e162]:
+                - generic [ref=e163]: 584만
+                - generic [ref=e164]: •6년 전
+            - generic [ref=e165]:
+              - link "KBS Kpop 채널로 이동" [ref=e166]:
+                - /url: /@KBSKpop
+              - generic [ref=e168]:
+                - link "KBS Kpop" [ref=e172]:
+                  - /url: /@KBSKpop
+                - img "인증됨" [ref=e177]
+            - generic [ref=e179]:
+              - generic [ref=e180]: 아이유 - 좋은 날.
+              - tooltip "tooltip"
+        - generic [ref=e182]:
+          - link [aria-hidden] [ref=e184] [cursor=pointer]:
+            - /url: /watch?v=V6WWJNpIJN4&list=RDV6WWJNpIJN4&start_radio=1&pp=ygUU7JWE7J207JygIOyii-ydgCDrgqCgBwE%3D
+            - img [ref=e189]:
+              - generic [aria-hidden] [ref=e191]: 3:56
+            - generic: 지금 재생 중
+          - generic [ref=e192] [cursor=pointer]:
+            - generic [ref=e193]:
+              - heading [level=3] [ref=e195]:
+                - link "아이유(IU) - 좋은 날 [가사/Lyrics] 3분 56초" [ref=e196]:
+                  - /url: /watch?v=V6WWJNpIJN4&list=RDV6WWJNpIJN4&start_radio=1&pp=ygUU7JWE7J207JygIOyii-ydgCDrgqCgBwE%3D
+                  - text: 아이유(IU) - 좋은 날 [가사/Lyrics]
+              - generic [ref=e199]:
+                - generic [ref=e200]: 151만
+                - generic [ref=e201]: •2년 전
+            - generic [ref=e202]:
+              - link "웅키 채널로 이동" [ref=e203]:
+                - /url: /@%EC%9B%85%ED%82%A4
+              - generic [ref=e205]:
+                - link "웅키" [ref=e209]:
+                  - /url: /@%EC%9B%85%ED%82%A4
+                - img "인증됨" [ref=e214]
+            - generic [ref=e216]:
+              - generic [ref=e217]: "아이유(IU) - 좋은 날 [가사/Lyrics] #아이유 #IU #좋은날 발매 : 2010.12.09 아티스트 : 아이유(IU) 앨범 : Real 작곡 : 이민수 작사 : 김 ..."
+              - tooltip "tooltip"
+        - generic [ref=e219]:
+          - link [aria-hidden] [ref=e221] [cursor=pointer]:
+            - /url: /watch?v=GQt03lkFQE4&pp=ygUU7JWE7J207JygIOyii-ydgCDrgqA%3D
+            - img [ref=e226]:
+              - generic [aria-hidden] [ref=e227]: 4:04
+            - generic: 지금 재생 중
+          - generic [ref=e228] [cursor=pointer]:
+            - generic [ref=e229]:
+              - heading [level=3] [ref=e231]:
+                - link "【TVPP】IU - Good Day, 아이유 - 좋은 날 @ Comeback Stage, Show Music core Live 4분 4초" [ref=e232]:
+                  - /url: /watch?v=GQt03lkFQE4&pp=ygUU7JWE7J207JygIOyii-ydgCDrgqA%3D
+                  - text: 【TVPP】IU - Good Day, 아이유 - 좋은 날 @ Comeback Stage, Show Music core Live
+              - generic [ref=e235]:
+                - generic [ref=e236]: 582만
+                - generic [ref=e237]: •12년 전
+            - generic [ref=e238]:
+              - link "TV-People 채널로 이동" [ref=e239]:
+                - /url: /@TVPeople
+              - generic [ref=e241]:
+                - link "TV-People" [ref=e245]:
+                  - /url: /@TVPeople
+                - img "인증됨" [ref=e250]
+            - generic [ref=e252]:
+              - generic [ref=e253]: "【TVPP】IU - Good Day, 아이유 - 좋은 날 @ Comeback Stage, Show Music core Live IU # 006 : IU - Good Day at Show Music ..."
+              - tooltip "tooltip"
+            - img "자막" [ref=e258]:
+              - generic [aria-hidden] [ref=e259]: 자막
+        - generic [ref=e261] [cursor=pointer]:
+          - link [aria-hidden] [ref=e262]:
+            - /url: /watch?v=jeqdYqsrsA0&list=RDjeqdYqsrsA0&start_radio=1&pp=0gcJCRwDOCosWNin
+            - generic [ref=e264]: 믹스 재생목록
+          - generic [ref=e277]:
+            - heading "믹스 - IU (아이유) _ Good Day (좋은 날) _ MV" [level=3] [ref=e278]:
+              - link "믹스 - IU (아이유) _ Good Day (좋은 날) _ MV" [ref=e279]:
+                - /url: /watch?v=jeqdYqsrsA0&list=RDjeqdYqsrsA0&start_radio=1&pp=0gcJCRwDOCosWNin
+            - generic [ref=e281]:
+              - group [ref=e282]:
+                - generic [ref=e283]: 아이유, 지드래곤 등
+                - generic [ref=e284]: 재생목록
+              - group [ref=e285]
+              - group [ref=e286]:
+                - link "IU (아이유) _ Good Day (좋은 날) _ MV · 5:58" [ref=e288]:
+                  - /url: /watch?v=jeqdYqsrsA0&list=RDjeqdYqsrsA0&start_radio=1
+              - group [ref=e289]:
+                - link "[MV] IU(아이유) _ Celebrity · 3:19" [ref=e291]:
+                  - /url: /watch?v=0-q1KafFCLU&list=RDjeqdYqsrsA0&start_radio=1
+              - group [ref=e292]:
+                - generic [ref=e293]: 아이유, 지드래곤 등
+        - generic [ref=e295]:
+          - link [aria-hidden] [ref=e297] [cursor=pointer]:
+            - /url: /watch?v=7bPMyLV-vk0&list=RD7bPMyLV-vk0&start_radio=1&pp=ygUU7JWE7J207JygIOyii-ydgCDrgqCgBwHSBwkJRwwBhyohjO8%3D
+          - generic [ref=e299] [cursor=pointer]:
+            - generic [ref=e300]:
+              - heading [level=3] [ref=e302]:
+                - link "[뮤뱅] 아이유 - 좋은날 20120831 3분 56초" [ref=e303]:
+                  - /url: /watch?v=7bPMyLV-vk0&list=RD7bPMyLV-vk0&start_radio=1&pp=ygUU7JWE7J207JygIOyii-ydgCDrgqCgBwHSBwkJRwwBhyohjO8%3D
+                  - text: "[뮤뱅] 아이유 - 좋은날 20120831"
+              - generic [ref=e306]:
+                - generic [ref=e307]: 242만
+                - generic [ref=e308]: •9년 전
+            - generic [ref=e309]:
+              - link "KBS Kpop 채널로 이동" [ref=e310]:
+                - /url: /@KBSKpop
+              - generic [ref=e311]:
+                - link "KBS Kpop" [ref=e315]:
+                  - /url: /@KBSKpop
+                - img "인증됨" [ref=e320]
+            - generic [ref=e322]:
+              - generic [ref=e323]: "[뮤뱅] 아이유 - 좋은날 20120831."
+              - tooltip "tooltip"
+        - generic [ref=e325]:
+          - link [aria-hidden] [ref=e327] [cursor=pointer]:
+            - /url: /watch?v=89zmxOBhEFk&pp=ygUU7JWE7J207JygIOyii-ydgCDrgqA%3D
+          - generic [ref=e329] [cursor=pointer]:
+            - generic [ref=e330]:
+              - heading [level=3] [ref=e332]:
+                - 'link "IU : Good Day - 아이유, 좋은 날, 쇼! 음악중심, 2010/12/11 - MBC 3분 43초" [ref=e333]':
+                  - /url: /watch?v=89zmxOBhEFk&pp=ygUU7JWE7J207JygIOyii-ydgCDrgqA%3D
+                  - text: "IU : Good Day - 아이유, 좋은 날, 쇼! 음악중심, 2010/12/11 - MBC"
+              - generic [ref=e336]:
+                - generic [ref=e337]: 17만
+                - generic [ref=e338]: •14년 전
+            - generic [ref=e339]:
+              - link "mbcglobal 채널로 이동" [ref=e340]:
+                - /url: /@mbcglobal
+              - generic [ref=e341]:
+                - link "mbcglobal" [ref=e345]:
+                  - /url: /@mbcglobal
+                - img "인증됨" [ref=e350]
+            - generic [ref=e352]:
+              - generic [ref=e353]: "IU : Good Day, Show! MusicCore(쇼! 음악중심), EP237, 2010.12.11, MBC TV, South Korea."
+              - tooltip "tooltip"
+        - generic [ref=e355]:
+          - link [aria-hidden] [ref=e357] [cursor=pointer]:
+            - /url: /watch?v=cRdvzzWIfkA&list=RDcRdvzzWIfkA&start_radio=1&pp=ygUU7JWE7J207JygIOyii-ydgCDrgqCgBwE%3D
+          - generic [ref=e359] [cursor=pointer]:
+            - generic [ref=e360]:
+              - heading [level=3] [ref=e362]:
+                - link "IU (아이유) - 'Good Day (좋은 날)' Lyrics [Han/Rom/Eng/가사] 4분" [ref=e363]:
+                  - /url: /watch?v=cRdvzzWIfkA&list=RDcRdvzzWIfkA&start_radio=1&pp=ygUU7JWE7J207JygIOyii-ydgCDrgqCgBwE%3D
+                  - text: IU (아이유) - 'Good Day (좋은 날)' Lyrics [Han/Rom/Eng/가사]
+              - generic [ref=e366]:
+                - generic [ref=e367]: 232만
+                - generic [ref=e368]: •4년 전
+            - generic [ref=e369]:
+              - link "NIGHTMARE 채널로 이동" [ref=e370]:
+                - /url: /@NIGHTMARE-yp3cd
+              - link "NIGHTMARE" [ref=e375]:
+                - /url: /@NIGHTMARE-yp3cd
+            - generic [ref=e376]:
+              - generic [ref=e377]: IU - 'Good Day (좋은 날)' Color Coded Lyrics .............................................................................. Hope you like it Uaena!
+              - tooltip "tooltip"
+        - generic [ref=e379]:
+          - link [aria-hidden] [ref=e381] [cursor=pointer]:
+            - /url: /watch?v=z87KuVzhja4&list=RDz87KuVzhja4&start_radio=1&pp=ygUU7JWE7J207JygIOyii-ydgCDrgqCgBwE%3D
+          - generic [ref=e383] [cursor=pointer]:
+            - generic [ref=e384]:
+              - heading [level=3] [ref=e386]:
+                - link "IU - Good day (아이유 - 좋은날) @ SBS Inkigayo 인기가요 101226 3분 52초" [ref=e387]:
+                  - /url: /watch?v=z87KuVzhja4&list=RDz87KuVzhja4&start_radio=1&pp=ygUU7JWE7J207JygIOyii-ydgCDrgqCgBwE%3D
+                  - text: IU - Good day (아이유 - 좋은날) @ SBS Inkigayo 인기가요 101226
+              - generic [ref=e390]:
+                - generic [ref=e391]: 97만
+                - generic [ref=e392]: •14년 전
+            - generic [ref=e393]:
+              - link "SBSKPOP X INKIGAYO 채널로 이동" [ref=e394]:
+                - /url: /@SBSKPOP
+              - link "SBSKPOP X INKIGAYO" [ref=e399]:
+                - /url: /@SBSKPOP
+            - generic [ref=e400]:
+              - generic [ref=e401]: 12월 26일 오후 4시 00분 생방송 SBS 인기가요! * 아이유가 드리는 크리스마스 선물! 애교3종세트! '휴~아이쿠~하나 둘!' & 한층 화려 ...
+              - tooltip "tooltip"
