@@ -68,11 +68,13 @@ services:
       - ./logs/llm:/app/logs
     ports:
       - "11003:11003"
+    # GPU 0.42(약 10GB): 7B AWQ 가중치 ~5.6GB + 16k KV 캐시 ~1GB 에 넉넉하다.
+    # 남는 GPU 는 vision(이미지 이해)이 쓴다
     command: >
       --model ${LLM_MODEL:-Qwen/Qwen2.5-14B-Instruct-AWQ}
       --dtype auto
       --max-model-len ${LLM_MAX_MODEL_LEN:-16384}
-      --gpu-memory-utilization ${LLM_GPU_UTIL:-0.6}
+      --gpu-memory-utilization ${LLM_GPU_UTIL:-0.42}
       --trust-remote-code
       --port 11003
       --enable-auto-tool-choice
@@ -91,6 +93,51 @@ services:
       timeout: 10s
       retries: 3
       start_period: 120s
+    networks:
+      - edgevoice-net
+    restart: unless-stopped
+
+  # --- Vision (채팅에 첨부한 사진·화면을 한국어로 설명 — 그 설명을 llm 이 읽고 답한다) ---
+  vision:
+    image: vllm/vllm-openai:latest
+    container_name: ev-vision
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HF_TOKEN=${HF_TOKEN:-}
+    volumes:
+      - ${MODEL_CACHE_PATH:-./models}/llm:/root/.cache/huggingface
+    ports:
+      - "11009:11009"
+    command:
+      - --model
+      - ${VISION_MODEL:-Qwen/Qwen2.5-VL-3B-Instruct-AWQ}
+      - --max-model-len
+      - ${VISION_MAX_MODEL_LEN:-8192}
+      - --gpu-memory-utilization
+      - ${VISION_GPU_UTIL:-0.24}
+      - --limit-mm-per-prompt
+      - '{"image": 2}'
+      # 큰 화면 캡처도 약 900x900 픽셀로 줄여 토큰·메모리를 아낀다.
+      # 0.16 에서는 이미지 처리 작업 메모리 때문에 KV 캐시 자리가 -1.3GB 였다(실측)
+      - --mm-processor-kwargs
+      - '{"max_pixels": 802816}'
+      - --enforce-eager
+      - --port
+      - "11009"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11009/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
     networks:
       - edgevoice-net
     restart: unless-stopped

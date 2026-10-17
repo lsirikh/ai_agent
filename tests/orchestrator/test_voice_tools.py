@@ -199,7 +199,8 @@ class TestInternetOff:
             await voice_turn(orchestrator, "안녕")
 
         names = [t["function"]["name"] for t in requests[0]["tools"]]
-        assert names == ["get_time"]
+        # learn_note(학습 노트)는 오프라인 로컬 도구라 항상 있다
+        assert names == ["get_time", "learn_note"]
         http_get.assert_not_called()
         assert spoken == ["안녕하세요."]
 

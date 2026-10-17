@@ -138,6 +138,7 @@ class TestChatToolRoundTrip:
         ]
         assert sorted(t["function"]["name"] for t in requests[0]["tools"]) == [
             "get_time",
+            "learn_note",  # 학습 노트는 오프라인 로컬 도구라 항상 있다
             "web_fetch",
             "web_search",
         ]
@@ -345,10 +346,13 @@ class TestToolSettingsApi:
             json={"internet_enabled": True, "search_provider": "searxng"},
         ).json()
 
-        assert before["internet_enabled"] is False and before["tools"] == ["get_time"]
+        assert before["internet_enabled"] is False
+        assert before["tools"] == ["get_time", "learn_note"]
         assert after["internet_enabled"] is True
         # 인터넷을 켜면 날씨(get_weather, 기본 켜짐)도 함께 노출된다
-        assert after["tools"] == ["get_time", "get_weather", "web_fetch", "web_search"]
+        assert after["tools"] == [
+            "get_time", "get_weather", "learn_note", "web_fetch", "web_search"
+        ]
         assert client.get("/api/settings/tools").json()["internet_enabled"] is True
 
 

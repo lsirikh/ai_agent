@@ -50,7 +50,8 @@ class TestRegistry:
             {"internet_enabled": False}, search_provider=Provider()
         )
 
-        assert registry.names() == ["get_time"]
+        # learn_note(학습 노트)는 오프라인 로컬 도구라 항상 있다
+        assert registry.names() == ["get_time", "learn_note"]
         assert calls == []
 
     def test_should_hide_internet_tools_when_no_provider_configured(self, monkeypatch):
@@ -60,7 +61,8 @@ class TestRegistry:
             {"internet_enabled": True, "search_provider": "searxng"}
         )
 
-        assert registry.names() == ["get_time"]
+        # learn_note(학습 노트)는 오프라인 로컬 도구라 항상 있다
+        assert registry.names() == ["get_time", "learn_note"]
 
     def test_should_expose_web_tools_sorted_when_enabled(self, monkeypatch):
         monkeypatch.setenv("SEARXNG_URL", "http://searxng:8080")
@@ -69,7 +71,9 @@ class TestRegistry:
             {"internet_enabled": True, "search_provider": "searxng"}
         )
 
-        assert registry.names() == ["get_time", "web_fetch", "web_search"]
+        assert registry.names() == [
+            "get_time", "learn_note", "web_fetch", "web_search"
+        ]
         assert [s["function"]["name"] for s in registry.schemas()] == registry.names()
 
     @pytest.mark.asyncio

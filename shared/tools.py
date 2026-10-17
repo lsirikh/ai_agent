@@ -194,7 +194,10 @@ _SAVED_FILE = re.compile(r"\.(txt|docx|xlsx|pptx)\b")
 _READ = re.compile(r"내용|읽어|열람")
 _FILE_LIST = re.compile(r"(파일|폴더).*(목록|뭐|무엇|있어|보여|알려)|저장된\s*파일")
 
+_REMEMBER = re.compile(r"기억해|학습해|학습\s*시켜|외워")
+
 _REQUIRED_TOOLS = [
+    ("learn_note", _REMEMBER.search),
     ("read_test_file", lambda q: _SAVED_FILE.search(q) and _READ.search(q)),
     ("list_test_files", _FILE_LIST.search),
     ("write_document", lambda q: _PROGRAM.search(q) and _WRITE.search(q)),
@@ -582,13 +585,75 @@ def web_fetch_tool(
     )
 
 
+# ===== learn_note (학습 노트: 지식 베이스에 기억해 둔다) =====
+
+KNOWLEDGE_UPLOAD_URL = os.getenv(
+    "KNOWLEDGE_UPLOAD_URL", "http://backend:8000/api/knowledge/upload"
+)
+LEARN_NOTE_CATEGORY = "학습노트"
+
+
+def learn_note_tool(
+    upload_url: str = KNOWLEDGE_UPLOAD_URL, transport: Any = None
+) -> Tool:
+    """
+    사용자가 "기억해/학습해" 라고 한 상황을 지식 베이스에 학습 노트로 저장한다.
+    다음부터 채팅·음성이 관련 질문에서 이 노트를 찾아 쓴다
+    (모델 가중치를 바꾸는 학습이 아니라 기억).
+    """
+
+    async def run(args: dict) -> ToolResult:
+        title = str(args.get("title") or "학습 노트").strip()[:80]
+        content = str(args.get("content") or "").strip()
+        if not content:
+            return ToolResult("기억할 내용이 비어 있습니다", is_error=True)
+        note = (
+            f"# 학습 노트: {title}\n\n{content}\n\n"
+            "(EdgeVoice 대화에서 사용자가 기억해 달라고 한 내용 · "
+            f"{current_time_text()})\n"
+        )
+        note_file = (f"학습노트-{title}.md", note.encode("utf-8"), "text/markdown")
+        files = {"file": note_file}
+        data = {"title": f"학습노트: {title}", "category": LEARN_NOTE_CATEGORY}
+        try:
+            async with httpx.AsyncClient(timeout=60.0, transport=transport) as client:
+                response = await client.post(upload_url, files=files, data=data)
+                response.raise_for_status()
+        except Exception as error:
+            message = f"학습 노트를 저장하지 못했습니다: {error}"
+            return ToolResult(message, is_error=True)
+        return ToolResult(f"학습 노트 '{title}' 를 지식 베이스에 저장했습니다.")
+
+    return Tool(
+        name="learn_note",
+        description=(
+            "사용자가 기억하거나 학습하라고 한 내용을 지식 베이스에 저장한다. "
+            "상황(첨부 이미지 설명 포함)·원인·해결 방법을 나중에 읽어도 알 수 있게 "
+            "구체적으로 적는다."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "짧은 제목"},
+                "content": {"type": "string", "description": "기억할 내용"},
+            },
+            "required": ["title", "content"],
+        },
+        run=run,
+        announce="기억해 둘게요.",
+    )
+
+
 def build_registry(
     settings: dict, extra_tools: Optional[list] = None, search_provider: Any = None
 ) -> ToolRegistry:
     """
     이번 턴에 쓸 도구. 인터넷 도구는 설정이 켜져 있고 검색 제공자가 있을 때만 넣는다.
     """
-    registry = ToolRegistry([get_time_tool(settings.get("timezone"))])
+    # learn_note(학습 노트)는 지식 베이스에 쓰는 오프라인 로컬 도구라 항상 넣는다
+    registry = ToolRegistry(
+        [get_time_tool(settings.get("timezone")), learn_note_tool()]
+    )
     # 날씨는 인터넷(Open-Meteo)을 쓰므로 인터넷 도구가 켜져 있을 때만 (오프라인 원칙)
     if settings.get("internet_enabled") and settings.get("weather_enabled"):
         from .weather import weather_tool

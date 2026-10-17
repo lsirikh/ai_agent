@@ -8,6 +8,7 @@ import asyncio
 from typing import Any, AsyncIterator, Awaitable, Callable, List, Optional, Tuple
 
 import shared.tools as tools
+from shared import vision
 from shared.knowledge_filter import relevant_results
 
 from . import conversation
@@ -53,7 +54,8 @@ class ChatService:
         history_store: Optional[Any] = None,
         context_enabled: bool = True,
         context_window_size: int = 20,
-        tool_provider: Optional[Callable[[], Awaitable[Any]]] = None
+        tool_provider: Optional[Callable[[], Awaitable[Any]]] = None,
+        image_describer: Optional[Callable[[str, str], Awaitable[str]]] = None,
     ):
         """
         ChatService 초기화
@@ -66,6 +68,7 @@ class ChatService:
             context_window_size: Sliding Window 크기 (최근 N개 메시지)
             tool_provider: 이번 턴에 쓸 ToolRegistry 를 돌려주는 함수
                 (None 이면 도구 없음)
+            image_describer: (이미지 data URL, 질문) → 한국어 설명 (기본 vision 서비스)
         """
         self.llm_client = llm_client
         self.rag_service = rag_service
@@ -73,12 +76,24 @@ class ChatService:
         self.context_enabled = context_enabled
         self.context_window_size = context_window_size
         self.tool_provider = tool_provider
+        self.image_describer = image_describer or vision.describe_image
+
+    async def _describe_images(self, images: List[str], message: str) -> List[str]:
+        """첨부 이미지마다 한국어 설명. 실패해도 답은 이어 간다."""
+        descriptions = []
+        for image in images:
+            try:
+                descriptions.append(await self.image_describer(image, message))
+            except Exception as e:
+                descriptions.append(f"(이미지를 읽지 못했습니다: {e})")
+        return descriptions
 
     async def process_message(
         self,
         session_id: str,
         message: str,
-        use_rag: bool = True
+        use_rag: bool = True,
+        images: Optional[List[str]] = None,
     ) -> AsyncIterator[dict]:
         """
         메시지 처리 (스트리밍)
@@ -87,10 +102,27 @@ class ChatService:
             session_id: 세션 ID
             message: 사용자 메시지
             use_rag: RAG 사용 여부
+            images: 첨부 이미지(data URL). 비전 모델 설명을 이번 질문의 근거로 붙인다
 
         Yields:
             채팅 이벤트 (type, content, session_id, sources)
         """
+        # 0. 첨부 이미지 → 한국어 설명 (사용자가 LLM 이 이해한 내용을 먼저 본다)
+        image_note = ""
+        if images:
+            descriptions = await self._describe_images(images, message)
+            numbered = len(descriptions) > 1
+            image_note = "\n\n".join(
+                f"[첨부 이미지 설명{f' {i}' if numbered else ''}]\n{d}"
+                for i, d in enumerate(descriptions, start=1)
+            )
+            yield {
+                "type": "image_description",
+                "content": image_note,
+                "session_id": session_id,
+                "sources": [],
+            }
+
         # 1. RAG 컨텍스트 검색 (use_rag가 True이고 rag_service가 있을 때)
         rag_context = None
         sources = []
@@ -123,6 +155,8 @@ class ChatService:
         # (이번 질문에 붙어 앞쪽 접두사 캐시는 그대로)
         redis = conversation._get_redis()
         extra["reference"] = await tools.current_time_reference(redis)
+        if image_note:
+            extra["reference"] += f"\n\n{image_note}"
         if rag_context:
             extra["reference"] += (
                 "\n\n다음은 관련 문서 내용입니다. 이 정보를 참고하여 답변하고, "
@@ -196,7 +230,9 @@ class ChatService:
         if not full_response.strip():
             return
         if conversation.is_available():
-            await conversation.save_message(session_id, "user", message, source="web")
+            # 첨부 이미지 설명도 함께 남긴다(이어지는 질문·학습 노트에 쓴다)
+            user_text = f"{message}\n\n{image_note}" if image_note else message
+            await conversation.save_message(session_id, "user", user_text, source="web")
             for result in tool_results:
                 await conversation.save_message(
                     session_id,

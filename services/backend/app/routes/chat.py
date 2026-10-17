@@ -13,12 +13,13 @@ import json
 import os
 import time
 import uuid
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
+from shared import vision
 from shared.mcp_client import start_mcp_from_env
 from shared.tools import build_registry, load_tool_settings
 
@@ -184,6 +185,15 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     message: str
     use_rag: bool = True
+    # 첨부 이미지(data:image/…;base64). 비전 모델이 설명해 근거로 붙인다
+    images: List[str] = Field(default_factory=list, max_length=vision.MAX_IMAGES)
+
+    @field_validator("images")
+    @classmethod
+    def _images_are_data_urls(cls, images: List[str]) -> List[str]:
+        if not all(vision.valid_image(image) for image in images):
+            raise ValueError("이미지는 data:image/…;base64 형식, 8MB 이하만 됩니다")
+        return images
 
 
 class ConfirmRequest(BaseModel):
@@ -228,7 +238,8 @@ async def send_message(request: ChatRequest):
             async for event in chat_service.process_message(
                 session_id=session_id,
                 message=request.message,
-                use_rag=request.use_rag
+                use_rag=request.use_rag,
+                images=request.images,
             ):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
