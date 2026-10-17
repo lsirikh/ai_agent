@@ -173,10 +173,20 @@ async def load_tool_settings(redis: Any) -> dict:
     return settings
 
 
+TIME_REFERENCE_RULE = (
+    "(참고용: 사용자가 시각·날짜·요일을 물을 때만 쓰고, "
+    "그 밖의 답에는 시각·날짜를 말하지 마세요.)"
+)
+
+
 async def current_time_reference(redis: Any) -> str:
     """매 턴 이번 질문에 붙이는 시각 근거 — 설정한 시간대로."""
     settings = await load_tool_settings(redis)
-    return f"지금 시각: {current_time_text(settings.get('timezone'))}"
+    # 쓸 때를 정해 주지 않으면 묻지 않은 답에도 '현재 시각은 …' 으로 시작했다(실측)
+    return (
+        f"지금 시각: {current_time_text(settings.get('timezone'))}\n"
+        f"{TIME_REFERENCE_RULE}"
+    )
 
 
 # 열기·켜기·접속처럼 무언가를 해 달라는 요청 (질문 끝이나 '…해 줘' 꼴)

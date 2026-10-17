@@ -164,3 +164,20 @@ async def test_weather_tool_retries_once_after_temporary_failure() -> None:
 
     assert not result.is_error
     assert "맑음" in result.content and len(attempts) == 2
+
+
+@pytest.mark.asyncio
+async def test_time_reference_says_to_mention_time_only_when_asked() -> None:
+    # 실측(2026-10-18): 시각을 묻지 않은 '말해봐'·'고마워'·'오늘 기분이 안 좋아' 에도
+    # 답이 '현재 시각은 …' 으로 시작했다(6종 중 4종) — 사용자: '입 다물어'
+    from unittest.mock import AsyncMock
+
+    import shared.tools as tools
+
+    redis = AsyncMock()
+    redis.get.return_value = None
+
+    text = await tools.current_time_reference(redis)
+
+    assert text.startswith("지금 시각:")
+    assert "물을 때만" in text
