@@ -52,3 +52,12 @@ def test_voice_sentence_uses_korean_number_reading() -> None:
     spoken, _ = to_speech("현재 시각은 **1시 20분**이고, 기온은 20도입니다.", None)
 
     assert spoken == "현재 시각은 한 시 이십 분이고, 기온은 이십 도입니다."
+
+
+def test_voice_drops_timezone_annotation() -> None:
+    # 실측: 모델이 시각 근거의 'KST(UTC+0900)' 까지 따라 말해 'UTC+구백' 으로 읽혔다
+    from services.orchestrator.app.orchestrator import to_speech
+
+    spoken, _ = to_speech("현재 시각은 22시 15분 KST(UTC+0900)입니다.", None)
+
+    assert spoken == "현재 시각은 이십이 시 십오 분입니다."

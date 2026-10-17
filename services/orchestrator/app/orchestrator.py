@@ -105,6 +105,9 @@ LIST_NUMBER_AT_LINE_START = re.compile(r"^\s*(\d{1,2})[.)]\s+")
 LIST_NUMBER_AT_END = re.compile(r"\s+(\d{1,2})[.)]\s*$")
 BULLET_AT_LINE_START = re.compile(r"^\s*[-*•]\s+")
 MARKDOWN_MARKS = re.compile(r"\*\*|__|`|#+\s*")
+TIMEZONE_NOTE = re.compile(
+    r"\s*(KST\s*)?\(\s*UTC\s*[+-]\s*\d{1,2}:?\d{0,2}\s*\)|\s*KST"
+)
 
 
 def _ordinal(number: int) -> str:
@@ -138,6 +141,8 @@ def to_speech(
     if pending_number is not None:
         text = f"{_ordinal(pending_number)}, {text}"
     text = MARKDOWN_MARKS.sub("", text)
+    # 시각 근거의 시간대 표기는 읽지 않는다(실측: 'KST(UTC+0900)' → 'UTC+구백')
+    text = TIMEZONE_NOTE.sub("", text)
     # 숫자를 한국어 읽기로('1시 20분' → '한 시 이십 분').
     # '1:20' 이 쉼표가 되기 전에 한다
     text = read_numbers(text)
