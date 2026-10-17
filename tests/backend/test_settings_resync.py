@@ -61,22 +61,28 @@ def test_heartbeat_without_settings_target_is_ignored() -> None:
 
 
 def test_heartbeat_log_triggers_resync() -> None:
-    from services.backend.app.routes import logs
+    # 서비스 로그는 Redis 채널로 와서 LogSubscriber 가 저장한다(/api/logs 를 거치지 않는다)
+    from services.backend.app.services import log_subscriber
 
-    repo = MagicMock(create=AsyncMock(return_value="id"), get_by_id=AsyncMock())
-    repo.get_by_id.return_value = {"id": "id"}
-    log = logs.LogCreate(
-        service="stt", stage="heartbeat", message="alive",
-        metadata={"uptime_seconds": 3},
-    )
-    with (
-        patch.object(logs, "PipelineLogRepository", return_value=repo),
-        patch.object(logs, "broadcast_log", AsyncMock()),
-        patch.object(logs, "on_heartbeat", AsyncMock()) as heartbeat,
-    ):
-        asyncio.run(logs.create_log(log))
+    repo = MagicMock(create=AsyncMock(return_value="id"))
+    log = {
+        "timestamp": "2026-10-17T15:50:58",
+        "service": "stt",
+        "event": "heartbeat",
+        "data": {"message": "alive", "uptime_seconds": 3},
+        "level": "info",
+    }
 
-    heartbeat.assert_called_once_with("stt", {"uptime_seconds": 3})
+    async def save():
+        await log_subscriber.LogSubscriber()._save_log_to_db(repo, log)
+        await asyncio.sleep(0)  # 다시 보내기는 기다리지 않고 따로 돈다
+
+    with patch.object(log_subscriber, "on_heartbeat", AsyncMock()) as heartbeat:
+        asyncio.run(save())
+
+    heartbeat.assert_awaited_once()
+    assert heartbeat.await_args.args[0] == "stt"
+    assert heartbeat.await_args.args[1]["uptime_seconds"] == 3
 
 
 def test_uptime_is_read_from_the_real_heartbeat_shape() -> None:

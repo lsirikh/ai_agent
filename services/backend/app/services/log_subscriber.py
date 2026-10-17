@@ -18,6 +18,10 @@ import redis.asyncio as redis
 # Phase 31.2: 채널 통합 (edgevoice:logs -> edgevoice:logs:pipeline)
 from ..constants.redis_channels import RedisChannels
 from ..repositories.pipeline_log_repository import PipelineLogRepository
+from .settings_resync import on_heartbeat
+
+# 다시 보내기 작업(끝나기 전에 사라지지 않게 잡아 둔다)
+_resync_tasks: set = set()
 
 LOGS_CHANNEL = RedisChannels.PIPELINE_LOGS  # "edgevoice:logs:pipeline"
 
@@ -159,6 +163,12 @@ class LogSubscriber:
                 duration_ms=duration_ms,
                 metadata=metadata
             )
+
+            if event == "heartbeat":
+                # 다시 시작된 서비스에 저장한 설정을 다시 보낸다(로그 수신은 막지 않는다)
+                task = asyncio.create_task(on_heartbeat(service, metadata))
+                _resync_tasks.add(task)
+                task.add_done_callback(_resync_tasks.discard)
 
         except Exception as e:
             # DB 저장 실패해도 로그 수신은 계속

@@ -21,7 +21,6 @@ from pydantic import BaseModel
 
 from ..repositories.pipeline_log_repository import LOG_LEVELS, PipelineLogRepository
 from ..services.log_broadcaster import broadcast_log, LOGS_CHANNEL
-from ..services.settings_resync import on_heartbeat
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
 
@@ -342,10 +341,6 @@ async def create_log(log: LogCreate):
     except Exception as e:
         # 브로드캐스트 실패해도 로그 생성은 성공으로 처리
         print(f"[logs] Failed to broadcast log: {e}")
-
-    if log.stage == "heartbeat":
-        # 다시 시작된 서비스에 저장한 설정을 다시 보낸다(응답은 기다리지 않는다)
-        asyncio.create_task(on_heartbeat(log.service, log.metadata))
 
     return created_log
 
