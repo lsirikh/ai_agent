@@ -28,6 +28,7 @@ import json
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 from urllib.parse import quote_plus
@@ -42,6 +43,7 @@ NAME_MAX = 64
 DEFAULT_TIMEOUT_SECONDS = 30.0
 MAX_LIST_PAGES = 50
 # 브라우저 서버가 이 도구들을 내주면 play_youtube 도 만든다
+RECONNECT_INTERVAL_SECONDS = 30.0
 PLAY_YOUTUBE_NEEDS = {"browser_navigate", "browser_snapshot", "browser_click"}
 
 
@@ -124,6 +126,7 @@ class _Server:
         self._stop = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
         self.error: Optional[BaseException] = None
+        self.retry_after = 0.0  # 이 시각(monotonic) 전에는 다시 연결해 보지 않는다
 
     def _target(self) -> Any:
         from mcp import StdioServerParameters
@@ -223,7 +226,7 @@ class MCPManager:
         result, taken = [], set()
         self.name_map = {}
         for server in self.servers:
-            if server.client is None:
+            if server.client is None and not await self._retry_connect(server):
                 continue
             if server.stale:
                 try:
@@ -303,6 +306,17 @@ class MCPManager:
             run=run,
             announce="유튜브에서 찾아 틀어 볼게요.",
         )
+
+    async def _retry_connect(self, server: "_Server") -> bool:
+        """
+        끊긴 서버를 다시 연결해 본다(서버를 다시 띄운 뒤 도구가 사라졌다 — 실측).
+        죽은 서버로 요청마다 기다리지 않게 RECONNECT_INTERVAL 초에 한 번만.
+        """
+        now = time.monotonic()
+        if now < server.retry_after:
+            return False
+        server.retry_after = now + RECONNECT_INTERVAL_SECONDS
+        return await server.reconnect()
 
     def _wrap(self, server: _Server, tool: Any, name: str) -> Tool:
         config = server.config
