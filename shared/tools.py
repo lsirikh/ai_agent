@@ -191,12 +191,15 @@ def _now() -> datetime:
         return datetime.now().astimezone()
 
 
-async def _get_time(_: dict) -> ToolResult:
+def current_time_text() -> str:
+    """지금 날짜·요일·시각(한국어). get_time 도구와 매 턴 시각 근거가 같이 쓴다."""
     now = _now()
     weekday = "월화수목금토일"[now.weekday()]
-    return ToolResult(
-        now.strftime(f"%Y년 %m월 %d일 ({weekday}요일) %H시 %M분 %Z(UTC%z)")
-    )
+    return now.strftime(f"%Y년 %m월 %d일 ({weekday}요일) %H시 %M분 %Z(UTC%z)")
+
+
+async def _get_time(_: dict) -> ToolResult:
+    return ToolResult(current_time_text())
 
 
 GET_TIME = Tool(

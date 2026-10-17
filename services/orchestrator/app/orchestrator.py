@@ -12,6 +12,7 @@ import time
 from typing import Any, Optional
 
 from shared.tool_calling import wrap_untrusted
+import shared.tools as tools
 from shared.tools import ToolRegistry, build_registry, load_tool_settings
 
 from .backend_client import BackendClient
@@ -24,11 +25,12 @@ from .state_machine import OrchestratorStateMachine, State
 # Qwen 이 답 중간에 중국어로 넘어가는 경우가 있다.
 HAN_CHARACTER_PATTERN = re.compile(r"[㐀-䶿一-鿿]")
 
+# 문구에 민감하다: "2~3문장", "목록 기호·마크다운 금지" 같은 형식 제한을 넣으면
+# Qwen2.5-7B 가 도구를 부르지 않고 시각을 지어냈다(실측 0/15 → 이 문구 15/15).
+# 목록 기호는 to_speech, 한자 문장은 HAN_CHARACTER_PATTERN 이 TTS 직전에 처리한다.
 DEFAULT_VOICE_SYSTEM_PROMPT = (
-    "당신은 EdgeVoice 음성 비서입니다. 항상 한국어로만 답하고 "
-    "중국어·한자·일본어는 절대 쓰지 마세요. "
-    "답은 소리 내어 읽기 좋게 2~3문장으로 짧고 자연스럽게 말하고, "
-    "목록 기호·마크다운·이모지는 쓰지 마세요."
+    "당신은 EdgeVoice 음성 비서입니다. 한국어로 짧게 답하세요. "
+    "오늘 날짜나 지금 시각 같은 필요한 정보는 도구로 확인하세요."
 )
 
 # 녹음에 섞여 들어온 웨이크워드("Hey Jarvis", "헤이 자비스")를 STT 결과 앞에서 뗀다
@@ -535,7 +537,11 @@ class Orchestrator:
             if rag_context is None:
                 registry = await self._build_tools()
                 # 채팅과 같은 지식 베이스에서 근거를 찾아 이번 질문에 붙인다
-                rag_context = await self._relevant_knowledge(text) or None
+                rag_context = await self._relevant_knowledge(text)
+            # 세션 기록의 옛 시각 답을 따라 하지 않도록 지금 시각을 근거로 붙인다(뒤쪽이라 캐시 유지)
+            rag_context = (rag_context or []) + [
+                {"content": f"지금 시각: {tools.current_time_text()}", "source": "시계"}
+            ]
             async for token in self.llm_client.generate_stream(
                 text, history=history, summary=summary, rag_context=rag_context,
                 tools=registry, confirm=self._defer_confirm

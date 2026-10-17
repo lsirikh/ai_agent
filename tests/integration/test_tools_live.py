@@ -133,3 +133,51 @@ async def test_live_mcp_tools_with_real_model():
     restart_results = [e for e in restart_events if e["type"] == "tool_result"]
     assert asked == ["ironwall__restart"] * len(asked) and asked
     assert all("재시작 완료" not in e["content"] for e in restart_results)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "question", ["지금 몇 시야?", "오늘 무슨 요일이야?", "오늘 며칠이야?"]
+)
+async def test_live_voice_prompt_uses_get_time_for_natural_questions(question):
+    """실제 음성 시스템 프롬프트 + 자연스러운 질문에서도 도구로 시각을 확인한다.
+
+    이전 음성 프롬프트("2~3문장", "목록 기호·마크다운 금지" 등)에서는 모델이 도구를
+    한 번도 부르지 않고 시각을 지어냈다(실측 0/15, 실제 08:52 에 "17시").
+    """
+    from services.orchestrator.app.llm_client import LLMClient
+    from services.orchestrator.app.orchestrator import DEFAULT_VOICE_SYSTEM_PROMPT
+    from shared.tools import build_registry
+
+    llm = LLMClient(base_url=VLLM, system_prompt=DEFAULT_VOICE_SYSTEM_PROMPT)
+    called = 0
+    for _ in range(3):
+        text, events = await _run(
+            llm.generate_stream(
+                question,
+                history=[],
+                tools=build_registry({"internet_enabled": False}),
+            )
+        )
+        called += "get_time" in [e["name"] for e in events if e["type"] == "tool_call"]
+        assert "<tool_call>" not in text
+
+    assert called >= 2, f"{question}: 3회 중 {called}회만 도구 호출"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("question", ["안녕, 반가워", "파이썬이 뭐야?"])
+async def test_live_voice_prompt_does_not_call_tools_for_ordinary_questions(question):
+    from services.orchestrator.app.llm_client import LLMClient
+    from services.orchestrator.app.orchestrator import DEFAULT_VOICE_SYSTEM_PROMPT
+    from shared.tools import build_registry
+
+    llm = LLMClient(base_url=VLLM, system_prompt=DEFAULT_VOICE_SYSTEM_PROMPT)
+    text, events = await _run(
+        llm.generate_stream(
+            question, history=[], tools=build_registry({"internet_enabled": False})
+        )
+    )
+
+    assert not [e for e in events if e["type"] == "tool_call"]
+    assert text.strip()

@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from tests.orchestrator.message_helpers import roles_and_questions, without_reference
+
 
 def _make_orchestrator_with_real_llm_client(sent_requests: list) -> object:
     from services.orchestrator.app.llm_client import LLMClient
@@ -41,7 +43,9 @@ class TestUserTurnSentOnce:
         await orchestrator.process_user_input("오늘 날씨 어때?")
 
         user_turns = [m for m in sent_requests[0] if m["role"] == "user"]
-        assert [m["content"] for m in user_turns] == ["오늘 날씨 어때?"]
+        assert [without_reference(m["content"]) for m in user_turns] == [
+            "오늘 날씨 어때?"
+        ]
 
     @pytest.mark.asyncio
     async def test_should_keep_alternating_history_when_processing_second_input(self):
@@ -51,7 +55,7 @@ class TestUserTurnSentOnce:
         await orchestrator.process_user_input("첫 번째 질문")
         await orchestrator.process_user_input("두 번째 질문")
 
-        roles_and_contents = [(m["role"], m["content"]) for m in sent_requests[1]]
+        roles_and_contents = roles_and_questions(sent_requests[1])
         assert roles_and_contents == [
             ("user", "첫 번째 질문"),
             ("assistant", "응답입니다."),

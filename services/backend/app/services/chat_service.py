@@ -7,6 +7,8 @@ Phase 15.3: Sliding Window 컨텍스트 로드
 import asyncio
 from typing import Any, AsyncIterator, Awaitable, Callable, List, Optional, Tuple
 
+import shared.tools as tools
+
 from . import conversation
 from .llm_client import LANGUAGE_PROMPTS
 
@@ -116,9 +118,12 @@ class ChatService:
         extra = {}
         if summary:
             extra["summary"] = summary
+        # 세션 기록의 옛 시각 답을 따라 하지 않도록 지금 시각을 근거로 붙인다
+        # (이번 질문에 붙어 앞쪽 접두사 캐시는 그대로)
+        extra["reference"] = f"지금 시각: {tools.current_time_text()}"
         if rag_context:
-            extra["reference"] = (
-                "다음은 관련 문서 내용입니다. 이 정보를 참고하여 답변하고, "
+            extra["reference"] += (
+                "\n\n다음은 관련 문서 내용입니다. 이 정보를 참고하여 답변하고, "
                 f"출처 정보가 있으면 답변에 포함해주세요:\n\n{rag_context}"
             )
 

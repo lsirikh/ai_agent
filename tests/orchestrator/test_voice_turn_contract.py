@@ -14,6 +14,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from tests.orchestrator.message_helpers import without_reference
+
 
 def _orchestrator(sent: list, **kwargs):
     from services.orchestrator.app.orchestrator import Orchestrator
@@ -47,7 +49,9 @@ async def test_should_strip_wake_phrase_before_llm(heard: str) -> None:
 
     await orchestrator.handle_stt_result(heard)
 
-    user_turns = [m["content"] for m in sent[0] if m["role"] == "user"]
+    user_turns = [
+        without_reference(m["content"]) for m in sent[0] if m["role"] == "user"
+    ]
     assert user_turns == ["오늘 날씨 어때?"]
 
 

@@ -42,7 +42,10 @@ async def test_should_not_send_chinese_sentence_to_tts() -> None:
     assert any("재킷" in s for s in spoken)
 
 
-def test_should_tell_model_not_to_use_chinese() -> None:
+def test_should_ask_korean_and_tool_use_in_voice_prompt() -> None:
+    # 프롬프트에 '중국어 금지' 같은 형식 제한을 넣으면 도구 호출이 사라져(실측)
+    # 한자 문장은 위 테스트의 TTS 직전 필터로 막는다.
     from services.orchestrator.app.orchestrator import DEFAULT_VOICE_SYSTEM_PROMPT
 
-    assert "중국어" in DEFAULT_VOICE_SYSTEM_PROMPT
+    assert "한국어" in DEFAULT_VOICE_SYSTEM_PROMPT
+    assert "도구" in DEFAULT_VOICE_SYSTEM_PROMPT

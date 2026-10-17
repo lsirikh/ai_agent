@@ -14,6 +14,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from tests.orchestrator.message_helpers import roles_and_questions
+
 
 class FakeBackend:
     """활성 세션과 메시지를 메모리에 두는 BackendClient 대역."""
@@ -132,7 +134,7 @@ class TestSharedHistory:
 
         await orchestrator.process_user_input("내 이름 뭐야?")
 
-        assert [(m["role"], m["content"]) for m in sent[0]] == [
+        assert roles_and_questions(sent[0]) == [
             ("system", "음성 비서"),
             ("user", "내 이름은 민수야"),
             ("assistant", "반가워요, 민수님."),
