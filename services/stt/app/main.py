@@ -373,6 +373,11 @@ async def transcribe_audio(
         TranscribeResponse: 전사 결과
     """
     start_time = time.time()
+    # 요청에 언어가 없으면 설정 언어(기본 ko).
+    # 자동 감지는 짧은 "네." 를 일본어("ねえ。")로 받아 적었다(실측)
+    if language is None:
+        configured = _current_settings.get("language")
+        language = None if configured in (None, "", "auto") else configured
 
     try:
         # 오디오 파일 읽기
