@@ -23,6 +23,7 @@ from .audio_io import AudioIOManager
 from .audio_recorder import AudioRecorder
 from .barge_in import BargeInDetector, PlaybackState
 from .speech_barge_in import EchoDelay, PlaybackTracker, SpeechBargeIn
+from .speech_end import VoiceLevel
 from .pipeline_logger import get_logger, HEARTBEAT_INTERVAL
 from .stt_client import STTClient
 from .vad import VoiceActivityDetector
@@ -39,6 +40,7 @@ audio_recorder = AudioRecorder()
 # 말소리로 끼어들기: 앱으로 보낸 답 음성의 실제 재생 구간과, 에코보다 큰 목소리 감지
 playback_tracker = PlaybackTracker()
 speech_barge = SpeechBargeIn()
+voice_level = VoiceLevel()  # 이번 질문의 사용자 목소리 크기(배경 소리와 구분)
 echo_delay = EchoDelay()  # 스피커 소리가 마이크로 되돌아오는 시차(한 번 익히면 유지)
 # 끼어든 첫마디가 녹음에서 빠지지 않게 최근 마이크 소리를 들고 있는다(0.8초)
 _recent_chunks: deque = deque(maxlen=8)
@@ -165,6 +167,7 @@ async def reset_session() -> None:
     _is_recording = False
     _last_speech_time = None
     _question_wait_until = None
+    voice_level.reset()  # 다음 질문은 목소리 크기를 새로 익힌다
 
     await _logger.info(
         "session_reset",
@@ -651,7 +654,13 @@ async def handle_vad_result(
         )
 
     # Phase 36.3: 음성 감지 시 마지막 음성 시간 업데이트
-    if is_speech and _is_recording:
+    # 목소리보다 뚜렷이 작은 배경 소리(TV 등)는 VAD 가 말소리라 해도 무음으로 본다
+    rms = (
+        float(np.sqrt(np.mean(audio_chunk**2)))
+        if audio_chunk is not None and len(audio_chunk)
+        else 0.0
+    )
+    if _is_recording and voice_level.is_voice(rms, is_speech):
         _last_speech_time = time.time()
 
     # 녹음 중이면 청크 추가 (Phase 49: 무음 구간도 포함하여 전체 녹음)
