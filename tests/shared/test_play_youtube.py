@@ -129,3 +129,26 @@ def test_drawing_request_uses_draw_picture() -> None:
         assert required_tools(question, offered) == ["desktop__draw_picture"]
 
     assert required_tools("그림판 열어 줘", offered) == ["desktop__open_app"]
+
+
+@pytest.mark.asyncio
+async def test_list_argument_given_as_json_text_is_parsed() -> None:
+    # 실측: 로컬 LLM 이 shapes 를 '[{"type": ...}]' 글로 넘겨 검증 오류가 났다
+    manager = MCPManager([MCPServerConfig(
+        name="desktop", url="http://x/mcp", trusted=True,
+        allowed_tools=["draw_picture"],
+    )])
+    server = manager.servers[0]
+    server.client, server.stale = object(), False
+    server.tools = [SimpleNamespace(
+        name="draw_picture", description="그리기", annotations=None,
+        input_schema={"type": "object", "properties": {
+            "shapes": {"type": "array", "items": {"type": "object"}},
+            "title": {"type": "string"},
+        }},
+    )]
+    (tool,) = [t for t in await manager.tools() if t.name == "desktop__draw_picture"]
+
+    fixed = tool.normalize({"shapes": '[{"type": "circle"}]', "title": "[강아지]"})
+
+    assert fixed == {"shapes": [{"type": "circle"}], "title": "[강아지]"}

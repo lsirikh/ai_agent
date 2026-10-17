@@ -93,6 +93,25 @@ def result_text(result: Any) -> str:
     return "\n".join(parts)
 
 
+def parse_json_arguments(args: dict, schema: Optional[dict]) -> dict:
+    """
+    목록·객체여야 할 인자가 JSON 글로 오면 풀어 준다.
+    실측: 로컬 LLM 이 shapes 를 '[{"type": ...}]' 글로 넘겨 검증 오류가 났다.
+    """
+    properties = (schema or {}).get("properties") or {}
+    fixed = dict(args)
+    for key, value in args.items():
+        expected = (properties.get(key) or {}).get("type")
+        if expected in ("array", "object") and isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except ValueError:
+                continue
+            if isinstance(parsed, list if expected == "array" else dict):
+                fixed[key] = parsed
+    return fixed
+
+
 class _Server:
     """한 MCP 서버 연결. 연결은 전용 태스크 안에서 열고 닫는다(anyio 취소 범위 규칙)."""
 
@@ -306,14 +325,18 @@ class MCPManager:
                 )
             return result
 
-        normalize = None
+        fix = None
         if tool.name == "browser_navigate":
-            def normalize(a):
+            def fix(a):
                 return {**a, "url": browser_assist.normalize_url(a.get("url", ""))}
         elif tool.name == "browser_type":
-            normalize = self.browser.fix_type_target
+            fix = self.browser.fix_type_target
         elif tool.name == "browser_click":
-            normalize = self.browser.fix_click_target
+            fix = self.browser.fix_click_target
+
+        def normalize(a, fix=fix, schema=tool.input_schema):
+            a = parse_json_arguments(a, schema)
+            return fix(a) if fix else a
 
         return Tool(
             name=name,
