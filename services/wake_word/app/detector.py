@@ -5,10 +5,13 @@ Phase 3.1: OpenWakeWord 기반 Wake Word 감지
 Phase 17.1: Pipeline Logging 추가
 Phase 40: OpenWakeWord 실제 모델 통합
 """
+import asyncio
 import json
 import os
+import re
 import time
-from typing import Any, Dict, Optional
+from collections import deque
+from typing import Any, Awaitable, Callable, Dict, Optional
 
 import numpy as np
 
@@ -22,6 +25,11 @@ WAKE_WORD_MODELS = {
     "alexa": "alexa_v0.1",
     "hey_mycroft": "hey_mycroft_v0.1",
 }
+
+
+# STT 로 받아 적은 글에 호출어가 있는지 ('헤이 자비스!' · '헤이자비스' · 'Hey Jarvis')
+WAKE_TEXT = re.compile(r"[자쟈재저제]\s*[비삐]\s*[스즈쓰]|jarvis", re.IGNORECASE)
+VERIFY_SECONDS = 2.5  # STT 로 확인할 최근 소리 길이
 
 
 class WakeWordDetector:
@@ -89,6 +97,17 @@ class WakeWordDetector:
         self.barge_in_threshold = float(
             os.environ.get("WAKE_WORD_BARGE_IN_THRESHOLD", "0.15")
         )
+        # 애매한 점수(이 값 이상 · 기준 미만)는 STT 로 '자비스' 가 있는지 확인한다.
+        # 실측: 사용자의 호출어 22.5%·28.4% 를 놓쳤고, 부르지 않을 때도 15~30% 가 나왔다
+        self.verify_threshold = float(
+            os.environ.get("WAKE_WORD_VERIFY_THRESHOLD", "0.15")
+        )
+        self.verifier: Optional[Callable[[np.ndarray], Awaitable[str]]] = None
+        self.verify_delay = 0.5  # 호출어 끝까지 듣고 확인한다
+        self._recent: deque = deque()
+        self._recent_samples = 0
+        self._verify_task: Optional[asyncio.Task] = None
+        self._verify_quiet_until = 0.0
 
         # Pipeline logger
         self._logger = get_logger("wake_word")
@@ -195,6 +214,8 @@ class WakeWordDetector:
             - confidence: 신뢰도 점수 (감지 시)
             - cooldown: 쿨다운 상태 여부 (쿨다운 중일 때)
         """
+        self._remember(audio_chunk)
+
         # 쿨다운 체크
         if self._is_in_cooldown:
             current_time = time.time()
@@ -246,8 +267,58 @@ class WakeWordDetector:
         return {
             "detected": False,
             "wake_word": best_wake_word,
-            "confidence": best_confidence
+            "confidence": best_confidence,
+            "ambiguous": best_confidence >= self.verify_threshold,
         }
+
+    def _remember(self, audio_chunk: np.ndarray) -> None:
+        """STT 확인용으로 최근 VERIFY_SECONDS 초를 들고 있는다."""
+        self._recent.append(audio_chunk)
+        self._recent_samples += len(audio_chunk)
+        limit = int(VERIFY_SECONDS * self.sample_rate)
+        while self._recent and self._recent_samples - len(self._recent[0]) >= limit:
+            self._recent_samples -= len(self._recent.popleft())
+
+    def clear_buffer(self) -> None:
+        """모델·확인용 버퍼에 남은 소리를 비운다.
+
+        듣기 시작·끝에 부른다 — 남은 '헤이 자…' 로 다시 감지되지 않게.
+        """
+        if hasattr(self.model, "reset"):
+            self.model.reset()
+        self._recent.clear()
+        self._recent_samples = 0
+
+    def _start_verify(self, result: Dict[str, Any]) -> None:
+        busy = self._verify_task is not None and not self._verify_task.done()
+        if busy or self.verifier is None or time.time() < self._verify_quiet_until:
+            return
+        wake_word = result.get("wake_word") or self.wake_word
+        self._verify_task = asyncio.create_task(
+            self._verify(wake_word, result["confidence"])
+        )
+
+    async def _verify(self, wake_word: str, confidence: float) -> None:
+        """애매한 점수: 최근 소리를 받아 적어 '자비스' 가 있으면 감지로 본다."""
+        await asyncio.sleep(self.verify_delay)
+        audio = np.concatenate(list(self._recent)) if self._recent else np.zeros(0)
+        try:
+            text = await self.verifier(audio) or ""
+        except Exception as e:
+            text = ""
+            await self._logger.warning("wake_verify_failed", f"STT 확인 실패: {e}")
+        self._verify_quiet_until = time.time() + 1.5  # 같은 소리로 거듭 확인하지 않게
+        await self._logger.log(
+            event="wake_verify",
+            data={"message": f"{confidence:.1%} → STT '{text[:40]}'", "text": text},
+            level="debug",
+        )
+        if self._is_in_cooldown or not WAKE_TEXT.search(text):
+            return
+        self._last_detection_time = time.time()
+        self._is_in_cooldown = True
+        self.clear_buffer()
+        await self._publish_detection(wake_word, confidence)
 
     async def _publish_detection(self, wake_word: str, confidence: float) -> None:
         """감지를 로그로 남기고 Redis 로 알린다."""
@@ -343,6 +414,8 @@ class WakeWordDetector:
 
         if result["detected"]:
             await self._publish_detection(result["wake_word"], result["confidence"])
+        elif result.get("ambiguous"):
+            self._start_verify(result)
 
         return result
 

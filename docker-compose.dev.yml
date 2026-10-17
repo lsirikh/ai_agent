@@ -276,6 +276,8 @@ services:
       - MODEL_PATH=/models/openwakeword
       - THRESHOLD=0.3
       - WAKE_WORD_THRESHOLD=0.3
+      # 애매한 호출어 점수(15~30%)는 STT 로 '자비스' 가 있는지 확인한다
+      - STT_URL=http://stt:8001
       - LOG_LEVEL=INFO
       # Pipeline Logging (Phase 17.1)
       - BACKEND_URL=http://backend:8000

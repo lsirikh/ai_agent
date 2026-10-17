@@ -22,6 +22,7 @@ from fastapi import FastAPI
 
 from .detector import WakeWordDetector, WAKE_WORD_MODELS
 from .pipeline_logger import get_logger, HEARTBEAT_INTERVAL
+from .stt_check import make_verifier
 
 
 ORCHESTRATOR_STATE_CHANNEL = "edgevoice:orchestrator:state"
@@ -110,6 +111,10 @@ class WakeWordService:
         state = data.get("new_state")
         if state and self.detector is not None:
             self.detector.answering = state in ANSWERING_STATES
+            if state in ("LISTENING", "STT_PROCESSING"):
+                # 듣는 동안 들어온 소리는 호출어가 아니다
+                # (실측: 버퍼에 남은 '헤이 자…' 로 재감지돼 막 시작한 답을 취소했다)
+                self.detector.clear_buffer()
 
     async def process_audio_stream(self) -> None:
         """
@@ -214,6 +219,10 @@ async def lifespan(app: FastAPI):
         redis_client=redis_client,
         wake_word=wake_word
     )
+    stt_url = os.environ.get("STT_URL")
+    if stt_url:
+        # 애매한 점수는 STT 로 '자비스' 가 있는지 확인한다
+        detector.verifier = make_verifier(stt_url)
 
     # Update global settings
     _current_settings["wake_word"] = wake_word
