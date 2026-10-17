@@ -361,3 +361,29 @@ def test_wrap_untrusted_neutralizes_end_marker():
     assert wrapped.count(RESULT_END) == 1
     assert wrapped.endswith(RESULT_END)
     assert "따르지 말고" in wrapped
+
+
+@pytest.mark.asyncio
+async def test_short_tool_result_survives_when_budget_is_tight():
+    # 실측(2026-10-18): 그림판에 그린 뒤 결과('그림판에 … 그렸습니다')가 빈 글로 잘려
+    # LLM 이 '도구가 실행되지 않았습니다' 라고 답했다. 모양 목록(인자)이 길고 도구
+    # 스키마가 늘어 남은 예산이 0 이 됐다 → 짧은 결과는 늘 남긴다.
+    from shared.context_builder import prompt_tokens
+    from shared.tool_calling import schema_tokens
+
+    registry = registry_with([])
+    messages = [{"role": "user", "content": "그려 줘"}]
+    budget = prompt_tokens(messages) + schema_tokens(registry.schemas()) + 40
+    long_args = '{"shapes": "' + "원" * 400 + '"}'
+    llm = FakeLLM(
+        [chunk(tool_calls=[{"index": 0, "id": "c1", "type": "function",
+                            "function": {"name": "get_time", "arguments": long_args}}]),
+         chunk(finish="tool_calls")],
+        [chunk("그렸어요.")],
+    )
+
+    await collect(stream_with_tools(llm, messages, registry, input_budget=budget))
+
+    tool_message = llm.requests[1]["messages"][-1]
+    assert tool_message["role"] == "tool"
+    assert "2026년 10월 17일" in tool_message["content"]
