@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 
 import shared.tools as tools
 from shared.knowledge_filter import relevant_results
+from shared.korean_numbers import read_numbers
 from shared.tool_calling import wrap_untrusted
 from shared.tools import ToolRegistry, build_registry, load_tool_settings
 
@@ -137,6 +138,9 @@ def to_speech(
     if pending_number is not None:
         text = f"{_ordinal(pending_number)}, {text}"
     text = MARKDOWN_MARKS.sub("", text)
+    # 숫자를 한국어 읽기로('1시 20분' → '한 시 이십 분').
+    # '1:20' 이 쉼표가 되기 전에 한다
+    text = read_numbers(text)
     text = re.sub(r"\s*[;:]\s*", ", ", text)
     text = re.sub(r",\s*$", ".", re.sub(r"\s{2,}", " ", text)).strip()
     return text, next_number

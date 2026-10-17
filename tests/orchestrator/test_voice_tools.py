@@ -170,7 +170,8 @@ class TestWebSearchRoundTrip:
         await voice_turn(orchestrator, "서울 날씨 어때?")
 
         assert provider.queries == ["서울 날씨"]
-        assert spoken == ["검색해 볼게요.", "서울은 맑고 18도예요."]
+        # TTS 에는 숫자를 한국어 읽기로 보낸다(사용자 요청: '20도' → '이십 도')
+        assert spoken == ["검색해 볼게요.", "서울은 맑고 십팔 도예요."]
         second = requests[1]["messages"]
         assert second[-1]["role"] == "tool" and "서울 맑음" in second[-1]["content"]
         assert second[-2]["tool_calls"][0]["function"]["name"] == "web_search"
