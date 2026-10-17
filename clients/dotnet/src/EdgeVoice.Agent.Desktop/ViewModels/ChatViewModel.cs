@@ -1,10 +1,13 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using EdgeVoice.Agent.Core;
 using Prism.Commands;
@@ -31,6 +34,30 @@ public sealed class ChatMessage : BindableBase
     public string Text { get => _text; set => SetProperty(ref _text, value); }
 }
 
+/// <summary>채팅에 첨부한 이미지(전송 전). 서버로는 data URL 로 보낸다.</summary>
+public sealed class ChatAttachment
+{
+    public ChatAttachment(string name, string mime, byte[] bytes)
+    {
+        Name = name;
+        DataUrl = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+        try
+        {
+            Preview = new Bitmap(new MemoryStream(bytes));
+        }
+        catch (Exception)
+        {
+            Preview = null; // 미리보기만 못 그린다(형식은 머리 바이트로 확인했다)
+        }
+    }
+
+    public string Name { get; }
+
+    public string DataUrl { get; }
+
+    public Bitmap? Preview { get; }
+}
+
 /// <summary>
 /// 채팅: 음성과 같은 활성 세션을 쓴다. 시작하면 세션 히스토리를 불러오고 /api/chat/stream 을 상시 구독해
 /// 음성 턴을 말풍선으로 보여 준다. 텍스트 질문은 스트리밍 응답(RAG 출처 표시), 마이크 버튼은 상시 마이크 음소거 토글.
@@ -39,6 +66,14 @@ public sealed class ChatMessage : BindableBase
 public sealed class ChatViewModel : PageViewModel, IDisposable
 {
     private const int ReconnectDelayMs = 5000;
+
+    /// <summary>서버(shared/vision.py)와 같은 제한.</summary>
+    public const int MaxImages = 2;
+
+    public const int MaxImageBytes = 8 * 1024 * 1024;
+
+    /// <summary>글 없이 이미지만 보낼 때의 질문.</summary>
+    public const string ImageOnlyQuestion = "이 이미지를 보고 무엇인지 설명해 줘.";
 
     private readonly EdgeVoiceApiClient _api;
     private readonly AlwaysOnMicrophone _mic;
@@ -53,9 +88,16 @@ public sealed class ChatViewModel : PageViewModel, IDisposable
     {
         _api = api;
         _mic = mic;
-        SendCommand = new DelegateCommand(Send, () => !IsBusy && !string.IsNullOrWhiteSpace(Input))
+        SendCommand = new DelegateCommand(Send, () => !IsBusy && (!string.IsNullOrWhiteSpace(Input) || Attachments.Count > 0))
             .ObservesProperty(() => IsBusy)
             .ObservesProperty(() => Input);
+        Attachments.CollectionChanged += (_, _) =>
+        {
+            SendCommand.RaiseCanExecuteChanged();
+            RaisePropertyChanged(nameof(HasAttachments));
+        };
+        RemoveAttachmentCommand = new DelegateCommand<ChatAttachment>(a => Attachments.Remove(a));
+        AttachFileCommand = new DelegateCommand(AttachFromPicker);
         ToggleMuteCommand = new DelegateCommand(() => _mic.IsMuted = !_mic.IsMuted);
         NewConversationCommand = new DelegateCommand(NewConversation, () => !IsBusy).ObservesProperty(() => IsBusy);
 
@@ -67,6 +109,66 @@ public sealed class ChatViewModel : PageViewModel, IDisposable
     public ObservableCollection<ChatMessage> Messages { get; } = new();
 
     public DelegateCommand SendCommand { get; }
+
+    /// <summary>전송 전 첨부 이미지(최대 2장).</summary>
+    public ObservableCollection<ChatAttachment> Attachments { get; } = new();
+
+    public bool HasAttachments => Attachments.Count > 0;
+
+    public DelegateCommand<ChatAttachment> RemoveAttachmentCommand { get; }
+
+    /// <summary>📎: 창이 넣어 주는 파일 선택기(ImagePicker)로 이미지를 고른다.</summary>
+    public DelegateCommand AttachFileCommand { get; }
+
+    /// <summary>이미지 파일 선택기 (이름, 바이트). 창(MainWindow)이 StorageProvider 로 채운다.</summary>
+    public Func<Task<IReadOnlyList<(string Name, byte[] Bytes)>>>? ImagePicker { get; set; }
+
+    /// <summary>
+    /// 이미지 첨부(📎·붙여넣기). PNG·JPEG·GIF·BMP·WEBP 만, 8MB·2장까지. 첨부했으면 true.
+    /// </summary>
+    public bool AttachImage(byte[] bytes, string name)
+    {
+        var mime = ImageMime(bytes);
+        if (mime is null || bytes.Length > MaxImageBytes)
+        {
+            Status = $"이미지만 첨부할 수 있습니다(PNG·JPEG·GIF·BMP·WEBP, 8MB 이하): {name}";
+            return false;
+        }
+
+        if (Attachments.Count >= MaxImages)
+        {
+            Status = $"이미지는 {MaxImages}장까지 첨부할 수 있습니다.";
+            return false;
+        }
+
+        Attachments.Add(new ChatAttachment(name, mime, bytes));
+        Status = $"이미지 첨부: {name}";
+        return true;
+    }
+
+    /// <summary>머리 바이트로 이미지 형식을 알아낸다(확장자는 믿지 않는다).</summary>
+    public static string? ImageMime(byte[] b) => b switch
+    {
+        [0x89, 0x50, 0x4E, 0x47, ..] => "image/png",
+        [0xFF, 0xD8, 0xFF, ..] => "image/jpeg",
+        [0x47, 0x49, 0x46, 0x38, ..] => "image/gif",
+        [0x42, 0x4D, ..] => "image/bmp",
+        [0x52, 0x49, 0x46, 0x46, _, _, _, _, 0x57, 0x45, 0x42, 0x50, ..] => "image/webp",
+        _ => null,
+    };
+
+    private async void AttachFromPicker()
+    {
+        if (ImagePicker is null)
+        {
+            return;
+        }
+
+        foreach (var (name, bytes) in await ImagePicker())
+        {
+            AttachImage(bytes, name);
+        }
+    }
 
     public DelegateCommand ToggleMuteCommand { get; }
 
@@ -85,9 +187,17 @@ public sealed class ChatViewModel : PageViewModel, IDisposable
 
     private async void Send()
     {
+        var images = Attachments.Select(a => a.DataUrl).ToList();
         var text = Input.Trim();
+        if (text.Length == 0)
+        {
+            text = ImageOnlyQuestion;
+        }
+
         Input = "";
-        Messages.Add(new ChatMessage("User", text));
+        Attachments.Clear();
+        var user = new ChatMessage("User", images.Count > 0 ? $"{text}\n🖼 이미지 {images.Count}장" : text);
+        Messages.Add(user);
         var reply = new ChatMessage("AI", "");
         Messages.Add(reply);
         IsBusy = true;
@@ -96,7 +206,7 @@ public sealed class ChatViewModel : PageViewModel, IDisposable
         {
             // RAG 문서(rag_context)와 웹 검색·페이지(tool_result) 출처
             var sources = new JsonArray();
-            await foreach (var ev in _api.ChatAsync(text, _sessionId, UseRag))
+            await foreach (var ev in _api.ChatAsync(text, _sessionId, UseRag, images))
             {
                 var json = ev.Json;
                 _sessionId ??= json?["session_id"]?.ToString();
@@ -104,6 +214,10 @@ public sealed class ChatViewModel : PageViewModel, IDisposable
                 {
                     case "token":
                         reply.Text += json["content"]?.ToString();
+                        break;
+                    case "image_description":
+                        // LLM 이 첨부 화면을 어떻게 이해했는지(비전 모델 설명) — 저장된 기록과 같은 꼴
+                        user.Text = $"{text}\n\n{json["content"]}";
                         break;
                     case "rag_context":
                     case "tool_result":

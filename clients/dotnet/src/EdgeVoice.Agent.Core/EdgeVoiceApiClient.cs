@@ -72,11 +72,13 @@ public sealed class EdgeVoiceApiClient
         => StreamAsync(new HttpRequestMessage(HttpMethod.Get, path.TrimStart('/')), ct);
 
     /// <summary>POST /api/chat/message — 응답 토큰을 SSE 로 스트리밍한다.</summary>
-    public IAsyncEnumerable<ServerEvent> ChatAsync(string message, string? sessionId, bool useRag, CancellationToken ct = default)
+    /// <param name="images">첨부 이미지(data:image/…;base64) — 서버의 비전 모델이 설명해 근거로 붙인다</param>
+    public IAsyncEnumerable<ServerEvent> ChatAsync(
+        string message, string? sessionId, bool useRag, IReadOnlyList<string>? images = null, CancellationToken ct = default)
     {
         var req = new HttpRequestMessage(HttpMethod.Post, "api/chat/message")
         {
-            Content = JsonContent.Create(new { message, session_id = sessionId, use_rag = useRag }),
+            Content = JsonContent.Create(new { message, session_id = sessionId, use_rag = useRag, images = images ?? Array.Empty<string>() }),
         };
         return StreamAsync(req, ct);
     }
