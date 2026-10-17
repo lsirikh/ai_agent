@@ -655,12 +655,12 @@ async def handle_vad_result(
 
     # Phase 36.3: 음성 감지 시 마지막 음성 시간 업데이트
     # 목소리보다 뚜렷이 작은 배경 소리(TV 등)는 VAD 가 말소리라 해도 무음으로 본다
-    rms = (
-        float(np.sqrt(np.mean(audio_chunk**2)))
-        if audio_chunk is not None and len(audio_chunk)
-        else 0.0
-    )
-    if _is_recording and voice_level.is_voice(rms, is_speech):
+    if audio_chunk is None or not len(audio_chunk):
+        heard = is_speech  # 소리 크기를 모르면 VAD 만 본다
+    else:
+        rms = float(np.sqrt(np.mean(audio_chunk**2)))
+        heard = voice_level.is_voice(rms, is_speech)
+    if heard and _is_recording:
         _last_speech_time = time.time()
 
     # 녹음 중이면 청크 추가 (Phase 49: 무음 구간도 포함하여 전체 녹음)
