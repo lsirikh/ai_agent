@@ -136,33 +136,38 @@ async def test_live_mcp_tools_with_real_model():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "question", ["지금 몇 시야?", "오늘 무슨 요일이야?", "오늘 며칠이야?"]
-)
-async def test_live_voice_prompt_uses_get_time_for_natural_questions(question):
-    """실제 음성 시스템 프롬프트 + 자연스러운 질문에서도 도구로 시각을 확인한다.
+async def test_live_voice_turn_tells_current_time_despite_stale_history():
+    """옛 시각 답이 남은 세션 기록이 있어도 지금 시각을 정확히 말한다(음성 턴 그대로).
 
-    이전 음성 프롬프트("2~3문장", "목록 기호·마크다운 금지" 등)에서는 모델이 도구를
-    한 번도 부르지 않고 시각을 지어냈다(실측 0/15, 실제 08:52 에 "17시").
+    실측: 기록에 "현재 시간은 17시입니다." 가 있으면 모델이 도구 대신 그 답을 따라 했고
+    (0/3, 실제 08:52), 매 턴 시각 근거를 붙이자 정확했다(3/3).
     """
     from services.orchestrator.app.llm_client import LLMClient
     from services.orchestrator.app.orchestrator import DEFAULT_VOICE_SYSTEM_PROMPT
-    from shared.tools import build_registry
+    from shared.tools import _now, build_registry, current_time_text
 
     llm = LLMClient(base_url=VLLM, system_prompt=DEFAULT_VOICE_SYSTEM_PROMPT)
-    called = 0
+    stale = [
+        {"role": "user", "content": "지금 몇 시야?"},
+        {"role": "assistant", "content": "현재 시간은 17시입니다."},
+    ]
+    hour = str(_now().hour)
+    correct = 0
     for _ in range(3):
-        text, events = await _run(
+        text, _events = await _run(
             llm.generate_stream(
-                question,
-                history=[],
+                "지금 몇 시야?",
+                history=stale,
+                rag_context=[
+                    {"content": f"지금 시각: {current_time_text()}", "source": "시계"}
+                ],
                 tools=build_registry({"internet_enabled": False}),
             )
         )
-        called += "get_time" in [e["name"] for e in events if e["type"] == "tool_call"]
         assert "<tool_call>" not in text
+        correct += hour in text and "17시" not in text.replace(f"{hour}시", "")
 
-    assert called >= 2, f"{question}: 3회 중 {called}회만 도구 호출"
+    assert correct >= 2, f"3회 중 {correct}회만 지금 시각({hour}시)을 말함"
 
 
 @pytest.mark.asyncio
