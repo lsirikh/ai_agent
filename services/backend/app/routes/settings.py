@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Literal, Optional
 import httpx
 from fastapi import APIRouter, BackgroundTasks
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ..models.llm_models import LLM_MODELS, get_all_models
 from ..services.settings_env_sync import sync_settings_to_env
@@ -553,23 +553,47 @@ async def update_llm_context_settings(
 # ===== 도구 설정 (인터넷 검색 토글) =====
 
 class ToolSettings(BaseModel):
-    """LLM 도구 설정. 인터넷 도구(web_search·web_fetch)는 기본 꺼짐."""
+    """LLM 도구 설정. 인터넷 도구(web_search·web_fetch·날씨)는 기본 꺼짐."""
     internet_enabled: bool = False
     search_provider: Literal["searxng", "tavily", "naver"] = "searxng"
+    # 지역 및 시간: 시각 근거·get_time 의 시간대, 응답 언어, 날씨 기준 지역
+    timezone: str = "Asia/Seoul"
+    locale: str = "ko-KR"
+    location: str = "서울"
+    weather_enabled: bool = True
+    # 데스크톱 앱이 이 PC 의 시간대로 맞춘다(시작할 때·저장할 때)
+    follow_pc_timezone: bool = True
+
+    @field_validator("timezone")
+    @classmethod
+    def _known_timezone(cls, value: str) -> str:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as error:
+            raise ValueError(f"알 수 없는 시간대: {value}") from error
+        return value
 
 
 class ToolSettingsResponse(ToolSettings):
     # 지금 설정으로 LLM 에 노출되는 도구 (제공자 주소·키가 없으면 인터넷 도구는 빠진다)
     tools: List[str] = []
+    # 서버가 보는 지금 시각(설정 시간대) — 화면에서 PC 시각과 비교한다
+    server_time: str = ""
 
 
 async def _tool_settings_response() -> ToolSettingsResponse:
-    from shared.tools import build_registry, load_tool_settings
+    from shared.tools import build_registry, current_time_text, load_tool_settings
 
     from ..services.conversation import _get_redis
 
     current = await load_tool_settings(_get_redis())
-    return ToolSettingsResponse(**current, tools=build_registry(current).names())
+    return ToolSettingsResponse(
+        **current,
+        tools=build_registry(current).names(),
+        server_time=current_time_text(current.get("timezone")),
+    )
 
 
 @router.get("/tools", response_model=ToolSettingsResponse)

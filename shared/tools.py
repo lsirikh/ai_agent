@@ -15,7 +15,7 @@ import os
 import re
 import socket
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional
 from urllib.parse import urljoin, urlsplit
 
@@ -148,6 +148,12 @@ def default_tool_settings() -> dict:
         "internet_enabled": os.getenv("INTERNET_TOOLS_ENABLED", "false").lower()
         == "true",
         "search_provider": os.getenv("SEARCH_PROVIDER", "searxng"),
+        # 지역·시간 (설정 화면 "지역 및 시간", 데스크톱이 PC 시간대로 맞출 수 있다)
+        "timezone": os.getenv("TOOLS_TIMEZONE", DEFAULT_TIMEZONE),
+        "locale": os.getenv("TOOLS_LOCALE", "ko-KR"),
+        "location": os.getenv("DEFAULT_LOCATION", "서울"),
+        "weather_enabled": os.getenv("WEATHER_ENABLED", "true").lower() == "true",
+        "follow_pc_timezone": True,
     }
 
 
@@ -163,6 +169,12 @@ async def load_tool_settings(redis: Any) -> dict:
     except Exception:
         pass
     return settings
+
+
+async def current_time_reference(redis: Any) -> str:
+    """매 턴 이번 질문에 붙이는 시각 근거 — 설정한 시간대로."""
+    settings = await load_tool_settings(redis)
+    return f"지금 시각: {current_time_text(settings.get('timezone'))}"
 
 
 def tool_parser_for(model: Optional[str]) -> Optional[str]:
@@ -182,32 +194,46 @@ def tool_parser_for(model: Optional[str]) -> Optional[str]:
 # ===== get_time =====
 
 
-def _now() -> datetime:
+DEFAULT_TIMEZONE = "Asia/Seoul"
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _now(tz: Optional[str] = None) -> datetime:
+    """설정한 시간대(없으면 TOOLS_TIMEZONE, 기본 Asia/Seoul)의 지금 시각."""
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+    name = tz or os.getenv("TOOLS_TIMEZONE", DEFAULT_TIMEZONE)
     try:
-        return datetime.now(ZoneInfo(os.getenv("TOOLS_TIMEZONE", "Asia/Seoul")))
-    except ZoneInfoNotFoundError:
-        return datetime.now().astimezone()
+        return _utc_now().astimezone(ZoneInfo(name))
+    except (ZoneInfoNotFoundError, ValueError):
+        return _utc_now().astimezone(ZoneInfo(DEFAULT_TIMEZONE))
 
 
-def current_time_text() -> str:
+def current_time_text(tz: Optional[str] = None) -> str:
     """지금 날짜·요일·시각(한국어). get_time 도구와 매 턴 시각 근거가 같이 쓴다."""
-    now = _now()
+    now = _now(tz)
     weekday = "월화수목금토일"[now.weekday()]
     return now.strftime(f"%Y년 %m월 %d일 ({weekday}요일) %H시 %M분 %Z(UTC%z)")
 
 
-async def _get_time(_: dict) -> ToolResult:
-    return ToolResult(current_time_text())
+def get_time_tool(tz: Optional[str] = None) -> Tool:
+    async def run(_: dict) -> ToolResult:
+        return ToolResult(current_time_text(tz))
+
+    return Tool(
+        name="get_time",
+        description=(
+            "현재 날짜와 시각을 알려 준다. 오늘 날짜·요일·지금 시각 질문에 쓴다."
+        ),
+        parameters={"type": "object", "properties": {}},
+        run=run,
+    )
 
 
-GET_TIME = Tool(
-    name="get_time",
-    description="현재 날짜와 시각을 알려 준다. 오늘 날짜·요일·지금 시각 질문에 쓴다.",
-    parameters={"type": "object", "properties": {}},
-    run=_get_time,
-)
+GET_TIME = get_time_tool()
 
 
 # ===== 검색 제공자 =====
@@ -490,7 +516,17 @@ def build_registry(
     """
     이번 턴에 쓸 도구. 인터넷 도구는 설정이 켜져 있고 검색 제공자가 있을 때만 넣는다.
     """
-    registry = ToolRegistry([GET_TIME])
+    registry = ToolRegistry([get_time_tool(settings.get("timezone"))])
+    # 날씨는 인터넷(Open-Meteo)을 쓰므로 인터넷 도구가 켜져 있을 때만 (오프라인 원칙)
+    if settings.get("internet_enabled") and settings.get("weather_enabled"):
+        from .weather import weather_tool
+
+        registry.add(
+            weather_tool(
+                default_location=settings.get("location") or "서울",
+                timezone_name=settings.get("timezone") or DEFAULT_TIMEZONE,
+            )
+        )
     if settings.get("internet_enabled"):
         provider = search_provider or search_provider_from_env(
             settings.get("search_provider", "searxng")

@@ -121,7 +121,8 @@ class ChatService:
             extra["summary"] = summary
         # 세션 기록의 옛 시각 답을 따라 하지 않도록 지금 시각을 근거로 붙인다
         # (이번 질문에 붙어 앞쪽 접두사 캐시는 그대로)
-        extra["reference"] = f"지금 시각: {tools.current_time_text()}"
+        redis = conversation._get_redis()
+        extra["reference"] = await tools.current_time_reference(redis)
         if rag_context:
             extra["reference"] += (
                 "\n\n다음은 관련 문서 내용입니다. 이 정보를 참고하여 답변하고, "

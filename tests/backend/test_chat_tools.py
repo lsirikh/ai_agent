@@ -347,5 +347,6 @@ class TestToolSettingsApi:
 
         assert before["internet_enabled"] is False and before["tools"] == ["get_time"]
         assert after["internet_enabled"] is True
-        assert after["tools"] == ["get_time", "web_fetch", "web_search"]
+        # 인터넷을 켜면 날씨(get_weather, 기본 켜짐)도 함께 노출된다
+        assert after["tools"] == ["get_time", "get_weather", "web_fetch", "web_search"]
         assert client.get("/api/settings/tools").json()["internet_enabled"] is True

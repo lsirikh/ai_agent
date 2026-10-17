@@ -552,7 +552,10 @@ class Orchestrator:
             # 세션 기록의 옛 시각 답을 따라 하지 않도록 지금 시각을 근거로 붙인다
             # (질문 뒤쪽이라 접두사 캐시 유지)
             rag_context = (rag_context or []) + [
-                {"content": f"지금 시각: {tools.current_time_text()}", "source": "시계"}
+                {
+                    "content": await tools.current_time_reference(self.redis),
+                    "source": "시계",
+                }
             ]
             async for token in self.llm_client.generate_stream(
                 text, history=history, summary=summary, rag_context=rag_context,

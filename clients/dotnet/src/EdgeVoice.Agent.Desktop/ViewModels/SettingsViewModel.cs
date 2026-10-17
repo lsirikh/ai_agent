@@ -42,6 +42,12 @@ public sealed class SettingsViewModel : PageViewModel
     private int _contextWindowSize = 20;
     private bool _internetToolsEnabled;
     private string _availableTools = "";
+    private string _timeZone = "Asia/Seoul";
+    private string _location = "서울";
+    private bool _weatherEnabled = true;
+    private bool _followPcTimeZone = true;
+    private string _timeComparison = "";
+    private JsonNode? _toolSettings;
 
     public SettingsViewModel(EdgeVoiceApiClient api)
     {
@@ -88,6 +94,37 @@ public sealed class SettingsViewModel : PageViewModel
 
     /// <summary>지금 LLM 에 노출되는 도구 이름들 (검색 제공자가 없으면 인터넷 도구는 빠진다).</summary>
     public string AvailableTools { get => _availableTools; set => SetProperty(ref _availableTools, value); }
+
+    /// <summary>시각 근거·get_time 의 시간대(IANA, 예: Asia/Seoul).</summary>
+    public string TimeZone { get => _timeZone; set => SetProperty(ref _timeZone, value); }
+
+    /// <summary>날씨 기준 지역(예: 서울, 부산).</summary>
+    public string Location { get => _location; set => SetProperty(ref _location, value); }
+
+    /// <summary>날씨 도구(인터넷 도구가 켜져 있을 때만 동작).</summary>
+    public bool WeatherEnabled { get => _weatherEnabled; set => SetProperty(ref _weatherEnabled, value); }
+
+    /// <summary>켜면 이 PC 의 시간대를 서버 시간대로 쓴다(앱 시작 때도 맞춘다).</summary>
+    public bool FollowPcTimeZone
+    {
+        get => _followPcTimeZone;
+        set
+        {
+            if (SetProperty(ref _followPcTimeZone, value) && value)
+            {
+                TimeZone = PcTimeZone.IanaId();
+            }
+        }
+    }
+
+    /// <summary>서버 시각과 PC 시각을 나란히 보여 준다(어긋나면 바로 보이게).</summary>
+    public string TimeComparison { get => _timeComparison; set => SetProperty(ref _timeComparison, value); }
+
+    public IReadOnlyList<string> TimeZones { get; } = new[]
+    {
+        "Asia/Seoul", "Asia/Tokyo", "Asia/Shanghai", "Asia/Singapore", "UTC",
+        "Europe/London", "Europe/Berlin", "America/New_York", "America/Los_Angeles",
+    };
 
     // 콤보박스가 항목을 다시 그리는 동안 잠깐 보내는 null 은 무시한다 (선택값 유지)
     public string? TtsEngine
@@ -176,21 +213,47 @@ public sealed class SettingsViewModel : PageViewModel
             ContextWindowSize = c?["context_window_size"]?.GetValue<int>() ?? 20;
         });
 
-        await RunAsync(async () => ShowTools(await _api.GetAsync("api/settings/tools")));
+        await RunAsync(async () =>
+        {
+            ShowTools(await _api.GetAsync("api/settings/tools"));
+
+            // "PC 시간대 따르기" 면 시작할 때 서버 시간대를 이 PC 에 맞춘다
+            if (FollowPcTimeZone && TimeZone != PcTimeZone.IanaId())
+            {
+                TimeZone = PcTimeZone.IanaId();
+                ShowTools(await _api.SendAsync(HttpMethod.Put, "api/settings/tools", ToolSettingsBody()));
+            }
+        });
     }
 
     private void ShowTools(JsonNode? tools)
     {
+        _toolSettings = tools;
         InternetToolsEnabled = tools?["internet_enabled"]?.GetValue<bool>() ?? false;
+        TimeZone = tools?["timezone"]?.ToString() ?? TimeZone;
+        Location = tools?["location"]?.ToString() ?? Location;
+        WeatherEnabled = tools?["weather_enabled"]?.GetValue<bool>() ?? WeatherEnabled;
+        _followPcTimeZone = tools?["follow_pc_timezone"]?.GetValue<bool>() ?? true;
+        RaisePropertyChanged(nameof(FollowPcTimeZone));
+        TimeComparison = $"서버 시각: {tools?["server_time"]} · PC 시각: {PcTimeZone.NowText()} ({PcTimeZone.IanaId()})";
         AvailableTools = "사용 중인 도구: " + string.Join(", ",
             tools?["tools"]?.AsArray().Select(t => t?.ToString()) ?? Enumerable.Empty<string?>());
     }
 
     private async void SaveTools() => await RunAsync(async () =>
-        ShowTools(await _api.SendAsync(HttpMethod.Put, "api/settings/tools", new
-        {
-            internet_enabled = InternetToolsEnabled,
-        })), "도구 설정 저장 완료");
+        ShowTools(await _api.SendAsync(HttpMethod.Put, "api/settings/tools", ToolSettingsBody())),
+        "도구·지역 설정 저장 완료");
+
+    private object ToolSettingsBody() => new
+    {
+        internet_enabled = InternetToolsEnabled,
+        search_provider = _toolSettings?["search_provider"]?.ToString() ?? "searxng",
+        timezone = FollowPcTimeZone ? PcTimeZone.IanaId() : TimeZone,
+        locale = _toolSettings?["locale"]?.ToString() ?? "ko-KR",
+        location = Location,
+        weather_enabled = WeatherEnabled,
+        follow_pc_timezone = FollowPcTimeZone,
+    };
 
     private Task LoadOptions() => RunAsync(async () =>
     {

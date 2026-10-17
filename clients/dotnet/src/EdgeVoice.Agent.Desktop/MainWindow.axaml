@@ -405,6 +405,20 @@
                                     </Border>
                                     <Border Classes="card">
                                         <StackPanel>
+                                            <TextBlock Text="지역 및 시간" Classes="cardTitle" />
+                                            <CheckBox x:Name="FollowPcTimeZone" Content="PC 시간대 따르기 (시작할 때 자동으로 맞춤)" IsChecked="{Binding FollowPcTimeZone}" />
+                                            <TextBlock Text="시간대" Classes="label" />
+                                            <ComboBox x:Name="TimeZoneCombo" ItemsSource="{Binding TimeZones}" SelectedItem="{Binding TimeZone}"
+                                                      IsEnabled="{Binding !FollowPcTimeZone}" HorizontalAlignment="Stretch" />
+                                            <TextBlock Text="{Binding TimeComparison}" Classes="help" TextWrapping="Wrap" />
+                                            <TextBlock Text="날씨 기준 지역" Classes="label" />
+                                            <TextBox x:Name="LocationBox" Text="{Binding Location}" Watermark="예: 서울, 부산, 제주" />
+                                            <CheckBox Content="날씨 알려 주기 (인터넷 도구가 켜져 있을 때, Open-Meteo)" IsChecked="{Binding WeatherEnabled}" />
+                                            <Button Classes="accent" Content="지역·시간 설정 저장" Command="{Binding SaveToolsCommand}" HorizontalAlignment="Left" Margin="0,10,0,0" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Classes="card">
+                                        <StackPanel>
                                             <TextBlock Text="일반" Classes="cardTitle" />
                                             <TextBlock Text="언어" Classes="label" />
                                             <ComboBox x:Name="LanguageCombo" ItemsSource="{Binding Languages}" DisplayMemberBinding="{Binding Label}"
