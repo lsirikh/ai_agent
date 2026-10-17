@@ -88,7 +88,7 @@ class TestVoiceTurnSaved:
         orchestrator.publish_tts_request.assert_awaited()
 
     @pytest.mark.asyncio
-    async def test_should_not_save_answer_when_barge_in_cuts_it(self):
+    async def test_should_save_cut_answer_with_interrupted_mark(self):
         from services.orchestrator.app.llm_client import LLMClient
         from services.orchestrator.app.orchestrator import Orchestrator
 
@@ -118,7 +118,13 @@ class TestVoiceTurnSaved:
         await orchestrator.handle_barge_in()
         await turn
 
-        assert [m["role"] for m in backend.messages[backend.active]] == ["user"]
+        # 끊긴 답도 중단 표시와 함께 남긴다 — 없으면 다음 질문에 앞 답을 처음부터
+        # 다시 말했다(실측 2026-10-17). 끊긴 뒤의 '안 들림' 은 남지 않는다
+        saved = backend.messages[backend.active]
+        assert [m["role"] for m in saved] == ["user", "assistant"]
+        assert saved[1]["content"].startswith("첫 문장입니다.")
+        assert "끼어들어 중단" in saved[1]["content"]
+        assert "안 들림" not in saved[1]["content"]
 
 
 class TestSharedHistory:

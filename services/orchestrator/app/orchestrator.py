@@ -52,6 +52,8 @@ YES_PATTERN = re.compile(
 )
 NO_PATTERN = re.compile(r"^\s*(아니|아뇨|취소|하지\s*마|싫어|no\b)", re.IGNORECASE)
 CANCELLED_REPLY = "알겠어요, 실행하지 않을게요."
+# 말하는 도중 끼어들어 끊긴 답 뒤에 붙인다(대화 기록용)
+INTERRUPTED_NOTE = "…(사용자가 끼어들어 중단됨)"
 # 데스크톱 MCP 의 app_name → 말할 이름
 PROGRAM_NAMES = {
     "notepad": "메모장", "word": "워드", "excel": "엑셀",
@@ -247,6 +249,7 @@ class Orchestrator:
         # 이번 턴에 보냈지만 아직 완료되지 않은 TTS 문장 수
         self._pending_tts = 0
         self._tts_watchdog: Optional[asyncio.Task] = None
+        self._stt_task: Optional[asyncio.Task] = None
         # 앱 스피커에서 답 음성 재생이 끝날 시각(time.monotonic).
         # tts:complete 는 합성 완료라 재생은 그 뒤에도 이어진다
         self._playback_until = 0.0
@@ -728,6 +731,11 @@ class Orchestrator:
                 session_id=self._current_session_id,
                 data={"message": "LLM processing cancelled (barge-in)"}
             )
+            # 끊긴 답도 남긴다: 없으면 다음 질문에 앞 답을 처음부터 다시 말했다(실측)
+            if full_response.strip():
+                await self._save_voice_message(
+                    "assistant", f"{full_response.strip()} {INTERRUPTED_NOTE}"
+                )
             raise
         except Exception as e:
             await self._logger.log(
@@ -962,7 +970,9 @@ class Orchestrator:
         elif channel == self.CHANNELS["stt_result"]:
             text = data.get("text", "")
             if text:
-                await self.handle_stt_result(text)
+                # 답을 만드는 동안에도 이 루프가 호출어(끼어들기)를 받도록 따로 돌린다
+                # (실측: 기다리면 말하는 도중의 호출어를 답이 끝난 뒤에야 처리했다)
+                self._stt_task = asyncio.create_task(self.handle_stt_result(text))
 
         elif channel == self.CHANNELS["barge_in"]:
             await self.handle_barge_in()
