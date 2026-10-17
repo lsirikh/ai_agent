@@ -382,6 +382,38 @@ async def get_general_settings():
     return _general_settings
 
 
+def general_settings_by_service(settings: GeneralSettings) -> Dict[str, Dict[str, Any]]:
+    """일반 설정 중 각 서비스가 받는 값."""
+    return {
+        # TTS에 voice_speed 전파
+        "tts": {"speed": settings.voice_speed},
+        # Wake Word에 threshold 전파
+        "wake_word": {
+            "wake_word": settings.wake_word,
+            "threshold": settings.wake_word_threshold
+        },
+        # STT에 language 전파
+        "stt": {"language": settings.language},
+        # Phase 50: Orchestrator에 end_pause, listening_timeout 전파
+        "orchestrator": {
+            "end_pause_seconds": settings.end_pause_seconds,
+            "listening_timeout_seconds": settings.listening_timeout_seconds
+        },
+    }
+
+
+async def propagate_general_settings(settings: GeneralSettings) -> Dict[str, Any]:
+    """일반 설정을 각 서비스에 전파한다."""
+    propagation_results = {}
+    try:
+        propagator = get_settings_propagator()
+        for service, data in general_settings_by_service(settings).items():
+            propagation_results[service] = await propagator.propagate(service, data)
+    except Exception as e:
+        propagation_results["error"] = str(e)
+    return propagation_results
+
+
 @router.put("/general", response_model=GeneralSettingsResponse)
 async def update_general_settings(settings: GeneralSettings, background_tasks: BackgroundTasks):
     """
@@ -401,34 +433,7 @@ async def update_general_settings(settings: GeneralSettings, background_tasks: B
     background_tasks.add_task(save_settings_to_db, "general", settings_dict)
 
     # 서비스 전파
-    propagation_results = {}
-    try:
-        propagator = get_settings_propagator()
-
-        # TTS에 voice_speed 전파
-        tts_result = await propagator.propagate("tts", {"speed": settings.voice_speed})
-        propagation_results["tts"] = tts_result
-
-        # Wake Word에 threshold 전파
-        wake_word_result = await propagator.propagate("wake_word", {
-            "wake_word": settings.wake_word,
-            "threshold": settings.wake_word_threshold
-        })
-        propagation_results["wake_word"] = wake_word_result
-
-        # STT에 language 전파
-        stt_result = await propagator.propagate("stt", {"language": settings.language})
-        propagation_results["stt"] = stt_result
-
-        # Phase 50: Orchestrator에 end_pause, listening_timeout 전파
-        orchestrator_result = await propagator.propagate("orchestrator", {
-            "end_pause_seconds": settings.end_pause_seconds,
-            "listening_timeout_seconds": settings.listening_timeout_seconds
-        })
-        propagation_results["orchestrator"] = orchestrator_result
-
-    except Exception as e:
-        propagation_results["error"] = str(e)
+    propagation_results = await propagate_general_settings(settings)
 
     return GeneralSettingsResponse(
         wake_word=settings.wake_word,
