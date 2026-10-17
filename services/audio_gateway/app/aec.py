@@ -53,8 +53,9 @@ class AcousticEchoCanceller:
         self._playback_reference: Optional[np.ndarray] = None
         self._has_playback_reference = False
 
-        # 정규화 상수 (0으로 나누기 방지)
-        self._eps = 1e-8
+        # 정규화 상수: 거의 무음인 참조(x·x ≈ 0)로 나눠 계수가 폭주하지 않게
+        # 탭마다 크기 0.03(약 -30dB) 만큼 더한다 (1e-8 이던 때 마이크 0.1 → 49.8 실측)
+        self._eps = filter_length * 1e-3
 
     @property
     def has_playback_reference(self) -> bool:
