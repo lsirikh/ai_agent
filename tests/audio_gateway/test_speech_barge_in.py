@@ -139,3 +139,45 @@ def test_answer_audio_sent_to_the_app_is_tracked() -> None:
         main.unregister_playback_client(client)
 
     assert tracker.playing() and tracker.level() > 0.1
+
+
+def test_gateway_does_not_interrupt_on_its_own_echo() -> None:
+    # 실측(E2E): 에코만 들릴 때 예전 에너지 감지기(문턱 0.01)가 끼어들기를 냈다
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app import main
+    from app.barge_in import BargeInDetector, PlaybackState
+    from app.speech_barge_in import PlaybackTracker, SpeechBargeIn
+    from fastapi.testclient import TestClient
+
+    redis = AsyncMock()
+    vad = MagicMock()
+    vad.detect.side_effect = lambda _: {
+        "is_speech": True, "probability": 0.95, "speech_started": True
+    }
+    tracker = PlaybackTracker()
+    detector = BargeInDetector(vad=vad)
+    detector.set_playback_state(PlaybackState.PLAYING)
+    detector.redis_client = redis
+    # 재생 크기(약 0.35)의 0.3배로 되돌아온 에코
+    echo = (0.3 * 0.5 * 32767 * np.sin(np.arange(1600) / 3)).astype(np.int16)
+
+    with (
+        patch.object(main, "redis_client", redis),
+        patch.object(main, "vad", vad),
+        patch.object(main, "reset_session", AsyncMock()),
+        patch.object(main, "playback_tracker", tracker),
+        patch.object(main, "speech_barge", SpeechBargeIn()),
+        patch.object(main, "barge_in_detector", detector),
+        patch.object(main, "on_speech_started", AsyncMock()),
+    ):
+        tracker.add(_tone(5.0, 0.5))
+        with TestClient(main.app).websocket_connect("/ws/audio") as ws:
+            for _ in range(10):
+                ws.send_bytes(echo.tobytes())
+                ws.receive_json()
+    asyncio.run(main.reset_session())
+
+    channels = [c.args[0] for c in redis.publish.await_args_list]
+    assert "edgevoice:barge_in:detected" not in channels

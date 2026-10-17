@@ -80,6 +80,7 @@ class SpeechBargeIn:
         self.default_echo_ratio = default_echo_ratio
         self._ratios: deque = deque(maxlen=100)  # 끼어들지 않은 구간의 마이크/재생 비율
         self._streak = 0
+        self.last: dict = {}
 
     def echo_ratio(self) -> float:
         return (
@@ -89,6 +90,7 @@ class SpeechBargeIn:
     def feed(self, mic_rms: float, vad_prob: float, far_level: float) -> bool:
         """100ms 마이크 조각 하나. 끼어들기면 True."""
         expected_echo = self.echo_ratio() * far_level
+        self.last = {"mic": mic_rms, "far": far_level, "ratio": self.echo_ratio()}
         loud = mic_rms > max(self.min_level, self.margin * expected_echo)
         if not loud and far_level > 1e-3:
             # 에코만 들리는 구간으로 비율을 익힌다

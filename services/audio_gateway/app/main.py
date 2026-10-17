@@ -486,6 +486,7 @@ async def start_speech_barge_in() -> None:
     바로 듣기·녹음. 감지하느라 지나간 첫마디(최근 0.8초)도 녹음에 넣는다.
     """
     pre_roll = list(_recent_chunks)
+    decided = {k: round(v, 4) for k, v in speech_barge.last.items()}
     playback_tracker.clear()
     speech_barge.reset()
     if redis_client is not None:
@@ -496,7 +497,21 @@ async def start_speech_barge_in() -> None:
     await handle_wake_word_event({"type": "barge_in", "keyword": "speech"})
     for chunk in pre_roll:
         audio_recorder.add_chunk(chunk)
-    await _logger.info("speech_barge_in", "말소리 끼어들기 — 답을 멈추고 듣는다")
+    await _logger.info(
+        "speech_barge_in", f"말소리 끼어들기 — 답을 멈추고 듣는다 {decided}"
+    )
+
+
+async def check_speech_barge_in(processed: np.ndarray, vad_result: dict) -> None:
+    """답을 재생하는 동안 사용자가 말하면(에코보다 뚜렷이 크면) 끼어든다."""
+    _recent_chunks.append(processed)
+    if _listening_mode or not playback_tracker.playing():
+        return
+    rms = float(np.sqrt(np.mean(processed**2))) if len(processed) else 0.0
+    if speech_barge.feed(
+        rms, vad_result.get("probability", 0.0), playback_tracker.level()
+    ):
+        await start_speech_barge_in()
 
 
 async def publish_for_wake_word(processed: np.ndarray) -> None:
@@ -908,6 +923,7 @@ async def microphone_stream_task() -> None:
 
             # VAD 분석
             vad_result = vad.detect(processed)
+            await check_speech_barge_in(processed, vad_result)
 
             # VAD 결과 로깅 (10 청크마다, 약 1초)
             # Phase 43: log() 메서드 사용으로 event와 message 분리
@@ -933,8 +949,8 @@ async def microphone_stream_task() -> None:
 
             # 조건부 라우팅
             if barge_in_detector.playback_state == PlaybackState.PLAYING:
-                # TTS 재생 중: Barge-in 감지 활성화 + '헤이 자비스' 끼어들기
-                await barge_in_detector.detect_and_publish(processed)
+                # TTS 재생 중: '헤이 자비스' 끼어들기 (말소리 끼어들기는 위에서
+                # 에코와 견줘 판단한다 — 에너지 감지기는 에코에도 끊었다, 실측)
                 await publish_for_wake_word(processed)
             elif _listening_mode:
                 # Phase 49: Listening 모드: Wake Word로 전달하지 않음
@@ -1201,13 +1217,7 @@ async def websocket_audio_stream(websocket: WebSocket):
 
             processed = aec.process(audio)
             vad_result = vad.detect(processed)
-            _recent_chunks.append(processed)
-            if not _listening_mode and playback_tracker.playing():
-                rms = float(np.sqrt(np.mean(processed**2))) if len(processed) else 0.0
-                if speech_barge.feed(
-                    rms, vad_result.get("probability", 0.0), playback_tracker.level()
-                ):
-                    await start_speech_barge_in()
+            await check_speech_barge_in(processed, vad_result)
 
             # 10 청크마다 VAD 확률 로그 (콘솔 + Pipeline Log)
             if chunk_count % 10 == 0:
@@ -1253,9 +1263,8 @@ async def websocket_audio_stream(websocket: WebSocket):
 
             # Phase 35.2.1 & 35.3.1: TTS 재생 상태에 따른 조건부 라우팅
             if barge_in_detector.playback_state == PlaybackState.PLAYING:
-                # TTS 재생 중: Barge-in 감지 활성화
-                barge_in_result = await barge_in_detector.detect_and_publish(processed)
-                vad_result["barge_in"] = barge_in_result
+                # TTS 재생 중: 말소리 끼어들기는 위 speech_barge 가 에코와 견줘 판단한다
+                # (에너지 감지기는 자기 목소리 에코에도 끊었다 — 실측)
                 # 말하는 도중 '헤이 자비스' 로 끼어들 수 있게 웨이크워드로도 보낸다
                 # (에너지 끼어들기는 스피커 소리가 마이크로 다시 들어와 동작하지 않았다)
                 await publish_for_wake_word(processed)
