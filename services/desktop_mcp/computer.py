@@ -17,6 +17,7 @@ CANVAS_UNITS = 1000
 CIRCLE_POINTS = 48
 CANVAS_MARGIN = 0.04  # 캔버스 가장자리는 비워 둔다
 PAINT_TITLES = ("그림판", "Paint")
+PENCIL_ID = "PencilTool"  # 그림판 연필 도구의 UI Automation Id
 
 _VK_NAMES = {
     "ctrl": 0x11, "control": 0x11, "alt": 0x12, "shift": 0x10, "win": 0x5B,
@@ -222,6 +223,7 @@ class WindowsScreen:
         if hwnd is None:
             raise RuntimeError("그림판 창을 찾지 못했습니다")
         self.focus(hwnd)
+        self.select_pencil(hwnd)
         left, top, right, bottom = self.window_rect(hwnd)
         shot = np.asarray(
             ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
@@ -230,11 +232,41 @@ class WindowsScreen:
         if canvas is None:
             raise RuntimeError("그림판의 흰 캔버스를 찾지 못했습니다")
         cl, ct, cr, cb = canvas
+        # 도구를 고른 뒤 캔버스의 첫 누름은 초점만 옮기고 그려지지 않았다(실측: 첫 선이
+        # 통째로 빠졌다) → 구석을 오른쪽 버튼(보조색=흰색)으로 한 번 눌러 둔다
+        self.click(left + cl + 2, top + ct + 2, button="right")
+        time.sleep(0.2)
         mx, my = (cr - cl) * CANVAS_MARGIN, (cb - ct) * CANVAS_MARGIN
         return square_area((
             round(left + cl + mx), round(top + ct + my),
             round(left + cr - mx), round(top + cb - my),
         ))
+
+    def select_pencil(self, hwnd: int) -> None:
+        """
+        연필 도구를 고른다. 실측: 선택 도구(ctrl+a 뒤 등)가 골라져 있으면 끌어도
+        선택 영역만 생기고 아무것도 그려지지 않았는데 '그렸습니다' 라고 했다.
+        """
+        import comtypes.client
+
+        comtypes.client.GetModule("UIAutomationCore.dll")
+        from comtypes.gen import UIAutomationClient as uia_client
+
+        uia = comtypes.client.CreateObject(
+            uia_client.CUIAutomation, interface=uia_client.IUIAutomation
+        )
+        root = uia.ElementFromHandle(hwnd)
+        pencil = root.FindFirst(
+            uia_client.TreeScope_Descendants,
+            uia.CreatePropertyCondition(
+                uia_client.UIA_AutomationIdPropertyId, PENCIL_ID
+            ),
+        )
+        if not pencil:
+            raise RuntimeError("그림판의 연필 도구를 찾지 못했습니다")
+        rect = pencil.CurrentBoundingRectangle
+        self.click((rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2)
+        time.sleep(0.3)
 
     # ── 마우스 ──────────────────────────────────────────
     def _mouse(self, flag: int) -> None:
@@ -256,9 +288,15 @@ class WindowsScreen:
         """점들을 따라 왼쪽 버튼을 누른 채 긋는다(사이를 촘촘히 채운다)."""
         if not points:
             return
-        self.move(*points[0])
-        time.sleep(0.03)
+        # 캔버스에 커서가 들어온 것을 그림판이 알아챈 뒤 누른다
+        # (실측: 도구를 고른 직후 첫 선이 통째로 빠졌다)
+        x, y = points[0]
+        self.move(x + 1, y + 1)
+        time.sleep(0.1)
+        self.move(x, y)
+        time.sleep(0.05)
         self._mouse(0x0002)
+        time.sleep(0.03)
         # 너무 빨리 움직이면 그림판이 중간 점을 건너뛰어 원이 다각형이 됐다(실측)
         for (x0, y0), (x1, y1) in zip(points, points[1:]):
             steps = max(1, int(math.hypot(x1 - x0, y1 - y0) // 3))
