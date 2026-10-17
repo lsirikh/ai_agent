@@ -195,9 +195,11 @@ def weather_tool(
             place = await resolve_place(name, geocode=geocode)
             if place is None:
                 return ToolResult(f"'{name}' 지역을 찾지 못했습니다", is_error=True)
-            data = await fetch_forecast(
-                place["latitude"], place["longitude"], timezone_name
-            )
+            where = (place["latitude"], place["longitude"], timezone_name)
+            try:
+                data = await fetch_forecast(*where)
+            except Exception:  # Open-Meteo 가 가끔 503 — 한 번 더 부른다(실측)
+                data = await fetch_forecast(*where)
         except Exception as error:  # 네트워크 실패 등 — 지어내지 않는다
             return ToolResult(
                 f"날씨 정보를 가져오지 못했습니다: {error}", is_error=True

@@ -142,3 +142,25 @@ async def test_time_reference_uses_saved_timezone() -> None:
         text = await tools.current_time_reference(redis)
 
     assert text.startswith("지금 시각:") and "20시 52분" in text
+
+
+@pytest.mark.asyncio
+async def test_weather_tool_retries_once_after_temporary_failure() -> None:
+    # 실측: Open-Meteo 가 가끔 503 을 돌려줬다 — 바로 다시 부르면 됐다
+    from shared.weather import weather_tool
+
+    attempts = []
+
+    async def flaky(lat, lon, tz):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise OSError("503 Service Unavailable")
+        return {"current": {"temperature_2m": 23.0, "weather_code": 0}, "daily": {}}
+
+    tool = weather_tool(
+        default_location="서울", timezone_name="Asia/Seoul", fetch_forecast=flaky
+    )
+    result = await tool.run({"location": "부산"})
+
+    assert not result.is_error
+    assert "맑음" in result.content and len(attempts) == 2
