@@ -512,7 +512,9 @@ async def check_speech_barge_in(processed: np.ndarray, vad_result: dict) -> None
     rms = float(np.sqrt(np.mean(processed**2))) if len(processed) else 0.0
     far = echo_delay.far_level(playback_tracker)
     if echo_delay.observe(rms, playback_tracker):
-        speech_barge.forget_echo()
+        speech_barge.forget_echo(
+            echo_delay.recent_ratios(playback_tracker, speech_barge.min_far)
+        )
     if speech_barge.feed(
         rms, vad_result.get("probability", 0.0), far, learn=echo_delay.known
     ):

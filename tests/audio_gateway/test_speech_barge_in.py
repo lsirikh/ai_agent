@@ -227,7 +227,7 @@ def _play(seconds, delay, gain, voice_from=None, voice_rms=0.0, seed=0):
             mic = float(np.hypot(mic, voice_rms))
         far = echo_delay.far_level(tracker)
         if echo_delay.observe(mic, tracker):
-            barge.forget_echo()
+            barge.forget_echo(echo_delay.recent_ratios(tracker, barge.min_far))
         if barge.feed(mic, 0.9, far, learn=echo_delay.known):
             return round(clock.now - start, 1), echo_delay
     return None, echo_delay
@@ -279,3 +279,12 @@ def test_barge_in_status_shows_learned_echo() -> None:
 
     assert data["speech"]["echo_delay"] == 0.3
     assert "echo_ratio" in data["speech"]
+
+
+def test_user_voice_right_after_delay_is_learned_interrupts() -> None:
+    # E2E 실측: 시차를 익힌 직후 비율을 처음부터 다시 익히는 동안 사용자 말이
+    # 에코로 익혀져(0.28 → 0.73) 끝내 끊지 못했다
+    hit, echo_delay = _play(30.0, delay=0.3, gain=0.3, voice_from=3.3, voice_rms=0.25)
+
+    assert echo_delay.known
+    assert hit is not None and 3.3 < hit <= 3.9

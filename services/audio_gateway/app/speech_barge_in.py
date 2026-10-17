@@ -15,7 +15,7 @@
 import time
 from bisect import bisect_right
 from collections import deque
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 import numpy as np
 
@@ -132,6 +132,15 @@ class EchoDelay:
         self.delay = found
         return True
 
+    def recent_ratios(self, tracker: PlaybackTracker, min_far: float) -> list:
+        """최근 마이크 크기 / 익힌 시차만큼 앞선 재생 크기 (에코 비율을 바로 익히게)."""
+        if self.delay is None:
+            return []
+        pairs = [
+            (rms, tracker.around(t - self.delay, 0.15)) for t, rms in self._history
+        ]
+        return [rms / far for rms, far in pairs if far >= min_far]
+
     def _estimate(self, tracker: PlaybackTracker) -> Optional[float]:
         times = [t for t, _ in self._history]
         mic = np.array([rms for _, rms in self._history])
@@ -178,9 +187,14 @@ class SpeechBargeIn:
             return self.default_echo_ratio
         return float(np.percentile(list(self._ratios), 95))
 
-    def forget_echo(self) -> None:
-        """재생 크기를 보는 방법이 바뀌었다(에코 시차를 익힘) — 비율을 다시 익힌다."""
+    def forget_echo(self, ratios: Sequence[float] = ()) -> None:
+        """재생 크기를 보는 방법이 바뀌었다(에코 시차를 익힘) — 비율을 다시 익힌다.
+
+        ratios: 바뀐 방법으로 다시 잰 최근 비율. 처음부터 익히는 동안 사용자 말이
+        에코로 익혀져 끊지 못했다(실측).
+        """
         self._ratios.clear()
+        self._ratios.extend(ratios)
 
     def feed(
         self, mic_rms: float, vad_prob: float, far_level: float, learn: bool = True
