@@ -130,6 +130,26 @@ function failMessage(t, judged, excerpt, deadlineMs) {
     `Fix the implementation (not the checks), keep .harness/${t.id}/PLAN.md current, and end your turn when the checks pass. If it cannot be done, write .harness/${t.id}/BLOCKED.md with the reason.`].filter(Boolean).join('\n\n');
 }
 
+// 품질 검사(중복 + quality.js 규칙)를 한 메시지로 — 한 번만 보낸다. 규칙마다 어떻게 고치는지 붙인다.
+const QUALITY_HOW = {
+  unused: 'delete it if nothing needs it; if it is a public API meant for callers outside this repository, keep it and say so in DECISIONS.md',
+  debug: 'remove the debug output and breakpoints',
+  todo: 'finish the work now, or remove the note; if it is truly out of scope, record it in DECISIONS.md instead of leaving a TODO',
+  commented: 'delete the commented-out code (git keeps the history)',
+  suppress: 'fix the underlying warning or type error instead of suppressing it; if suppression is unavoidable, explain why in DECISIONS.md',
+  'test-weaken': 'do not skip, focus (.only) or neuter tests — make them pass',
+  hardcoded: 'use configuration, environment variables or paths relative to the repository; never commit secrets',
+  'format-only': 'revert whitespace/indentation-only changes in files the goal does not need',
+};
+function qualityMessage(t, dups, findings, deadlineMs) {
+  const L = ['The checks pass, but the harness quality rules found problems in the lines you added. Fix them (one pass — the harness will not send these back again):'];
+  if (dups.length) L.push('', '## duplicate code — reuse the existing code (call it, or move it into one shared function both places use) and delete the copy', ...dups.map(b => `- ${b.file}:${b.start}-${b.end} (${b.lines} lines) duplicates ${b.other}`));
+  const byRule = {};
+  for (const f of findings) (byRule[f.rule] = byRule[f.rule] || []).push(f);
+  for (const [rule, list] of Object.entries(byRule)) L.push('', `## ${rule} — ${QUALITY_HOW[rule] || 'fix it'}`, ...list.slice(0, 10).map(f => `- ${f.file}${f.line ? `:${f.line}` : ''} ${f.text}`));
+  L.push('', `If something here is intended, keep it and say why in .harness/${t.id}/DECISIONS.md. Then end your turn.`, remainingLine(t, deadlineMs));
+  return L.join('\n');
+}
 // 중복 코드(dup.js) — 테스트 · 린트는 통과했지만 새로 쓴 코드가 있는 코드를 블록째 베꼈다. 한 번만 돌려보낸다.
 function dupMessage(t, blocks, deadlineMs) {
   return ['The checks pass, but your change duplicates code that already exists (blocks of identical lines, whitespace ignored):',
@@ -194,4 +214,4 @@ function isQuestion(text) {
   return /할까요|하시겠|원하시면|괜찮을까요|진행할까|\bshould I\b|\bwould you like\b|\bshall I\b|\bdo you want\b|\blet me know if\b/i.test(s.slice(-400));
 }
 
-module.exports = { dupMessage, notesBlock, notesTurnMessage, lintLines, lintFailMessage, AUTONOMY, systemAppend, languageLine, attachmentLines, taskPrompt, failMessage, nudgeMessage, noChangeMessage, errorMessage, resumeMessage, unblockMessage, conflictMessage, isQuestion, remainingLine, money };
+module.exports = { qualityMessage, dupMessage, notesBlock, notesTurnMessage, lintLines, lintFailMessage, AUTONOMY, systemAppend, languageLine, attachmentLines, taskPrompt, failMessage, nudgeMessage, noChangeMessage, errorMessage, resumeMessage, unblockMessage, conflictMessage, isQuestion, remainingLine, money };

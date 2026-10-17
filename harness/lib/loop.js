@@ -97,6 +97,7 @@ async function go(o) {
     // 작업자 권한 — 기본 open(명령을 막지 않고 git 쓰기 · worktree 밖 삭제만 막는다). worker_permissions: strict 면 예전 허용 목록. [2026-10-16 사용자 지시]
     // 중복 코드 검사 — 기본 켬 · dup_check: off 로 끈다 · dup_min_lines 로 블록 크기(기본 8).
     task.checks.dup = { on: !/^(off|false|no)$/i.test(K.yamlString(here, 'dup_check') || K.yamlString(P.wt, 'dup_check') || ''), min_lines: K.yamlNumber(here, 'dup_min_lines') || K.yamlNumber(P.wt, 'dup_min_lines') || 8 };
+    task.checks.quality = { on: !/^(off|false|no)$/i.test(K.yamlString(here, 'quality') || K.yamlString(P.wt, 'quality') || ''), off: K.yamlList(here, 'quality_off') || K.yamlList(P.wt, 'quality_off') || [] };
     task.worker_permissions = /^strict$/i.test(K.yamlString(here, 'worker_permissions') || K.yamlString(P.wt, 'worker_permissions') || '') ? 'strict' : 'open';
     if (lintCmd) task.checks.lint = { command: lintCmd, files: /{files}/.test(lintCmd), baseline_ok: null, last: null };
     S.writeTask(root, task);
@@ -458,21 +459,29 @@ async function loop(c, kind) {
       }
       S.writeTask(root, task);
     }
-    // 중복 코드 — 새로 더한 코드가 있는 코드를 블록째 베꼈으면 위치를 알려 한 번 돌려보낸다(그 뒤로는 보고만 — 막지 않는다).
-    //   [2026-10-16 사용자 지시 · 영상 「쓰레기 코드 없애는 법」] 명령을 막는 대신 결과의 군더더기를 잡는다. 끄기: dup_check: off.
-    if (!task.checks.dup || task.checks.dup.on !== false) {
-      let found = [];
-      try { found = require('./dup').find(P.wt, task.base_commit, { minLines: task.checks.dup && task.checks.dup.min_lines }); } catch (e) { found = []; }
-      task.checks.dup = { ...(task.checks.dup || { on: true }), last: found, sent: !!(task.checks.dup && task.checks.dup.sent) };
-      S.log(root, task.id, { event: 'dup', blocks: found.length });
-      if (found.length && !task.checks.dup.sent) {
-        task.checks.dup.sent = true;
+    // 품질 검사(하네스 내장 린트) — 중복(dup.js) + 품질 규칙(quality.js: 쓰이지 않는 새 정의 · 디버그 흔적 · 남긴 할 일 · 주석 처리된 코드 ·
+    //   검사 억누르기 · 테스트 약화 · 하드코딩 · 형식만 바뀐 파일). 작업이 새로 더한 줄만 본다. 걸린 것을 모아 한 번만 돌려보내고,
+    //   그 뒤로는 보고만 한다(막지 않는다 — 멈춤을 늘리지 않게). [2026-10-16 · 10-17 사용자 지시] 끄기: dup_check: off · quality: off · quality_off: [...]
+    {
+      const dOn = !task.checks.dup || task.checks.dup.on !== false, qOn = !task.checks.quality || task.checks.quality.on !== false;
+      if (dOn || qOn) {
+        let dupF = [], qF = [];
+        if (dOn) { try { dupF = require('./dup').find(P.wt, task.base_commit, { minLines: task.checks.dup && task.checks.dup.min_lines }); } catch { dupF = []; } }
+        if (qOn) { try { qF = require('./quality').find(P.wt, task.base_commit, { off: (task.checks.quality && task.checks.quality.off) || [] }); } catch { qF = []; } }
+        const sent = !!((task.checks.dup && task.checks.dup.sent) || (task.checks.quality && task.checks.quality.sent));
+        task.checks.dup = { ...(task.checks.dup || { on: true }), last: dupF, sent };
+        task.checks.quality = { ...(task.checks.quality || { on: true, off: [] }), last: qF, sent };
+        const byRule = {}; for (const x of qF) byRule[x.rule] = (byRule[x.rule] || 0) + 1;
+        S.log(root, task.id, { event: 'quality', dup: dupF.length, rules: byRule });
+        if ((dupF.length || qF.length) && !sent) {
+          task.checks.dup.sent = true; task.checks.quality.sent = true;
+          S.writeTask(root, task);
+          log(`[harness] ${task.id} — quality: ${dupF.length} duplicate block(s) · ${qF.length} finding(s) — sending back once`);
+          message = Pr.qualityMessage(task, dupF, qF, deadline); kind = 'continue';
+          continue;
+        }
         S.writeTask(root, task);
-        log(`[harness] ${task.id} — duplicate code: ${found.length} block(s) — sending back once`);
-        message = Pr.dupMessage(task, found, deadline); kind = 'continue';
-        continue;
       }
-      S.writeTask(root, task);
     }
     // 끝나려던 참에 전달하지 않은 추가 지시가 있으면 그것을 반영하는 턴을 한 번 더(지시는 다음 턴 머리에 붙는다).
     if (pendingNotes(root, task.id).length) { message = Pr.notesTurnMessage(task, deadline); kind = 'continue'; continue; }
@@ -564,6 +573,12 @@ function readDecisions(file) {
   if (!out.length && text.trim()) out.push({ title: '(형식 없이 적힌 결정)', body: text.split(/\r?\n/).map(l => l.trim()).filter(l => l && !/^#/.test(l)).slice(0, 12) });
   return out.slice(0, 30);
 }
+// 품질 규칙 결과 → '디버그 흔적 2 · 남긴 할 일 1'
+function qualitySummary(list, lang) {
+  const Q = require('./quality'), n = {};
+  for (const x of list) n[x.rule] = (n[x.rule] || 0) + 1;
+  return Object.entries(n).map(([r, c]) => `${(lang === 'ko' ? Q.LABEL_KO : Q.LABEL_EN)[r] || r} ${c}`).join(' · ');
+}
 function decisionLines(task, ko) {
   const d = task.decisions;
   if (!Array.isArray(d)) return [];   // 이 기능 전의 작업
@@ -638,6 +653,8 @@ function summaryKo(task) {
   if ((task.secrets_excluded || []).length) warn.push('비밀 파일은 커밋하지 않았다(worktree 에만 있다)');
   if (ch.baseline_warning) warn.push('작업 전 검사가 요약 없이 실패했다 — worktree 환경 문제일 수 있다');
   const dupLeft = ch.dup && ch.dup.on !== false ? (ch.dup.last || []) : [];
+  const qLeft = ch.quality && ch.quality.on !== false ? (ch.quality.last || []) : [];
+  if (qLeft.length) warn.push(`품질 규칙에 남은 것(한 번 돌려보냈다): ${qualitySummary(qLeft, 'ko')}`);
   if (dupLeft.length) warn.push(`새 코드에 중복 ${dupLeft.length}곳이 남았다(한 번 돌려보냈다) — ${dupLeft.slice(0, 3).map(b => `${b.file}:${b.start}-${b.end} ↔ ${b.other}`).join(' · ')}`);
   if ((ch.dropped || []).length) warn.push(`작업 전부터 시간 초과라 판정에서 뺐다(${ch.dropped.map(d => d.command).join(' ; ')}) — 이 검사는 이 작업을 판정하지 않았다`);
   if ((ch.flaky || []).length) warn.push(`불안정한 검사가 있다(${ch.flaky.length}개) — 다시 돌리면 통과한다`);
@@ -704,6 +721,7 @@ function reportKo(task, P) {
   }
   if ((ch.dropped || []).length) L.push(`판정에서 뺀 검사(저장소에서 찾은 것 · 작업 전부터 시간 초과 — 새 worktree 의 환경 문제일 수 있다): ${ch.dropped.map(d => d.command).join(' ; ')}`);
   if (ch.lint) L.push(`린트: ${lintState(ch.lint, 'ko')}`);
+  if (ch.quality && ch.quality.on !== false) L.push(`품질 검사(하네스 내장 린트): ${(ch.quality.last || []).length ? qualitySummary(ch.quality.last, 'ko') + ' — ' + ch.quality.last.slice(0, 8).map(x => `${x.file}${x.line ? ':' + x.line : ''} ${x.text}`).join(' · ') : '걸린 것 없음'}${ch.quality.sent ? ' (작업자에게 한 번 돌려보냈다)' : ''}`);
   if (ch.dup && ch.dup.on !== false) L.push(`중복 코드: ${(ch.dup.last || []).length ? (ch.dup.last || []).map(b => `${b.file}:${b.start}-${b.end}(${b.lines}줄) ↔ ${b.other}`).join(' · ') : '없음'}${ch.dup.sent ? ' (작업자에게 한 번 돌려보냈다)' : ''}`);
   L.push(`바뀐 파일: ${task.files_changed == null ? '?' : `${task.files_changed}개`}`);
   if (task.diff) L.push(`변경 규모: +${task.diff.insertions} / -${task.diff.deletions} 줄 · 새 파일 ${task.diff.added_files}개`);
@@ -765,6 +783,7 @@ function report(task, P) {
   }
   if ((ch.dropped || []).length) lines.push(`checks dropped (auto-detected, timed out before the task — likely the new worktree's environment): ${ch.dropped.map(d => d.command).join(' ; ')}`);
   if (ch.lint) lines.push(`lint: ${lintState(ch.lint, 'en')}`);
+  if (ch.quality && ch.quality.on !== false) lines.push(`quality checks (built-in lint): ${(ch.quality.last || []).length ? qualitySummary(ch.quality.last, 'en') + ' — ' + ch.quality.last.slice(0, 8).map(x => `${x.file}${x.line ? ':' + x.line : ''} ${x.text}`).join(' · ') : 'nothing found'}${ch.quality.sent ? ' (sent back to the worker once)' : ''}`);
   if (ch.dup && ch.dup.on !== false) lines.push(`duplicate code: ${(ch.dup.last || []).length ? (ch.dup.last || []).map(b => `${b.file}:${b.start}-${b.end} (${b.lines} lines) duplicates ${b.other}`).join(' · ') : 'none'}${ch.dup.sent ? ' (sent back to the worker once)' : ''}`);
   lines.push(`changed files: ${task.files_changed == null ? '?' : task.files_changed}`);
   if (task.diff) lines.push(`diff: +${task.diff.insertions} -${task.diff.deletions} lines · ${task.diff.added_files} new files`);

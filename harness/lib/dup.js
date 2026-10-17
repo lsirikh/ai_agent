@@ -37,6 +37,19 @@ function addedLines(wt, base, file) {
   for (const m of r.out.matchAll(/^@@ -\S+ \+(\d+)(?:,(\d+))? @@/gm)) { const a = Number(m[1]), n = m[2] == null ? 1 : Number(m[2]); for (let i = 0; i < n; i++) set.add(a + i); }
   return set;
 }
+// 기준 대비 전체 변경을 git diff 한 번으로 → Map(파일 → 더한 줄 번호 Set). [2026-10-17 실측] 파일마다 git 을 띄우니 239개 파일에서 수십 초.
+function addedMap(wt, base) {
+  const r = G.git(wt, ['-c', 'core.quotepath=off', 'diff', '-U0', '--no-color', '--no-ext-diff', '--no-renames', base], { allowFail: true });
+  const map = new Map();
+  if (!r.ok) return map;
+  let cur = null;
+  for (const l of r.out.split(/\r?\n/)) {
+    if (l.startsWith('+++ ')) { const p = l.slice(4).replace(/^"|"$/g, ''); cur = p === '/dev/null' ? null : p.replace(/^b\//, ''); if (cur && !map.has(cur)) map.set(cur, new Set()); continue; }
+    const m = cur && /^@@ -\S+ \+(\d+)(?:,(\d+))? @@/.exec(l);
+    if (m) { const a = Number(m[1]), n = m[2] == null ? 1 : Number(m[2]); for (let i = 0; i < n; i++) map.get(cur).add(a + i); }
+  }
+  return map;
+}
 const eligible = f => CODE_EXT.test(f) && !SKIP.test(f) && !TEST.test(f);
 
 // → [{ file, start, end, lines, other: 'path:start-end' }] (최대 10)
@@ -60,10 +73,11 @@ function find(wt, base, o) {
       index.get(k).push({ file: f, start: L[i].n, end: L[i + K - 1].n });
     }
   }
+  const amap = addedMap(wt, base);
   const out = [];
   for (const f of changed) {
     const L = cache.get(f) || linesOf(path.join(wt, f));
-    const added = untracked.has(f) ? new Set(L.map(x => x.n)) : addedLines(wt, base, f);
+    const added = untracked.has(f) ? new Set(L.map(x => x.n)) : (amap.get(f) || new Set());
     let cur = null;
     for (let i = 0; i + K <= L.length; i++) {
       const win = L.slice(i, i + K);
@@ -83,4 +97,4 @@ function find(wt, base, o) {
   return uniq.slice(0, 10);
 }
 
-module.exports = { find, meaningful };
+module.exports = { find, meaningful, addedLines, addedMap, CODE_EXT, SKIP, TEST };
