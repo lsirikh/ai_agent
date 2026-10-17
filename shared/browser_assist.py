@@ -89,6 +89,22 @@ def compact_snapshot(content: str) -> str:
     return "\n".join(header + elements)
 
 
+# 유튜브 검색 결과의 동영상 링크: 이름이 길이('5분 58초' · '1시간 2분' · '43초')로
+# 끝난다.
+# 바로 뒤의 '채널로 이동' · 채널 이름 링크는 길이가 없다
+_LINK = re.compile(r"""^\s*-\s+'?link\s+"([^"]*)".*?\[ref=([a-z0-9]*e\d+)\]""")
+_DURATION = re.compile(r"(\d+시간|\d+분|\d+초)$")
+
+
+def first_video(snapshot: str):
+    """유튜브 검색 결과에서 첫 동영상 (ref, 제목). 없으면 (None, None)."""
+    for line in snapshot.splitlines():
+        match = _LINK.match(line)
+        if match and _DURATION.search(match.group(1)):
+            return match.group(2), match.group(1)
+    return None, None
+
+
 _REF_TARGET = re.compile(r"^\[?\s*ref\s*=\s*([a-z0-9]*e\d+)\s*\]?$")
 
 

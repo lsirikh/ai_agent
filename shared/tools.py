@@ -192,6 +192,8 @@ _BROWSER_ACTION = re.compile(
 )
 # 그중 검색 도구로는 대신할 수 없는 일(열기·접속·누르기)
 _BROWSER_OPEN = re.compile(r"열|켜|들어가|접속|이동|띄워|클릭|눌러|틀어")
+_YOUTUBE = re.compile(r"유튜브|youtube", re.IGNORECASE)
+_PLAY = re.compile(r"틀어|재생|플레이|들려|틀\s*수")
 # MCP 데스크톱(서버__open_app · 서버__write_document)
 _PROGRAM = re.compile(r"메모장|노트패드|워드|엑셀|파워\s*포인트|피피티|계산기|그림판")
 _WRITE = re.compile(r"저장|작성|써|적어|만들어|기록")
@@ -232,6 +234,8 @@ _REQUIRED_TOOLS = [
     ("list_test_files", _FILE_LIST.search),
     ("write_document", lambda q: _PROGRAM.search(q) and _WRITE.search(q)),
     ("open_app", lambda q: _PROGRAM.search(q) and _ACTION.search(q)),
+    # 유튜브에서 틀기는 전용 도구로(실측: 동영상 대신 '채널로 이동' 을 눌렀다)
+    ("play_youtube", lambda q: _YOUTUBE.search(q) and _PLAY.search(q)),
     # MCP 브라우저(서버__browser_navigate). 크롬·사이트를 직접 말했으면 날씨보다 먼저
     # (실측: '네이버 검색창에 오늘 날씨를 입력해' 가 날씨 도구로 갔다)
     ("browser_navigate", lambda q: _BROWSER.search(q) and _BROWSER_ACTION.search(q)),
