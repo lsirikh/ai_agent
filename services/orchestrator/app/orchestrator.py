@@ -52,6 +52,8 @@ YES_PATTERN = re.compile(
 )
 NO_PATTERN = re.compile(r"^\s*(아니|아뇨|취소|하지\s*마|싫어|no\b)", re.IGNORECASE)
 CANCELLED_REPLY = "알겠어요, 실행하지 않을게요."
+# TTS 음성: float32(4바이트) · 24kHz mono
+TTS_BYTES_PER_SECOND = 4 * 24000
 
 
 def confirm_question(name: str, arguments: Any) -> str:
@@ -170,6 +172,9 @@ class Orchestrator:
 
     # 마지막 TTS 요청 후 완료 신호를 기다리는 최대 시간
     TTS_COMPLETE_TIMEOUT_SECONDS = 60.0
+    # "실행할까요?" 를 다 말한 뒤 대답을 듣기 전에 잠깐 쉰다
+    # (스피커 잔향이 녹음되지 않게)
+    FOLLOW_UP_LISTEN_DELAY_SECONDS = 0.3
 
     def __init__(
         self,
@@ -228,6 +233,9 @@ class Orchestrator:
         # 이번 턴에 보냈지만 아직 완료되지 않은 TTS 문장 수
         self._pending_tts = 0
         self._tts_watchdog: Optional[asyncio.Task] = None
+        # 앱 스피커에서 답 음성 재생이 끝날 시각(time.monotonic).
+        # tts:complete 는 합성 완료라 재생은 그 뒤에도 이어진다
+        self._playback_until = 0.0
 
         # 문장 끝에 떨어진 목록 번호(다음 문장 앞에 '첫째,' 처럼 붙인다)
         self._pending_list_number: Optional[int] = None
@@ -429,13 +437,18 @@ class Orchestrator:
         """
         return self.state_machine.handle_timeout()
 
-    async def handle_speaking_complete(self) -> bool:
+    async def handle_speaking_complete(self, audio_seconds: float = 0.0) -> bool:
         """
         TTS 출력 완료 처리
+
+        Args:
+            audio_seconds: 이 문장 음성의 길이(앱이 순서대로 재생한다)
 
         Returns:
             처리 성공 여부
         """
+        now = time.monotonic()
+        self._playback_until = max(self._playback_until, now) + audio_seconds
         # TTS 는 문장마다 완료를 알린다 → 마지막 문장이 끝날 때 READY
         if self.state_machine.current_state in (State.SPEAKING, State.TTS_PROCESSING):
             self._pending_tts = max(0, self._pending_tts - 1)
@@ -451,8 +464,37 @@ class Orchestrator:
         if self.state_machine.current_state in (
             State.STT_PROCESSING, State.LLM_PROCESSING, State.TTS_PROCESSING, State.SPEAKING
         ):
-            return self.state_machine.transition_to(State.READY)
+            finished = self.state_machine.transition_to(State.READY)
+            if finished and self._pending_confirm:
+                asyncio.create_task(self._listen_for_answer())
+            return finished
         return False
+
+    async def _listen_for_answer(self) -> None:
+        """
+        "네 또는 아니오" 를 물었으면 호출어 없이 바로 듣는다.
+        웨이크워드 이벤트를 내면 게이트웨이 녹음·이 상태(LISTENING)·
+        앱 듣기 표시가 함께 켜진다.
+        """
+        playing = max(0.0, self._playback_until - time.monotonic())
+        await asyncio.sleep(playing + self.FOLLOW_UP_LISTEN_DELAY_SECONDS)
+        if not self._pending_confirm:
+            return
+        event = {
+            "type": "wake_word_detected",
+            "wake_word": "follow_up",
+            "confidence": 1.0,
+            "timestamp": time.time(),
+        }
+        try:
+            await self.redis.publish(self.CHANNELS["wake_word"], json.dumps(event))
+        except Exception as e:
+            await self._logger.log(
+                event="follow_up_listen_failed",
+                session_id=self._current_session_id,
+                data={"message": f"Follow-up listen failed: {e}", "error": str(e)},
+                level="warning",
+            )
 
     def _start_tts_watchdog(self) -> None:
         """TTS 완료 신호가 끝내 오지 않아도 비서가 멈추지 않도록 READY 로 되돌린다."""
@@ -900,7 +942,9 @@ class Orchestrator:
             await self.handle_barge_in()
 
         elif channel == self.CHANNELS["tts_complete"]:
-            await self.handle_speaking_complete()
+            # audio_length: float32 24kHz 바이트 수
+            seconds = (data.get("audio_length") or 0) / TTS_BYTES_PER_SECOND
+            await self.handle_speaking_complete(seconds)
 
     async def stop(self) -> None:
         """오케스트레이터 중지"""

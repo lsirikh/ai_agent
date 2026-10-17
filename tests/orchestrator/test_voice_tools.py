@@ -133,6 +133,20 @@ def make(responses, model=MODEL, registry=None):
     return orchestrator, backend, requests, spoken
 
 
+def count_pending_tts(orchestrator):
+    """실제 publish_tts_request 처럼 끝나지 않은 TTS 를 센다.
+
+    (tts:complete 를 받아야 턴이 끝나게)
+    """
+    speak = orchestrator.publish_tts_request
+
+    async def counting(text):
+        orchestrator._pending_tts += 1
+        await speak(text)
+
+    orchestrator.publish_tts_request = counting
+
+
 async def voice_turn(orchestrator, text):
     await orchestrator.handle_wake_word()
     await orchestrator.handle_stt_result(text)
@@ -376,6 +390,67 @@ class TestVoiceConfirmation:
         assert spoken[-1] == "재시작했어요."
         assert "stt 재시작 완료" in requests[1]["messages"][-1]["content"]
         assert requests[1]["tools"] is None
+
+    @pytest.mark.asyncio
+    async def test_should_listen_for_answer_without_wake_word(self):
+        # 사용자 요청: "네 또는 아니오" 를 물었으면 호출어 없이 바로 대답을 들어야 한다
+        # (듣기 표시도 켜져야 한다 — 웨이크워드 이벤트가 게이트웨이·앱 표시를 함께 켠다)
+        orchestrator, _, _, spoken = make(
+            [[call_chunk(("ironwall__restart", '{"service": "stt"}'))]],
+            registry=self._registry([]),
+        )
+        orchestrator.FOLLOW_UP_LISTEN_DELAY_SECONDS = 0
+        count_pending_tts(orchestrator)
+
+        await voice_turn(orchestrator, "STT 재시작해 줘")
+        await orchestrator.handle_speaking_complete()  # 질문을 다 말함
+        await asyncio.sleep(0.05)
+
+        published = [
+            (c.args[0], json.loads(c.args[1]))
+            for c in orchestrator.redis.publish.await_args_list
+            if c.args[0] == orchestrator.CHANNELS["wake_word"]
+        ]
+        assert published and published[-1][1]["type"] == "wake_word_detected"
+
+    @pytest.mark.asyncio
+    async def test_should_wait_until_question_finishes_playing(self):
+        # tts:complete 는 합성 완료라 재생은 그 뒤에도 이어진다. 바로 들으면
+        # 스피커의 "네 또는 아니오로…" 가 녹음돼 '네' 로 스스로 승인할 수 있다
+        orchestrator, _, _, _ = make(
+            [[call_chunk(("ironwall__restart", '{"service": "stt"}'))]],
+            registry=self._registry([]),
+        )
+        orchestrator.FOLLOW_UP_LISTEN_DELAY_SECONDS = 0
+        count_pending_tts(orchestrator)
+
+        def listened():
+            return any(
+                c.args[0] == orchestrator.CHANNELS["wake_word"]
+                for c in orchestrator.redis.publish.await_args_list
+            )
+
+        await voice_turn(orchestrator, "STT 재시작해 줘")
+        # 0.3초 길이의 음성 (float32 24kHz)
+        await orchestrator._handle_message(
+            orchestrator.CHANNELS["tts_complete"], {"audio_length": 4 * 24000 * 0.3}
+        )
+        await asyncio.sleep(0.1)
+        assert not listened()
+        await asyncio.sleep(0.4)
+        assert listened()
+
+    @pytest.mark.asyncio
+    async def test_should_not_listen_again_after_normal_answer(self):
+        orchestrator, _, _, _ = make([[text_chunk("안녕하세요.")]])
+        orchestrator.FOLLOW_UP_LISTEN_DELAY_SECONDS = 0
+
+        await voice_turn(orchestrator, "안녕")
+        await orchestrator.handle_speaking_complete()
+        await asyncio.sleep(0.05)
+
+        channels = [c.args[0] for c in orchestrator.redis.publish.await_args_list]
+        assert orchestrator.CHANNELS["wake_word"] not in channels
 
     @pytest.mark.asyncio
     async def test_should_not_run_after_no(self):
