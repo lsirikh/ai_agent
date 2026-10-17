@@ -307,3 +307,23 @@ class TestReconnectOnListing:
             await mcp.close()
 
         assert len(attempts) == 1
+
+
+@pytest.mark.asyncio
+async def test_listing_reconnects_when_session_is_terminated(manager):
+    # 실측: 서버를 다시 띄운 뒤 'mcp list_tools failed (browser): Session terminated'
+    from mcp.shared.exceptions import MCPError
+
+    server = manager.servers[0]
+    old_client = server.client
+    server.stale = True
+
+    async def terminated(*args, **kwargs):
+        raise MCPError(-32600, "Session terminated")
+
+    old_client.list_tools = terminated
+
+    names = [t.name for t in await manager.tools()]
+
+    assert "ironwall__status" in names
+    assert server.client is not old_client

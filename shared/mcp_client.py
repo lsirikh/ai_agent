@@ -235,7 +235,13 @@ class MCPManager:
                     audit_log.warning(
                         "mcp list_tools failed (%s): %s", server.config.name, e
                     )
-                    continue
+                    # 세션이 끊겼으면(서버를 다시 띄움) 다시 연결해 한 번 더 받는다
+                    try:
+                        if not await self._retry_connect(server):
+                            continue
+                        await server.list_tools()
+                    except Exception:
+                        continue
             allowed = set(server.config.allowed_tools)
             for tool in server.tools:
                 if tool.name not in allowed:
