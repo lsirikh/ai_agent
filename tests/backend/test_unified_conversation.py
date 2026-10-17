@@ -165,6 +165,13 @@ def db(monkeypatch):
     return fake
 
 
+def _question(content: str) -> str:
+    """'지금 시각: …\n\n질문' 에서 질문만."""
+    if content.startswith("지금 시각:"):
+        return content.split("\n\n", 1)[1]
+    return content
+
+
 def _sessions_client() -> TestClient:
     from services.backend.app.routes import sessions
 
@@ -333,7 +340,8 @@ class TestSharedContext:
         ]
 
         assert events[-1]["content"] == "민수님이에요."
-        sent = [(m["role"], m["content"]) for m in captured[0]["messages"]]
+        # 이번 질문 앞에는 매 턴 '지금 시각' 근거가 붙는다 — 질문만 비교한다
+        sent = [(m["role"], _question(m["content"])) for m in captured[0]["messages"]]
         assert sent[1:] == [
             ("user", "내 이름은 민수야"),
             ("assistant", "반가워요, 민수님."),
@@ -381,7 +389,8 @@ class TestSharedContext:
         assert events[-1]["type"] == "complete"
         payload = captured[0]
         assert prompt_tokens(payload["messages"]) + payload["max_tokens"] <= 4096
-        assert payload["messages"][-1] == {"role": "user", "content": "마지막 질문"}
+        last = payload["messages"][-1]
+        assert last["role"] == "user" and _question(last["content"]) == "마지막 질문"
         assert payload["messages"][0]["role"] == "system"
 
 
