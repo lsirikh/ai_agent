@@ -70,7 +70,8 @@ public class RegionTimeScenarioTests
     {
         var id = PcTimeZone.IanaId();
 
-        Assert.Contains("/", id);
+        // Windows 이름("Korea Standard Time")이 아니라 IANA 이름("Asia/Seoul", CI 의 "UTC" 등)
+        Assert.DoesNotContain(" ", id);
         Assert.NotNull(TimeZoneInfo.FindSystemTimeZoneById(id));
     }
 }
