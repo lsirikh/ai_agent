@@ -107,15 +107,18 @@ class TestStdioServer:
         assert tools["ironwall__status"].needs_confirm is True
 
     @pytest.mark.asyncio
-    async def test_no_confirm_skips_question_but_never_for_destructive(self):
+    async def test_no_confirm_overrides_hints_but_not_always_confirm(self):
         # 음성은 승인한 다음 턴에 도구가 없어 '열기' 뒤 '입력' 으로 못 넘어갔다.
         # 브라우저 열기·입력처럼 사용자가 믿기로 한 도구는 묻지 않는다
-        # (파괴적 도구는 계속 묻는다)
+        # Playwright MCP 는 열기·입력에도 destructive 표시를 붙여,
+        # 명시한 no_confirm 이 이긴다.
+        # always_confirm 은 그보다 우선한다.
         mcp = MCPManager(
             [
                 config(
                     allowed_tools=["status", "restart", "hidden"],
-                    no_confirm=["hidden", "restart"],
+                    no_confirm=["hidden", "restart", "status"],
+                    always_confirm=["status"],
                 )
             ]
         )
@@ -126,7 +129,8 @@ class TestStdioServer:
             await mcp.close()
 
         assert tools["ironwall__hidden"].needs_confirm is False
-        assert tools["ironwall__restart"].needs_confirm is True
+        assert tools["ironwall__restart"].needs_confirm is False  # destructive 표시
+        assert tools["ironwall__status"].needs_confirm is True
 
     @pytest.mark.asyncio
     async def test_should_call_tools_and_report_is_error(self, manager):

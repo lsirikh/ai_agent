@@ -11,7 +11,7 @@ MCP 클라이언트 (Python mcp SDK 2.x — stdio · streamable HTTP)
         "allowed_tools": ["status", "restart"],   # 허용 목록 (밖은 노출 안 함)
         "trusted": true,                          # read-only 도구는 바로 실행
         "always_confirm": ["restart"],            # 항상 확인 (자동 조치 등)
-        "no_confirm": ["status_page"],            # 확인 없이 (파괴적이면 그래도 확인)
+        "no_confirm": ["status_page"],            # 확인 없이 (always_confirm 이 우선)
         "timeout": 30
     }]}
 
@@ -52,7 +52,8 @@ class MCPServerConfig:
     allowed_tools: list = field(default_factory=list)
     trusted: bool = False
     always_confirm: list = field(default_factory=list)
-    # 확인 없이 실행할 도구(사용자가 믿기로 한 것). 파괴적 표시가 있으면 그래도 묻는다
+    # 확인 없이 실행할 도구(사용자가 믿기로 한 것). 서버의 destructive 표시보다 우선한다
+    # (Playwright MCP 는 열기·입력에도 destructive 를 붙인다). always_confirm 이 더 우선
     no_confirm: list = field(default_factory=list)
     timeout: float = DEFAULT_TIMEOUT_SECONDS
 
@@ -213,9 +214,10 @@ class MCPManager:
         hints = tool.annotations
         read_only = bool(hints and hints.read_only_hint)
         destructive = bool(hints and hints.destructive_hint)
-        needs_confirm = (
-            not (config.trusted and read_only) and tool.name not in config.no_confirm
-        ) or destructive or tool.name in config.always_confirm
+        needs_confirm = tool.name in config.always_confirm or (
+            tool.name not in config.no_confirm
+            and (not (config.trusted and read_only) or destructive)
+        )
 
         async def run(args: dict) -> ToolResult:
             result = await self.call(server, tool.name, args)
