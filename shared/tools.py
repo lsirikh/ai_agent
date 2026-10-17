@@ -66,6 +66,8 @@ class Tool:
     announce: Optional[str] = None
     # 실행 전에 사용자 확인이 필요한 도구 (MCP 의 쓰기·파괴적 도구)
     needs_confirm: bool = False
+    # 확인·실행 전에 인자를 고친다 (예: 브라우저 주소 'newtab' → 'about:blank')
+    normalize: Optional[Callable[[dict], dict]] = None
 
     def schema(self) -> dict:
         return {
@@ -183,6 +185,13 @@ _ACTION = re.compile(
     r"|(열어|켜|실행해|접속해|들어가)\s*[.?!~]*$"
 )
 _BROWSER = re.compile(r"크롬|브라우저|사이트|홈페이지|웹\s*페이지|네이버|구글|유튜브")
+# 브라우저로 하는 일: 어미와 상관없이 본다
+# (실측: STT 가 '들어가 줘' 를 '들어가죠', '열어서' 를 '열어가지고' 로 적었다)
+_BROWSER_ACTION = re.compile(
+    r"열|켜|들어가|접속|이동|띄워|검색|입력|클릭|눌러|틀어|가\s*줘"
+)
+# 그중 검색 도구로는 대신할 수 없는 일(열기·접속·누르기)
+_BROWSER_OPEN = re.compile(r"열|켜|들어가|접속|이동|띄워|클릭|눌러|틀어")
 # MCP 데스크톱(서버__open_app · 서버__write_document)
 _PROGRAM = re.compile(r"메모장|노트패드|워드|엑셀|파워\s*포인트|피피티|계산기|그림판")
 _WRITE = re.compile(r"저장|작성|써|적어|만들어|기록")
@@ -202,9 +211,10 @@ _REQUIRED_TOOLS = [
     ("list_test_files", _FILE_LIST.search),
     ("write_document", lambda q: _PROGRAM.search(q) and _WRITE.search(q)),
     ("open_app", lambda q: _PROGRAM.search(q) and _ACTION.search(q)),
+    # MCP 브라우저(서버__browser_navigate). 크롬·사이트를 직접 말했으면 날씨보다 먼저
+    # (실측: '네이버 검색창에 오늘 날씨를 입력해' 가 날씨 도구로 갔다)
+    ("browser_navigate", lambda q: _BROWSER.search(q) and _BROWSER_ACTION.search(q)),
     ("get_weather", _WEATHER.search),
-    # MCP 브라우저(서버__browser_navigate)
-    ("browser_navigate", lambda q: _BROWSER.search(q) and _ACTION.search(q)),
     ("web_search", _SEARCH.search),
 ]
 
@@ -235,6 +245,29 @@ def required_tool(question: str, offered) -> Optional[str]:
     return None
 
 
+# 브라우저 작업 단계: 열기 다음에 입력·클릭을 해야 하는 요청
+_TYPE_INTENT = re.compile(r"입력|검색|써\s*줘|적어")
+_CLICK_INTENT = re.compile(r"클릭|눌러")
+
+
+def required_tools(question: str, offered) -> list:
+    """
+    라운드마다 지정할 도구(첫 라운드부터). 브라우저는 열기 → 입력 → 클릭 순서.
+    열기만 지정하면 모델이 입력하지 않고 '입력하고 검색했습니다' 라고 지어냈다(실측).
+    """
+    first = required_tool(question, offered)
+    if not first:
+        return []
+    plan = [first]
+    if first.endswith("browser_navigate"):
+        steps = (("browser_type", _TYPE_INTENT), ("browser_click", _CLICK_INTENT))
+        for name, intent in steps:
+            tool = _offered_tool(name, offered)
+            if tool and intent.search(question or ""):
+                plan.append(tool)
+    return plan
+
+
 def unavailable_action_reply(question: str, offered) -> Optional[str]:
     """
     열기·접속을 해 달라는데 그걸 할 도구가 없으면 모델 대신 할 답.
@@ -245,10 +278,10 @@ def unavailable_action_reply(question: str, offered) -> Optional[str]:
         _ACTION.search(question) or _WRITE.search(question)
     ):
         return None if required_tool(question, offered) else CANNOT_DO_REPLY
+    if _BROWSER.search(question) and _BROWSER_OPEN.search(question):
+        return None if _offered_tool("browser_navigate", offered) else CANNOT_DO_REPLY
     if not _ACTION.search(question):
         return None
-    if _BROWSER.search(question):
-        return None if _offered_tool("browser_navigate", offered) else CANNOT_DO_REPLY
     return None if required_tool(question, offered) else CANNOT_DO_REPLY
 
 

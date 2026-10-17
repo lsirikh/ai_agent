@@ -17,12 +17,15 @@ stream_with_tools 는 답 텍스트(str)와 도구 이벤트(dict)를 섞어 내
 """
 
 import json
-from typing import Any, AsyncIterator, Awaitable, Callable, Optional
+import re
+from typing import Any, AsyncIterator, Awaitable, Callable, Optional, Sequence, Union
 
 from .context_builder import _truncate_to_tokens, estimate_tokens, prompt_tokens
-from .tools import TOOL_RESULT_MAX_TOKENS, ToolRegistry, ToolResult
+from .tools import TOOL_RESULT_MAX_TOKENS, Tool, ToolRegistry, ToolResult
 
-MAX_TOOL_ROUNDS = 3
+# 브라우저 작업은 열기 → (요소 보기) → 입력 → 클릭 → 결과 확인처럼 여러 번 왕복한다
+# (3번 한도에서는 입력하기 전에 끝났다 — 실측)
+MAX_TOOL_ROUNDS = 8
 TOOL_CALL_TAG = "<tool_call>"
 RESULT_BEGIN = "<<도구 결과 시작: {name}>>"
 RESULT_END = "<<도구 결과 끝>>"
@@ -124,6 +127,37 @@ def tool_choice_for(name: Optional[str]) -> Any:
     return {"type": "function", "function": {"name": name}}
 
 
+# 답이 실패를 인정하는 말
+_ADMITS_FAILURE = re.compile(r"못|실패|오류|에러|않았|없었|없어|모르|안 됐|안됐")
+
+
+def failure_notice(failures: list, answer: str) -> str:
+    """
+    도구가 실패했는데 답이 성공한 것처럼 말하면 덧붙일 안내.
+    실측: 주소 열기·입력이 모두 실패했는데 '검색했습니다' 라고 답했다.
+    """
+    if not failures or _ADMITS_FAILURE.search(answer or ""):
+        return ""
+    name, error = failures[-1]
+    first_line = next(
+        (line for line in error.splitlines() if line.strip() and "###" not in line),
+        error,
+    ).strip()[:160]
+    tool = name.split("__")[-1]
+    return f"\n\n※ 실제로는 '{tool}' 실행이 실패했습니다: {first_line}"
+
+
+def _normalized(tool: Tool, arguments: str) -> str:
+    """도구의 normalize 로 인자(JSON 문자열)를 고친다. 읽을 수 없으면 그대로."""
+    try:
+        args = json.loads(arguments or "{}")
+    except ValueError:
+        return arguments
+    if not isinstance(args, dict):
+        return arguments
+    return json.dumps(tool.normalize(args), ensure_ascii=False)
+
+
 async def stream_with_tools(
     request: StreamRequest,
     messages: list,
@@ -132,7 +166,7 @@ async def stream_with_tools(
     input_budget: Optional[int] = None,
     confirm: Optional[Confirm] = None,
     max_rounds: int = MAX_TOOL_ROUNDS,
-    required: Optional[str] = None,
+    required: Union[str, Sequence[str], None] = None,
 ) -> AsyncIterator[Any]:
     """
     도구 왕복을 처리하며 답 텍스트와 도구 이벤트를 내보낸다.
@@ -144,12 +178,15 @@ async def stream_with_tools(
         input_budget: 프롬프트 토큰 한도. 도구 결과가 이 안에 들도록 자르고,
             모자라면 도구 없이 최종 답을 받는다.
         confirm: 확인이 필요한 도구를 실행해도 되는지 묻는다(없으면 실행하지 않는다)
-        required: 첫 요청에서 반드시 부를 도구 이름(request 에 tool_choice 로 준다)
+        required: 반드시 부를 도구 이름. 목록이면 라운드마다 차례로 지정한다
+            (request 에 tool_choice 로 준다)
     """
     tools = registry.schemas() if registry else None
-    if required and required not in (registry.names() if registry else []):
-        required = None
+    names = registry.names() if registry else []
+    plan = [required] if isinstance(required, str) else list(required or [])
+    plan = [name for name in plan if name in names]
     messages = list(messages)
+    failures: list = []  # (도구, 오류) — 답이 성공했다고 하면 밝힌다
     for round_index in range(max_rounds + 1):
         offer = tools if round_index < max_rounds else None
         if (
@@ -162,8 +199,8 @@ async def stream_with_tools(
         assembler = ToolCallAssembler()
         guard = ToolTextGuard()
         text = ""
-        forced = {"tool_choice": required} if offer and required else {}
-        required = None
+        step = plan.pop(0) if plan else None
+        forced = {"tool_choice": step} if offer and step else {}
         async for chunk in request(messages, offer, **forced):
             choices = chunk.get("choices") or []
             if not choices:
@@ -183,6 +220,9 @@ async def stream_with_tools(
 
         calls = assembler.calls() if offer else []
         if not calls:
+            notice = failure_notice(failures, text)
+            if notice:
+                yield notice
             return
 
         messages.append(
@@ -195,9 +235,15 @@ async def stream_with_tools(
 
         for call in calls:
             name = call["function"]["name"]
+            tool = registry.get(name)
+            if tool is not None and tool.normalize is not None:
+                # 확인 질문·실행·대화 기록이 모두 고친 인자를 쓴다
+                call["function"]["arguments"] = _normalized(
+                    tool, call["function"]["arguments"]
+                )
             arguments = call["function"]["arguments"]
             event = {"id": call["id"], "name": name, "arguments": arguments}
-            tool = registry.get(name)
+            approved = False
             if tool is not None and tool.needs_confirm:
                 yield {"type": "tool_confirm", **event}
                 approved = bool(confirm) and await confirm(event)
@@ -213,6 +259,10 @@ async def stream_with_tools(
                 yield {"type": "tool_call", **event}
                 result = await registry.execute(name, arguments)
 
+            # 승인하지 않아 실행하지 않은 것은 실패가 아니다
+            ran = tool is None or not tool.needs_confirm or approved
+            if result.is_error and ran:
+                failures.append((name, result.content))
             content = _truncate_to_tokens(result.content, room)
             yield {
                 "type": "tool_result",

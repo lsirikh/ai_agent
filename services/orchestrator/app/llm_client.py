@@ -10,6 +10,7 @@ from typing import Any, AsyncGenerator, Optional
 
 import httpx
 
+from shared import browser_assist
 from shared.context_builder import (
     DEFAULT_MAX_MODEL_LEN,
     VOICE_MAX_TOKENS,
@@ -26,7 +27,7 @@ from shared.tool_calling import (
 )
 from shared.tools import (
     ToolRegistry,
-    required_tool,
+    required_tools,
     tool_parser_for,
     unavailable_action_reply,
 )
@@ -440,6 +441,9 @@ class LLMClient:
         if cannot:
             yield cannot
             return
+        if tools:
+            # 질문에서 부른 사이트·'검색' 에 맞춰 브라우저 도구 인자를 바로잡는다
+            tools = browser_assist.adapt_to_question(tools, user_message or "")
         reserve = schema_tokens(tools.schemas()) if tools else 0
         if messages or not user_message:
             built_messages = self._build_messages(user_message, messages, rag_context)
@@ -507,7 +511,7 @@ class LLMClient:
                 input_budget=input_budget(self.max_model_len, max_tokens),
                 confirm=confirm,
                 required=(
-                    required_tool(user_message, tools.names()) if tools else None
+                    required_tools(user_message, tools.names()) if tools else None
                 ),
             ):
                 if isinstance(item, str):

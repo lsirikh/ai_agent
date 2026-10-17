@@ -14,6 +14,7 @@ from shared.tools import (
     ToolRegistry,
     ToolResult,
     required_tool,
+    required_tools,
     unavailable_action_reply,
 )
 
@@ -119,6 +120,71 @@ def test_should_check_saved_files_with_tools(question, expected) -> None:
 def test_should_admit_it_cannot_save_without_desktop_tools() -> None:
     reply = unavailable_action_reply("메모장에 장보기 목록 저장해 줘", ALL)
     assert reply and "없" in reply
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        # 실측 실패 문장(STT 가 '들어가 줘' 를 '들어가죠' 로 적었다)
+        "웹페이지 열어가지고 네이버 카페 들어가죠",
+        "크롬 페이지 열어줘",
+        # '날씨' 가 있어도 크롬·사이트를 말했으면 브라우저 (실측: 날씨 도구로 갔다)
+        "크롬으로 네이버에 들어가서 검색창에 오늘 날씨를 입력하고 검색해 줘",
+        "유튜브 들어가서 음악 틀어 줘",
+    ],
+)
+def test_spoken_browser_requests_use_browser(question) -> None:
+    assert required_tool(question, BROWSER) == "browser__browser_navigate"
+
+
+def test_plain_weather_question_still_uses_weather() -> None:
+    assert required_tool("오늘 서울 날씨 어때?", BROWSER) == "get_weather"
+
+
+def test_spoken_open_request_without_browser_is_admitted() -> None:
+    reply = unavailable_action_reply("웹페이지 열어가지고 네이버 카페 들어가죠", ALL)
+    assert reply and "없" in reply
+
+
+BROWSER_ALL = BROWSER + ["browser__browser_type", "browser__browser_click"]
+
+
+def test_browser_search_is_planned_as_open_then_type() -> None:
+    # 실측: 열기만 지정하면 그다음에 입력하지 않고 '입력하고 검색했습니다' 라고 지어냈다
+    assert required_tools(
+        "크롬으로 네이버에 들어가서 검색창에 EdgeVoice 를 입력하고 검색해 줘",
+        BROWSER_ALL,
+    ) == ["browser__browser_navigate", "browser__browser_type"]
+
+
+def test_click_request_adds_click_step() -> None:
+    assert required_tools("네이버 들어가서 카페 메뉴 눌러 줘", BROWSER_ALL) == [
+        "browser__browser_navigate",
+        "browser__browser_click",
+    ]
+
+
+def test_plain_open_is_one_step_and_others_unchanged() -> None:
+    assert required_tools("크롬 열어줘", BROWSER_ALL) == ["browser__browser_navigate"]
+    assert required_tools("오늘 서울 날씨 어때?", BROWSER_ALL) == ["get_weather"]
+    assert required_tools("안녕?", BROWSER_ALL) == []
+
+
+@pytest.mark.asyncio
+async def test_tool_loop_follows_the_plan_round_by_round() -> None:
+    llm = RecordingLLM(
+        [_call("get_weather", '{"location": "부산"}')],
+        [_call("get_weather", '{"location": "서울"}')],
+        [_text("끝.")],
+    )
+
+    async for _ in stream_with_tools(
+        llm, [{"role": "user", "content": "q"}], _weather_registry(),
+        required=["get_weather", "get_weather"],
+    ):
+        pass
+
+    assert llm.choices == ["get_weather", "get_weather", None]
 
 
 def test_should_not_require_tool_that_is_not_offered() -> None:

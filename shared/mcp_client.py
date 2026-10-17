@@ -30,6 +30,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from . import browser_assist
 from .tools import Tool, ToolResult
 
 audit_log = logging.getLogger("edgevoice.mcp.audit")
@@ -214,7 +215,19 @@ class MCPManager:
         )
 
         async def run(args: dict) -> ToolResult:
-            return await self.call(server, tool.name, args)
+            result = await self.call(server, tool.name, args)
+            if tool.name.startswith("browser_"):
+                # 페이지 구조가 문맥보다 커서 잘리므로 다룰 요소(ref)만 추려 붙인다
+                result = await browser_assist.with_page_elements(
+                    tool.name, result,
+                    lambda: self.call(server, "browser_snapshot", {}),
+                )
+            return result
+
+        normalize = None
+        if tool.name == "browser_navigate":
+            def normalize(a):
+                return {**a, "url": browser_assist.normalize_url(a.get("url", ""))}
 
         return Tool(
             name=name,
@@ -223,6 +236,7 @@ class MCPManager:
             run=run,
             announce="확인해 볼게요.",
             needs_confirm=needs_confirm,
+            normalize=normalize,
         )
 
     async def call(self, server: _Server, tool_name: str, args: dict) -> ToolResult:

@@ -568,6 +568,7 @@ class TestCannotDoWithoutTool:
             "메모장에 장보기 을 저장할까요?",
         ),
         ("desktop__open_app", '{"app_name": "excel"}', "엑셀 을 실행할까요?"),
+        ("browser__browser_navigate", '{"url": "about:blank"}', "크롬 새 창을 열까요?"),
         (
             "browser__browser_navigate",
             '{"url": "https://www.naver.com"}',

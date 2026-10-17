@@ -77,7 +77,9 @@ def confirm_question(name: str, arguments: Any) -> str:
     args = args if isinstance(args, dict) else {}
     program = PROGRAM_NAMES.get(str(args.get("app_name", "")).lower())
     program = program or args.get("app_name")
-    if url:
+    if url == "about:blank":
+        action = "크롬 새 창을 열까요?"
+    elif url:
         action = f"{site or url} 을 열까요?"
     elif args.get("filename") and program:
         action = f"{program}에 {args['filename']} 을 저장할까요?"
