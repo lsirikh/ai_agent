@@ -77,3 +77,25 @@ def test_heartbeat_log_triggers_resync() -> None:
         asyncio.run(logs.create_log(log))
 
     heartbeat.assert_called_once_with("stt", {"uptime_seconds": 3})
+
+
+def test_uptime_is_read_from_the_real_heartbeat_shape() -> None:
+    # 실측: 서비스 로거는 metadata 를
+    # {"metadata": {...}, "timestamp": ...} 로 싸서 보낸다
+    from services.backend.app.routes import settings as settings_route
+    from services.backend.app.services import settings_resync
+
+    propagator = MagicMock(propagate=AsyncMock(return_value={"success": True}))
+    heartbeat = {
+        "metadata": {"service": "wake_word", "uptime_seconds": 20},
+        "timestamp": "2026-10-17T15:50:58",
+    }
+    with (
+        patch.object(
+            settings_route, "get_settings_propagator", return_value=propagator
+        ),
+        patch.object(settings_resync, "_watcher", settings_resync.RestartWatcher()),
+    ):
+        asyncio.run(settings_resync.on_heartbeat("wake_word", heartbeat))
+
+    propagator.propagate.assert_awaited_once()

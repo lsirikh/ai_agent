@@ -27,7 +27,11 @@ async def on_heartbeat(service: str, metadata: Optional[Dict[str, Any]]) -> None
     """하트비트 로그 하나. 다시 시작된 서비스면 그 서비스가 받는 일반 설정을 보낸다."""
     from ..routes import settings as settings_route
 
-    uptime = (metadata or {}).get("uptime_seconds")
+    metadata = metadata or {}
+    # 서비스 로거는 {"metadata": {...}, "timestamp": ...} 로 싸서 보낸다
+    uptime = metadata.get("uptime_seconds")
+    if uptime is None:
+        uptime = (metadata.get("metadata") or {}).get("uptime_seconds")
     targets = settings_route.general_settings_by_service(
         settings_route._general_settings
     )
