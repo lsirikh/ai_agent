@@ -105,7 +105,7 @@ def test_gateway_interrupts_when_user_talks_over_the_answer() -> None:
     from unittest.mock import AsyncMock, MagicMock, patch
 
     from app import main
-    from app.speech_barge_in import PlaybackTracker, SpeechBargeIn
+    from app.speech_barge_in import EchoDelay, PlaybackTracker, SpeechBargeIn
     from fastapi.testclient import TestClient
 
     redis = AsyncMock()
@@ -120,6 +120,7 @@ def test_gateway_interrupts_when_user_talks_over_the_answer() -> None:
         patch.object(main, "reset_session", AsyncMock()),
         patch.object(main, "playback_tracker", tracker),
         patch.object(main, "speech_barge", SpeechBargeIn()),
+        patch.object(main, "echo_delay", EchoDelay()),
         patch.object(main, "on_speech_started", AsyncMock()),
     ):
         tracker.add(_tone(5.0, 0.05))  # 답을 5초째 재생 중
@@ -161,7 +162,7 @@ def test_gateway_does_not_interrupt_on_its_own_echo() -> None:
 
     from app import main
     from app.barge_in import BargeInDetector, PlaybackState
-    from app.speech_barge_in import PlaybackTracker, SpeechBargeIn
+    from app.speech_barge_in import EchoDelay, PlaybackTracker, SpeechBargeIn
     from fastapi.testclient import TestClient
 
     redis = AsyncMock()
@@ -182,6 +183,7 @@ def test_gateway_does_not_interrupt_on_its_own_echo() -> None:
         patch.object(main, "reset_session", AsyncMock()),
         patch.object(main, "playback_tracker", tracker),
         patch.object(main, "speech_barge", SpeechBargeIn()),
+        patch.object(main, "echo_delay", EchoDelay()),
         patch.object(main, "barge_in_detector", detector),
         patch.object(main, "on_speech_started", AsyncMock()),
     ):
@@ -194,3 +196,69 @@ def test_gateway_does_not_interrupt_on_its_own_echo() -> None:
 
     channels = [c.args[0] for c in redis.publish.await_args_list]
     assert "edgevoice:barge_in:detected" not in channels
+
+
+def _speech_like(seconds, rate=24000, seed=0):
+    """말처럼 크기가 오르내리는 재생 음성(0.3초 단위로 크기가 바뀐다)."""
+    rng = np.random.default_rng(seed)
+    t = np.arange(int(seconds * rate)) / rate
+    levels = rng.uniform(0.0, 0.5, int(seconds / 0.3) + 1)
+    envelope = levels[(t / 0.3).astype(int)]
+    return (envelope * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+
+
+def _play(seconds, delay, gain, voice_from=None, voice_rms=0.0, seed=0):
+    """재생을 시작하고 100ms 마다 마이크 조각을 넣는다. 끼어든 시각(초)을 돌려준다."""
+    from app.speech_barge_in import EchoDelay, PlaybackTracker, SpeechBargeIn
+
+    clock = Clock()
+    start = clock.now
+    tracker = PlaybackTracker(clock=clock)
+    audio = _speech_like(seconds, seed=seed)
+    tracker.add(audio)
+    echo_delay, barge = EchoDelay(), SpeechBargeIn()
+    step = 2400
+    for i in range(int(seconds * 10)):
+        clock.now = start + (i + 1) * 0.1
+        j = i - int(round(delay * 10))
+        piece = audio[j * step : (j + 1) * step] if j >= 0 else np.zeros(step)
+        mic = gain * float(np.sqrt(np.mean(piece**2)))
+        if voice_from is not None and clock.now - start > voice_from:
+            mic = float(np.hypot(mic, voice_rms))
+        far = echo_delay.far_level(tracker)
+        if echo_delay.observe(mic, tracker):
+            barge.forget_echo()
+        if barge.feed(mic, 0.9, far, learn=echo_delay.known):
+            return round(clock.now - start, 1), echo_delay
+    return None, echo_delay
+
+
+def test_tracker_level_around_a_moment() -> None:
+    from app.speech_barge_in import PlaybackTracker
+
+    clock = Clock()
+    tracker = PlaybackTracker(clock=clock)
+    tracker.add(np.concatenate([_tone(1.0, 0.0), _tone(1.0, 0.4)]))
+
+    assert tracker.around(clock.now + 0.5, 0.1) == 0.0
+    assert tracker.around(clock.now + 1.5, 0.1) > 0.2
+
+
+def test_echo_delay_is_learned_from_the_loudness_pattern() -> None:
+    _, echo_delay = _play(10.0, delay=0.5, gain=0.3)
+
+    assert echo_delay.known
+    assert abs(echo_delay.delay - 0.5) <= 0.1
+
+
+def test_late_loud_echo_never_interrupts() -> None:
+    # 원격 데스크톱처럼 에코가 1초 늦고 크게(0.8) 들어와도 끊지 않는다
+    for seed in range(3):
+        hit, _ = _play(30.0, delay=1.0, gain=0.8, seed=seed)
+        assert hit is None
+
+
+def test_user_voice_over_echo_interrupts_once_delay_is_known() -> None:
+    hit, _ = _play(30.0, delay=0.3, gain=0.3, voice_from=15.0, voice_rms=0.25)
+
+    assert hit is not None and 15.0 < hit <= 15.6

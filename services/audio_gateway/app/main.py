@@ -22,7 +22,7 @@ from .aec import AcousticEchoCanceller
 from .audio_io import AudioIOManager
 from .audio_recorder import AudioRecorder
 from .barge_in import BargeInDetector, PlaybackState
-from .speech_barge_in import PlaybackTracker, SpeechBargeIn
+from .speech_barge_in import EchoDelay, PlaybackTracker, SpeechBargeIn
 from .pipeline_logger import get_logger, HEARTBEAT_INTERVAL
 from .stt_client import STTClient
 from .vad import VoiceActivityDetector
@@ -39,6 +39,7 @@ audio_recorder = AudioRecorder()
 # 말소리로 끼어들기: 앱으로 보낸 답 음성의 실제 재생 구간과, 에코보다 큰 목소리 감지
 playback_tracker = PlaybackTracker()
 speech_barge = SpeechBargeIn()
+echo_delay = EchoDelay()  # 스피커 소리가 마이크로 되돌아오는 시차(한 번 익히면 유지)
 # 끼어든 첫마디가 녹음에서 빠지지 않게 최근 마이크 소리를 들고 있는다(0.8초)
 _recent_chunks: deque = deque(maxlen=8)
 stt_client = STTClient()
@@ -487,6 +488,7 @@ async def start_speech_barge_in() -> None:
     """
     pre_roll = list(_recent_chunks)
     decided = {k: round(v, 4) for k, v in speech_barge.last.items()}
+    decided["delay"] = echo_delay.delay
     playback_tracker.clear()
     speech_barge.reset()
     if redis_client is not None:
@@ -508,8 +510,11 @@ async def check_speech_barge_in(processed: np.ndarray, vad_result: dict) -> None
     if _listening_mode or not playback_tracker.playing():
         return
     rms = float(np.sqrt(np.mean(processed**2))) if len(processed) else 0.0
+    far = echo_delay.far_level(playback_tracker)
+    if echo_delay.observe(rms, playback_tracker):
+        speech_barge.forget_echo()
     if speech_barge.feed(
-        rms, vad_result.get("probability", 0.0), playback_tracker.level()
+        rms, vad_result.get("probability", 0.0), far, learn=echo_delay.known
     ):
         await start_speech_barge_in()
 
