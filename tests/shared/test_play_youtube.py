@@ -115,3 +115,17 @@ async def test_play_youtube_reports_failure_when_video_did_not_open() -> None:
     result = await tools["browser__play_youtube"].run({"query": "아이유 좋은 날"})
 
     assert result.is_error is True
+
+
+def test_drawing_request_uses_draw_picture() -> None:
+    # 실측(2026-10-18): '그림판 열어서 강아지 그려 줘' 를 못 했다(그리는 도구가 없었다)
+    offered = ["desktop__open_app", "desktop__draw_picture", "desktop__write_document"]
+
+    for question in (
+        "그림판 열어서 강아지 그림 그려줘",
+        "그림판에 고양이 그려 줘",
+        "강아지 그림 그려 줘",
+    ):
+        assert required_tools(question, offered) == ["desktop__draw_picture"]
+
+    assert required_tools("그림판 열어 줘", offered) == ["desktop__open_app"]

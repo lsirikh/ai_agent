@@ -193,6 +193,7 @@ _BROWSER_ACTION = re.compile(
 # 그중 검색 도구로는 대신할 수 없는 일(열기·접속·누르기)
 _BROWSER_OPEN = re.compile(r"열|켜|들어가|접속|이동|띄워|클릭|눌러|틀어")
 _YOUTUBE = re.compile(r"유튜브|youtube", re.IGNORECASE)
+_DRAW = re.compile(r"그려|그리고\s*싶|드로잉|스케치")
 _PLAY = re.compile(r"틀어|재생|플레이|들려|틀\s*수")
 # MCP 데스크톱(서버__open_app · 서버__write_document)
 _PROGRAM = re.compile(r"메모장|노트패드|워드|엑셀|파워\s*포인트|피피티|계산기|그림판")
@@ -230,6 +231,8 @@ _REMEMBER = re.compile(r"기억해|학습해|학습\s*시켜|외워")
 
 _REQUIRED_TOOLS = [
     ("learn_note", _REMEMBER.search),
+    # 그림 그리기(그림판을 열어 마우스로 그린다) — '그림판 열어' 보다 먼저
+    ("draw_picture", _DRAW.search),
     ("read_test_file", lambda q: _SAVED_FILE.search(q) and _READ.search(q)),
     ("list_test_files", _FILE_LIST.search),
     ("write_document", lambda q: _PROGRAM.search(q) and _WRITE.search(q)),

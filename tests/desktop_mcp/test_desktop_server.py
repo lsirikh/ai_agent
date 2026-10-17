@@ -17,6 +17,12 @@ async def test_should_mark_only_listing_and_reading_as_read_only() -> None:
         "write_document",
         "list_test_files",
         "read_test_file",
+        # 컴퓨터 조작 (2026-10-18: 그림판에 그리기를 못 했다)
+        "draw_picture",
+        "mouse_click",
+        "mouse_drag",
+        "type_text",
+        "press_keys",
     }
     assert tools["list_test_files"].annotations.read_only_hint is True
     assert tools["read_test_file"].annotations.read_only_hint is True
@@ -52,3 +58,31 @@ def test_should_report_unknown_program_without_crashing() -> None:
 
     with pytest.raises(ValueError):
         server.open_app("cmd")
+
+
+def test_draw_picture_tool_draws_on_paint(monkeypatch) -> None:
+    from services.desktop_mcp import computer, server
+
+    drags = []
+
+    class Screen:
+        def paint_canvas(self):
+            return (0, 0, 1000, 1000)
+
+        def drag(self, points):
+            drags.append(points)
+
+    monkeypatch.setattr(computer, "WindowsScreen", Screen)
+
+    message = server.draw_picture(
+        [{"type": "circle", "x": 500, "y": 400, "r": 200}, {"type": "line",
+          "x1": 400, "y1": 700, "x2": 600, "y2": 700}]
+    )
+
+    assert len(drags) == 2 and "2" in message
+
+
+def test_keyboard_tools_report_bad_keys_without_crashing() -> None:
+    from services.desktop_mcp import server
+
+    assert "모르는 키" in server.press_keys("ctrl+없는키")
