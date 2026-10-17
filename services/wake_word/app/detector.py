@@ -6,6 +6,7 @@ Phase 17.1: Pipeline Logging 추가
 Phase 40: OpenWakeWord 실제 모델 통합
 """
 import json
+import os
 import time
 from typing import Any, Dict, Optional
 
@@ -82,6 +83,12 @@ class WakeWordDetector:
         self._last_detection_time: Optional[float] = None
         self._is_in_cooldown = False
         self._use_mock = False  # Mock 모델 사용 여부
+        # 답을 말하는 동안은 스피커 소리가 섞여 호출어 점수가 낮아진다(실측 6.9~25.3%,
+        # 조용할 때 74%). TTS 만 나올 때는 3% 를 넘지 않아 이때만 기준을 낮춘다
+        self.answering = False
+        self.barge_in_threshold = float(
+            os.environ.get("WAKE_WORD_BARGE_IN_THRESHOLD", "0.15")
+        )
 
         # Pipeline logger
         self._logger = get_logger("wake_word")
@@ -218,7 +225,10 @@ class WakeWordDetector:
             print(f"[WakeWord] Detection: {best_wake_word} = {best_confidence:.2%} (threshold: {self.confidence_threshold:.2%})")
 
         # 임계값 체크
-        if best_confidence >= self.confidence_threshold:
+        threshold = self.confidence_threshold
+        if self.answering:
+            threshold = min(threshold, self.barge_in_threshold)
+        if best_confidence >= threshold:
             self._last_detection_time = time.time()
             self._is_in_cooldown = True
             # 버퍼에 남은 이 호출어로 다시 감지되지 않게 비운다

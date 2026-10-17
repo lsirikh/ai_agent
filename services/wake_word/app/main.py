@@ -9,6 +9,7 @@ Phase 17.2: Service Heartbeat Logging (10초 간격)
 Phase 40: OpenWakeWord 실제 모델 통합, 동적 Wake Word 변경
 """
 import asyncio
+import json
 import os
 import time
 from contextlib import asynccontextmanager
@@ -21,6 +22,11 @@ from fastapi import FastAPI
 
 from .detector import WakeWordDetector, WAKE_WORD_MODELS
 from .pipeline_logger import get_logger, HEARTBEAT_INTERVAL
+
+
+ORCHESTRATOR_STATE_CHANNEL = "edgevoice:orchestrator:state"
+# 이 상태에서 들린 호출어는 끼어들기다
+ANSWERING_STATES = {"STT_PROCESSING", "LLM_PROCESSING", "TTS_PROCESSING", "SPEAKING"}
 
 
 class WakeWordService:
@@ -99,6 +105,12 @@ class WakeWordService:
             )
             await asyncio.sleep(HEARTBEAT_INTERVAL)
 
+    def handle_state(self, data: dict) -> None:
+        """오케스트레이터 상태 → 답하는 중인지(호출어 기준을 낮출지)."""
+        state = data.get("new_state")
+        if state and self.detector is not None:
+            self.detector.answering = state in ANSWERING_STATES
+
     async def process_audio_stream(self) -> None:
         """
         오디오 스트림 처리 루프
@@ -110,14 +122,23 @@ class WakeWordService:
             return
 
         pubsub = self.redis_client.pubsub()
-        await pubsub.subscribe(self.audio_channel)
+        # 오케스트레이터 상태: 답하는 동안 호출어 기준을 낮춘다(끼어들기)
+        await pubsub.subscribe(self.audio_channel, ORCHESTRATOR_STATE_CHANNEL)
         print(f"[WakeWord] Subscribed to {self.audio_channel}")
 
         chunk_count = 0
         try:
             while self._running:
                 message = await pubsub.get_message(ignore_subscribe_messages=True)
-                if message:
+                channel = message.get("channel") if message else None
+                if isinstance(channel, bytes):
+                    channel = channel.decode()
+                if message and channel == ORCHESTRATOR_STATE_CHANNEL:
+                    try:
+                        self.handle_state(json.loads(message["data"]))
+                    except (ValueError, TypeError):
+                        pass
+                elif message:
                     audio_data = message.get("data")
                     if isinstance(audio_data, bytes):
                         chunk_count += 1
