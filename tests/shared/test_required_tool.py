@@ -9,7 +9,13 @@
 import pytest
 
 from shared.tool_calling import stream_with_tools
-from shared.tools import Tool, ToolRegistry, ToolResult, required_tool
+from shared.tools import (
+    Tool,
+    ToolRegistry,
+    ToolResult,
+    required_tool,
+    unavailable_action_reply,
+)
 
 ALL = ["get_time", "get_weather", "web_fetch", "web_search"]
 
@@ -30,6 +36,47 @@ ALL = ["get_time", "get_weather", "web_fetch", "web_search"]
 )
 def test_should_pick_tool_the_question_clearly_needs(question, expected) -> None:
     assert required_tool(question, ALL) == expected
+
+
+BROWSER = ALL + ["browser__browser_navigate", "browser__browser_snapshot"]
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "크롬 켜서 네이버 들어가",
+        "크롬 켜줘.",
+        "인터넷으로 네이버 들어가 줄 수 있어?",
+        "브라우저로 다음 사이트 열어 줘",
+    ],
+)
+def test_should_force_browser_for_open_requests(question) -> None:
+    # 실측: 브라우저 도구 없이 "크롬을 열었고, 네이버에 접속했습니다" 라고 지어냈다
+    assert required_tool(question, BROWSER) == "browser__browser_navigate"
+    assert unavailable_action_reply(question, BROWSER) is None
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["크롬 켜줘.", "인터넷으로 네이버 들어가 줄 수 있어?", "메모장 열어 줘"],
+)
+def test_should_admit_it_cannot_open_without_a_tool(question) -> None:
+    # 실측: 프롬프트로 막아도 기록을 따라 12번 중 8번 "열었습니다" 라고 지어냈다
+    reply = unavailable_action_reply(question, ALL)
+    assert reply and "없" in reply
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "오늘 날씨 알려줘",
+        "접속 방법 알려줘",
+        "창문 열어도 돼?",
+        "네이버 뉴스 검색해 줘",
+    ],
+)
+def test_should_not_block_questions_that_are_not_open_requests(question) -> None:
+    assert unavailable_action_reply(question, ALL) is None
 
 
 def test_should_not_require_tool_that_is_not_offered() -> None:

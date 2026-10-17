@@ -177,14 +177,35 @@ async def current_time_reference(redis: Any) -> str:
     return f"지금 시각: {current_time_text(settings.get('timezone'))}"
 
 
-# 질문에 이 말이 있으면 그 도구가 분명히 필요하다 (앞쪽이 우선)
-_REQUIRED_TOOL_WORDS = [
-    (
-        "get_weather",
-        re.compile(r"날씨|기온|우산|비\s*(와|오|올|가)|눈\s*(와|오|올|이)"),
-    ),
-    ("web_search", re.compile(r"검색|인터넷|뉴스|최신")),
+# 열기·켜기·접속처럼 무언가를 해 달라는 요청 (질문 끝이나 '…해 줘' 꼴)
+_ACTION = re.compile(
+    r"(열어|켜|실행해|접속해|들어가)(서\s|\s*(줘|줄래|줄\s*수|주세요|봐))"
+    r"|(열어|켜|실행해|접속해|들어가)\s*[.?!~]*$"
+)
+_BROWSER = re.compile(r"크롬|브라우저|사이트|홈페이지|웹\s*페이지|네이버|구글|유튜브")
+_WEATHER = re.compile(r"날씨|기온|우산|비\s*(와|오|올|가)|눈\s*(와|오|올|이)")
+_SEARCH = re.compile(r"검색|인터넷|뉴스|최신")
+
+# 질문이 이렇다면 그 도구가 분명히 필요하다 (앞쪽이 우선)
+_REQUIRED_TOOLS = [
+    ("get_weather", _WEATHER.search),
+    # MCP 브라우저(서버__browser_navigate)
+    ("browser_navigate", lambda q: _BROWSER.search(q) and _ACTION.search(q)),
+    ("web_search", _SEARCH.search),
 ]
+
+CANNOT_DO_REPLY = (
+    "죄송해요, 지금은 프로그램을 열거나 사이트에 접속할 수 없어요. "
+    "그런 일을 하는 도구가 연결되어 있지 않아요."
+)
+
+
+def _offered_tool(name: str, offered) -> Optional[str]:
+    """제공된 도구 중 name 인 것 (MCP 도구는 '서버__도구' 이름으로 온다)."""
+    for candidate in offered:
+        if candidate == name or candidate.endswith("__" + name):
+            return candidate
+    return None
 
 
 def required_tool(question: str, offered) -> Optional[str]:
@@ -192,10 +213,25 @@ def required_tool(question: str, offered) -> Optional[str]:
     분명히 도구가 필요한 질문이면 그 도구 이름. 같은 질문에 도구 없이 답한 기록이
     있으면 Qwen2.5-7B 는 auto 에서 도구를 부르지 않고 옛 답을 베낀다(실측).
     """
-    for name, words in _REQUIRED_TOOL_WORDS:
-        if name in offered and words.search(question or ""):
-            return name
+    question = question or ""
+    for name, needs in _REQUIRED_TOOLS:
+        tool = _offered_tool(name, offered)
+        if tool and needs(question):
+            return tool
     return None
+
+
+def unavailable_action_reply(question: str, offered) -> Optional[str]:
+    """
+    열기·접속을 해 달라는데 그걸 할 도구가 없으면 모델 대신 할 답.
+    도구 없이 맡기면 "크롬을 열었습니다" 라고 지어냈다(프롬프트로 막아도 8/12, 실측).
+    """
+    question = question or ""
+    if not _ACTION.search(question):
+        return None
+    if _BROWSER.search(question):
+        return None if _offered_tool("browser_navigate", offered) else CANNOT_DO_REPLY
+    return None if required_tool(question, offered) else CANNOT_DO_REPLY
 
 
 def tool_parser_for(model: Optional[str]) -> Optional[str]:

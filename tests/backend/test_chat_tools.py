@@ -387,3 +387,24 @@ class TestRequiredTool:
         }
         assert requests[1]["tool_choice"] == "auto"
         assert events[-1]["content"] == "부산은 지금 약한 비가 와요."
+
+
+class TestCannotDoWithoutTool:
+    @pytest.mark.asyncio
+    async def test_open_request_without_tool_is_admitted_without_llm(self, db):
+        # 실측: 도구 없이 "크롬을 열었고, 네이버에 접속했습니다" 라고 지어냈다
+        from services.backend.app.services.chat_service import ChatService
+        from shared.tools import CANNOT_DO_REPLY
+
+        llm, requests = scripted_vllm([text_chunk("크롬을 열었습니다.")])
+
+        async def tools():
+            return build_registry({"internet_enabled": False})
+
+        service = ChatService(llm_client=llm, tool_provider=tools)
+        session_id = await conversation.get_active_session_id()
+
+        events = await run_chat(service, session_id, "크롬 켜서 네이버 들어가")
+
+        assert events[-1]["content"] == CANNOT_DO_REPLY
+        assert requests == []

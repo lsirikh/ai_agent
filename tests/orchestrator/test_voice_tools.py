@@ -424,3 +424,20 @@ class TestRequiredTool:
             "function": {"name": "web_search"},
         }
         assert requests[1]["tool_choice"] == "auto"
+
+
+class TestCannotDoWithoutTool:
+    @pytest.mark.asyncio
+    async def test_open_request_without_tool_is_admitted_without_llm(self):
+        # 실측: 도구 없이 "크롬을 열었습니다" 라고 말했다
+        from shared.tools import CANNOT_DO_REPLY
+
+        orchestrator, _, requests, spoken = make(
+            [[text_chunk("크롬을 열었습니다.")]],
+            registry=build_registry({"internet_enabled": False}),
+        )
+
+        await voice_turn(orchestrator, "크롬 켜줘.")
+
+        assert requests == []
+        assert " ".join(spoken) == CANNOT_DO_REPLY

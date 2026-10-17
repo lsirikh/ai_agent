@@ -24,7 +24,12 @@ from shared.tool_calling import (
     stream_with_tools,
     tool_choice_for,
 )
-from shared.tools import ToolRegistry, required_tool, tool_parser_for
+from shared.tools import (
+    ToolRegistry,
+    required_tool,
+    tool_parser_for,
+    unavailable_action_reply,
+)
 
 from .pipeline_logger import PipelineLogger
 
@@ -430,6 +435,13 @@ class LLMClient:
             self.tools_supported and tool_parser_for(await self.resolve_model())
         ):
             tools = None
+        # 열기·접속을 할 도구가 없으면 모델에 맡기지 않는다(했다고 지어낸다 — 실측)
+        cannot = unavailable_action_reply(
+            user_message or "", tools.names() if tools else []
+        )
+        if cannot:
+            yield cannot
+            return
         reserve = schema_tokens(tools.schemas()) if tools else 0
         if messages or not user_message:
             built_messages = self._build_messages(user_message, messages, rag_context)
