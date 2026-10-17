@@ -355,10 +355,11 @@ class TestVoiceConfirmation:
     @pytest.mark.asyncio
     async def test_should_ask_then_run_after_yes(self):
         ran = []
+        # 승인 전 질문은 정해진 문장으로 한다 — 모델에 맡기면
+        # "실행하지 말고 물어보라" 는 도구 결과에도 "열었습니다" 라고 지어냈다(실측)
         orchestrator, backend, requests, spoken = make(
             [
                 [call_chunk(("ironwall__restart", '{"service": "stt"}'))],
-                [text_chunk("STT 서비스를 재시작할까요?")],
                 [text_chunk("재시작했어요.")],
             ],
             registry=self._registry(ran),
@@ -366,14 +367,15 @@ class TestVoiceConfirmation:
 
         await voice_turn(orchestrator, "STT 재시작해 줘")
         assert ran == []
-        assert spoken == ["STT 서비스를 재시작할까요?"]
+        assert len(spoken) == 1 and "restart" in spoken[0] and "할까요" in spoken[0]
+        assert len(requests) == 1
 
         await voice_turn(orchestrator, "네")
 
         assert ran == [{"service": "stt"}]
         assert spoken[-1] == "재시작했어요."
-        assert "stt 재시작 완료" in requests[2]["messages"][-1]["content"]
-        assert requests[2]["tools"] is None
+        assert "stt 재시작 완료" in requests[1]["messages"][-1]["content"]
+        assert requests[1]["tools"] is None
 
     @pytest.mark.asyncio
     async def test_should_not_run_after_no(self):
@@ -383,7 +385,6 @@ class TestVoiceConfirmation:
         orchestrator, backend, requests, spoken = make(
             [
                 [call_chunk(("ironwall__restart", '{"service": "stt"}'))],
-                [text_chunk("재시작할까요?")],
             ],
             registry=self._registry(ran),
         )
@@ -393,7 +394,7 @@ class TestVoiceConfirmation:
 
         assert ran == []
         assert spoken[-1] == CANCELLED_REPLY
-        assert len(requests) == 2
+        assert len(requests) == 1
         assert (
             json.dumps(backend.saved[-1]["content"], ensure_ascii=False).find(
                 CANCELLED_REPLY
@@ -441,3 +442,42 @@ class TestCannotDoWithoutTool:
 
         assert requests == []
         assert " ".join(spoken) == CANNOT_DO_REPLY
+
+    @pytest.mark.asyncio
+    async def test_browser_open_asks_with_url_and_answer_after_yes_is_not_refused(self):
+        # 실측: 승인 전 "크롬을 열었고 이동했습니다" 라고 말했고,
+        # "응 실행해" 는 새 열기 요청으로 오인돼 "할 수 없어요" 라고 답했다
+        opened = []
+
+        async def navigate(args):
+            opened.append(args)
+            return ToolResult("Page Title: Daum")
+
+        registry = ToolRegistry(
+            [
+                Tool("get_time", "시각", {"type": "object"}, AsyncMock()),
+                Tool(
+                    "browser__browser_navigate",
+                    "열기",
+                    {"type": "object"},
+                    navigate,
+                    needs_confirm=True,
+                ),
+            ]
+        )
+        orchestrator, _, requests, spoken = make(
+            [
+                [call_chunk(("browser__browser_navigate", '{"url": "https://daum.net"}'))],
+                [text_chunk("다음 사이트를 열었어요.")],
+            ],
+            registry=registry,
+        )
+
+        await voice_turn(orchestrator, "크롬 켜서 다음 사이트 들어가 줘")
+        assert opened == []
+        assert spoken == ["daum.net 을 열까요? 네 또는 아니오로 답해 주세요."]
+
+        await voice_turn(orchestrator, "응. 실행해.")
+
+        assert opened == [{"url": "https://daum.net"}]
+        assert spoken[-1] == "다음 사이트를 열었어요."

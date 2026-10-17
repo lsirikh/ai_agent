@@ -196,7 +196,7 @@ class SimpleLLMClient:
         if tools and (not self.tools_supported or not tool_parser_for(model_name)):
             tools = None
         # 열기·접속을 할 도구가 없으면 모델에 맡기지 않는다(했다고 지어낸다 — 실측)
-        cannot = unavailable_action_reply(prompt, tools.names() if tools else [])
+        cannot = tools and unavailable_action_reply(prompt, tools.names())
         if cannot:
             yield cannot
             return

@@ -10,6 +10,7 @@ import os
 import re
 import time
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 import shared.tools as tools
 from shared.knowledge_filter import relevant_results
@@ -51,6 +52,26 @@ YES_PATTERN = re.compile(
 )
 NO_PATTERN = re.compile(r"^\s*(아니|아뇨|취소|하지\s*마|싫어|no\b)", re.IGNORECASE)
 CANCELLED_REPLY = "알겠어요, 실행하지 않을게요."
+
+
+def confirm_question(name: str, arguments: Any) -> str:
+    """
+    확인이 필요한 도구를 실행하기 전에 물을 말.
+    모델에 맡기면 "실행하지 말고 물어보라" 는 도구 결과에도
+    "크롬을 열었고 이동했습니다" 라고 지어냈다(실측).
+    """
+    try:
+        args = json.loads(arguments) if isinstance(arguments, str) else arguments
+    except ValueError:
+        args = None
+    url = args.get("url") if isinstance(args, dict) else None
+    # 소리로 읽기 좋게 사이트 이름만 (https://www.daum.net → daum.net)
+    site = urlsplit(url).netloc.removeprefix("www.") if url else ""
+    if url:
+        action = f"{site or url} 을 열까요?"
+    else:
+        action = f"{name.split('__')[-1]} 을 실행할까요?"
+    return f"{action} 네 또는 아니오로 답해 주세요."
 
 
 def strip_wake_phrase(text: str) -> str:
@@ -561,6 +582,17 @@ class Orchestrator:
                 text, history=history, summary=summary, rag_context=rag_context,
                 tools=registry, confirm=self._defer_confirm
             ):
+                if isinstance(token, dict) and token["type"] == "tool_confirm":
+                    # 실행 전 확인: 정해진 질문을 말하고 다음 턴의 예/아니오를 기다린다.
+                    # 모델의 이어지는 말은 쓰지 않는다(했다고 지어낸다)
+                    self._pending_confirm = {
+                        k: token[k] for k in ("id", "name", "arguments")
+                    }
+                    full_response = confirm_question(
+                        token["name"], token["arguments"]
+                    )
+                    await speak_sentence(full_response)
+                    break
                 if isinstance(token, dict):
                     # 도구 이벤트: 실행 전 짧은 안내를 말하고,
                     # 결과는 저장만 한다(TTS 로 보내지 않음)
