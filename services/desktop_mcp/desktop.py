@@ -123,14 +123,31 @@ def _save_excel(path: Path, content: str) -> None:
     book.save(str(path))
 
 
+_NUMBERED_HEADING = re.compile(r"^\d+[.)]\s+")
+
+
+def slide_blocks(content: str) -> list:
+    """슬라이드마다 [제목, 본문 줄…]. 빈 줄로 나누고, 빈 줄이 없으면
+    맨 앞의 번호 줄('1. ', '2) ')에서 나눈다(로컬 LLM 이 그렇게 보냈다 — 실측)."""
+    text = content.strip()
+    blocks = [b for b in re.split(r"\n\s*\n", text) if b.strip()]
+    if len(blocks) <= 1:
+        blocks = re.split(r"\n(?=\d+[.)]\s)", text)
+    slides = []
+    for block in blocks:
+        lines = [line.strip() for line in block.strip().split("\n") if line.strip()]
+        if lines:
+            lines[0] = _NUMBERED_HEADING.sub("", lines[0])
+            slides.append(lines)
+    return slides or [[""]]
+
+
 def _save_powerpoint(path: Path, content: str) -> None:
-    """빈 줄로 슬라이드를 나눈다. 첫 줄은 제목, 나머지는 본문."""
+    """슬라이드마다 첫 줄은 제목, 나머지는 본문(slide_blocks)."""
     import pptx
 
     deck = pptx.Presentation()
-    blocks = [b for b in re.split(r"\n\s*\n", content.strip()) if b.strip()] or [""]
-    for block in blocks:
-        lines = block.strip().split("\n")
+    for lines in slide_blocks(content):
         slide = deck.slides.add_slide(deck.slide_layouts[1])  # 제목과 내용
         slide.shapes.title.text = lines[0]
         slide.placeholders[1].text = "\n".join(lines[1:])

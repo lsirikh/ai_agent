@@ -99,3 +99,24 @@ def test_office_documents_are_saved_without_office_and_opened(
 
     assert desktop.read_document(saved) == expected
     assert opened == [saved]
+
+
+def test_numbered_headings_become_separate_slides() -> None:
+    # 실측: '2장 만들어 줘' 에 로컬 LLM 은 빈 줄 대신 '1. … 2. …' 로 나눠 보내
+    # 슬라이드가 1장이 됐다
+    content = (
+        "1. EdgeVoice 소개\n   - 한국어 AI 어시스턴트\n"
+        "2. 주요 기능\n   - 웹 검색\n   - 파일 저장"
+    )
+
+    assert desktop.slide_blocks(content) == [
+        ["EdgeVoice 소개", "- 한국어 AI 어시스턴트"],
+        ["주요 기능", "- 웹 검색", "- 파일 저장"],
+    ]
+
+
+def test_blank_lines_still_split_slides() -> None:
+    assert desktop.slide_blocks("제목\n본문\n\n둘째\n내용") == [
+        ["제목", "본문"],
+        ["둘째", "내용"],
+    ]
