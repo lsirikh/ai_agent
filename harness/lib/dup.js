@@ -42,7 +42,9 @@ const eligible = f => CODE_EXT.test(f) && !SKIP.test(f) && !TEST.test(f);
 // → [{ file, start, end, lines, other: 'path:start-end' }] (최대 10)
 function find(wt, base, o) {
   const K = Math.max(4, Number(o && o.minLines) || 8);
-  const changed = G.diffNames(wt, base, null, ['--diff-filter=AM']).concat(G.statusEntries(wt).filter(e => e.code === '??').map(e => e.path))
+  // 추적되지 않은 새 파일은 git diff 에 나오지 않는다 — 모든 줄이 더한 줄이다(2026-10-17 적대적 검증: 커밋 전 새 파일의 복사를 놓쳤다)
+  const untracked = new Set(G.statusEntries(wt).filter(e => e.code === '??').map(e => e.path.replace(/\\/g, '/')));
+  const changed = G.diffNames(wt, base, null, ['--diff-filter=AM']).concat([...untracked])
     .map(f => f.replace(/\\/g, '/')).filter((f, i, a) => a.indexOf(f) === i && eligible(f) && fs.existsSync(path.join(wt, f)));
   if (!changed.length) return [];
   const exts = new Set(changed.map(f => path.extname(f).toLowerCase()));
@@ -61,7 +63,7 @@ function find(wt, base, o) {
   const out = [];
   for (const f of changed) {
     const L = cache.get(f) || linesOf(path.join(wt, f));
-    const added = addedLines(wt, base, f);
+    const added = untracked.has(f) ? new Set(L.map(x => x.n)) : addedLines(wt, base, f);
     let cur = null;
     for (let i = 0; i + K <= L.length; i++) {
       const win = L.slice(i, i + K);

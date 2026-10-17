@@ -395,7 +395,10 @@ function procsIn(dir) {
     const r = spawnSync('ps', ['-eo', 'pid=,comm=,args='], { encoding: 'utf8', timeout: 15000, maxBuffer: 32 << 20 });
     rows = String(r.stdout || '').split('\n').map(l => /^\s*(\d+)\s+(\S+)\s+(.*)$/.exec(l)).filter(Boolean).map(m => ({ pid: Number(m[1]), name: m[2], text: m[3] }));
   }
-  return rows.filter(x => x.pid && !self.has(x.pid) && variants.some(v => x.text.toLowerCase().includes(v))).map(({ pid, name }) => ({ pid, name }));
+  // 경로 뒤가 구분자 · 따옴표 · 공백 · 끝일 때만 그 폴더다 — [2026-10-17 적대적 검증] 접두어로만 비교해 …/<id> 를 치우다
+  //   옆 경로 …/<id>-2 에서 도는 살아 있는 작업을 잡았다.
+  const hit = text => { const t = text.toLowerCase(); return variants.some(v => { for (let i = t.indexOf(v); i >= 0; i = t.indexOf(v, i + 1)) { const c = t[i + v.length]; if (c === undefined || /[\\/"'\s]/.test(c)) return true; } return false; }); };
+  return rows.filter(x => x.pid && !self.has(x.pid) && hit(x.text)).map(({ pid, name }) => ({ pid, name }));
 }
 function killProcsIn(dir) {
   const found = procsIn(dir);

@@ -175,7 +175,14 @@ function prog(word) {
 //   문법은 하나만 쓴다(도구가 정한다). 두 문법으로 겹쳐 읽으면 한쪽이 다른 쪽의 데이터(heredoc 본문 등)를
 //   명령으로 오독해 오탐한다 — 실측: bash `$(cat <<'EOF' … (git push) … EOF)` 를 PowerShell 로 읽으면 걸린다.
 function analyze(command, opts) {
-  const ctx = { cwd: opts.cwd || process.cwd(), root: undefined, depth: opts.depth || 0, worker: !!opts.worker };
+  const cwd = opts.cwd || process.cwd();
+  // 작업자 모드의 경계는 처음 cwd 의 worktree 로 고정한다 — [2026-10-17 적대적 검증] `cd <메인 저장소> && rm -rf src` 에서
+  //   경계를 cd 뒤의 저장소(메인)로 다시 잡아 메인의 소스 삭제가 "안쪽" 으로 판정됐다.
+  const info0 = opts.wtRoot === undefined && opts.worker ? C.repoInfo(cwd) : null;
+  const wtRoot = opts.wtRoot !== undefined ? opts.wtRoot : (info0 ? info0.root : null);
+  // 메인 저장소(공통 .git 의 부모) — 임시 폴더 안에 있어도 그 안은 임시 폴더 예외를 받지 않는다
+  const mainRoot = opts.mainRoot !== undefined ? opts.mainRoot : (info0 && path.basename(info0.common).toLowerCase() === '.git' ? path.dirname(info0.common) : null);
+  const ctx = { cwd, root: undefined, depth: opts.depth || 0, worker: !!opts.worker, wtRoot, mainRoot, cwdUnknown: !!opts.cwdUnknown };
   return analyzeString(command, opts.mode || 'bash', ctx);
 }
 
@@ -212,10 +219,12 @@ function analyzeCommand(words0, mode, ctx) {
 
   if (CD.has(p)) {
     const t = args.find(a => !a.startsWith('-'));
-    if (t) ctx.cwd = resolveTarget(ctx.cwd, t) || ctx.cwd;
+    const to = t ? resolveTarget(ctx.cwd, String(t).replace(/^["']|["']$/g, '')) : null;
+    if (to) ctx.cwd = to; else if (t) ctx.cwdUnknown = true;   // 어디로 갔는지 모른다 — 작업자 모드는 그 뒤 상대 경로를 막는다
     ctx.root = undefined;
     return null;
   }
+  if (ctx.worker) { const w = checkWorker(p, args, words0, mode, ctx); if (w) return w; }
   const inner = { ...ctx, depth: ctx.depth + 1 };
   if (SHELLS.has(p)) {
     const k = args.findIndex(a => /^-[a-z]*c[a-z]*$/i.test(a) && !a.startsWith('--'));
@@ -224,20 +233,20 @@ function analyzeCommand(words0, mode, ctx) {
   }
   if (PWSH.has(p)) {
     const k = args.findIndex(a => /^[-/](c|co|com|comm|comma|comman|command)$/i.test(a));
-    if (k >= 0) return analyze(args.slice(k + 1).join(' '), { cwd: ctx.cwd, mode: 'ps', depth: ctx.depth + 1, worker: ctx.worker });
+    if (k >= 0) return analyze(args.slice(k + 1).join(' '), { cwd: ctx.cwd, mode: 'ps', depth: ctx.depth + 1, worker: ctx.worker, wtRoot: ctx.wtRoot, mainRoot: ctx.mainRoot, cwdUnknown: ctx.cwdUnknown });
     const e = args.findIndex(a => /^[-/](e|ec|en|enc|enco|encod|encode|encoded|encodedc|encodedcommand)$/i.test(a));
     if (e >= 0 && args[e + 1]) {
       let decoded = '';
       try { decoded = Buffer.from(args[e + 1], 'base64').toString('utf16le'); } catch { decoded = ''; }
-      if (decoded) return analyze(decoded, { cwd: ctx.cwd, mode: 'ps', depth: ctx.depth + 1, worker: ctx.worker });
+      if (decoded) return analyze(decoded, { cwd: ctx.cwd, mode: 'ps', depth: ctx.depth + 1, worker: ctx.worker, wtRoot: ctx.wtRoot, mainRoot: ctx.mainRoot, cwdUnknown: ctx.cwdUnknown });
     }
     const f = args.find(a => !a.startsWith('-'));
-    if (f && !/\.ps1$/i.test(f)) return analyze(args.filter(a => !/^-/.test(a)).join(' '), { cwd: ctx.cwd, mode: 'ps', depth: ctx.depth + 1, worker: ctx.worker });
+    if (f && !/\.ps1$/i.test(f)) return analyze(args.filter(a => !/^-/.test(a)).join(' '), { cwd: ctx.cwd, mode: 'ps', depth: ctx.depth + 1, worker: ctx.worker, wtRoot: ctx.wtRoot, mainRoot: ctx.mainRoot, cwdUnknown: ctx.cwdUnknown });
     return null;
   }
   if (p === 'cmd') {
     const k = args.findIndex(a => /^\/[ck]$/i.test(a));
-    if (k >= 0) return analyze(args.slice(k + 1).join(' '), { cwd: ctx.cwd, mode: 'ps', depth: ctx.depth + 1, worker: ctx.worker });
+    if (k >= 0) return analyze(args.slice(k + 1).join(' '), { cwd: ctx.cwd, mode: 'ps', depth: ctx.depth + 1, worker: ctx.worker, wtRoot: ctx.wtRoot, mainRoot: ctx.mainRoot, cwdUnknown: ctx.cwdUnknown });
     return null;
   }
   if (p === 'eval' || p === 'invoke-expression' || p === 'iex') {
@@ -275,7 +284,10 @@ const GIT_VALUE_OPTS = new Set(['-c', '--git-dir', '--work-tree', '--namespace',
 const WHOLE_TREE = new Set(['.', './', '.\\', ':/', ':/.', ':/*', '*', './*', '.\\*', ':(top)', ':(top).', ':(top)*', '-A', ':']);
 
 const REASONS = {
-  outsideWorker: '하네스 작업자는 자기 worktree 밖의 파일 · 폴더를 지울 수 없습니다. worktree 안에서만 지우세요 — 꼭 필요하면 BLOCKED.md 에 무엇을 왜 지워야 하는지 적으세요.',
+  workerUnresolved: '하네스 작업자는 어디인지 풀 수 없는 경로(변수 · 명령 치환 · 위치를 모르는 cd 뒤의 상대 경로)를 지우거나 쓸 수 없습니다. worktree 안의 구체적인 경로로 적으세요.',
+  dockerGlobal: '하네스 작업자는 docker 데몬 전체의 컨테이너 · 이미지 · 볼륨 · 네트워크를 지우거나 멈출 수 없습니다(사용자가 쓰는 서비스일 수 있다). 이 작업의 compose 프로젝트만 docker compose 로 다루세요.',
+  dockerProject: '하네스 작업자는 compose 프로젝트 이름(-p · --project-name)을 바꿀 수 없습니다 — 하네스가 이 작업만의 COMPOSE_PROJECT_NAME 을 줬습니다(메인 체크아웃의 실행 중 컨테이너와 섞이지 않게).',
+  outsideWorker: '하네스 작업자는 자기 worktree 밖의 파일 · 폴더를 지우거나 바꿀 수 없습니다(임시 폴더는 된다). worktree 안에서 하세요 — 꼭 필요하면 BLOCKED.md 에 무엇을 왜 해야 하는지 적으세요.',
   // [버그 2026-10-01] AGENTS.md 는 "사용자가 명시한 뒤에만" 이라 적었는데 허락의 길이 없었다 — 좁힌 하네스 명령으로 안내한다.
   push: 'git push 는 직접 실행하지 않습니다. 사용자가 push 를 **명시적으로** 요청했다면 `node harness/cli.js push [<remote>] [<branch>]` 를 쓰세요 — 강제 push 없이 빨리감기만 하고, 원격이 앞서 있으면 거부합니다(실행 때 승인 프롬프트가 뜹니다). 요청이 없었다면 커밋까지만 하고 무엇을 올릴지 보고하세요. 사용자가 직접 올릴 때: 터미널판은 `! git push …`, VS Code 확장은 보기 → 터미널에서 실행합니다.',
   reset: 'git reset --hard 는 미커밋 변경을 되돌릴 수 없게 지웁니다. 커밋을 되돌리려면 `git revert <sha>`, 자기가 고친 파일 하나를 되돌리려면 `git restore -- <file>` 을 쓰세요.',
@@ -485,15 +497,81 @@ function secretReason(what, files) {
 // ── 삭제 ──
 // 작업자 모드(--worker): 자기 worktree 밖의 파일 · 폴더는 지우지 못한다. [2026-10-16 실측] 허용 목록을 걷어 낸(open) 작업자가
 //   저장소 밖 폴더를 rm -rf 로 지웠다 — 대화형 guard 는 위험한 대상(루트 · 홈 · 저장소 · .git)만 막는다.
-function outsideWorktree(targets, mode, ctx) {
-  const root = repoRootOf(ctx.cwd, ctx);
+//   [2026-10-17 적대적 검증] 경계는 처음 worktree(ctx.wtRoot) — cd 로 옮겨 다녀도 바뀌지 않는다. 풀 수 없는 경로(변수 · cd 뒤 상대 경로)는 막는다.
+//   allowTmp: 임시 폴더(os.tmpdir · TEMP · TMP · TMPDIR)는 쓰고 지워도 된다.
+const tmpRoots = () => [os.tmpdir(), process.env.TEMP, process.env.TMP, process.env.TMPDIR].filter(Boolean).map(t => C.real(path.resolve(t)));
+function workerTarget(t0, mode, ctx, allowTmp) {
+  let t = String(mode === 'ps' && !C.IS_WIN ? t0.replace(/\\/g, '/') : t0).trim().replace(/^["']|["']$/g, '');
+  if (!t || /^(\/dev\/null|nul|\$null)$/i.test(t)) return null;
+  t = t.replace(/^\$\{?PWD\}?(?=$|[\\/])/i, () => ctx.cwd);
+  const relative = !path.isAbsolute(expandHome(t)) && !/^[a-zA-Z]:/.test(t) && !/^\//.test(t);
+  if (relative && ctx.cwdUnknown) return `${REASONS.workerUnresolved} (대상: ${t})`;
+  const abs = resolveTarget(ctx.cwd, t);
+  if (!abs) return `${REASONS.workerUnresolved} (대상: ${t.replace(new RegExp(SUB, 'g'), '$(…)')})`;
+  const root = ctx.wtRoot || repoRootOf(ctx.cwd, ctx);
   if (!root) return null;
-  for (const t0 of targets) {
-    const t = String(mode === 'ps' && !C.IS_WIN ? t0.replace(/\\/g, '/') : t0).trim().replace(/^["']|["']$/g, '');
-    const abs = resolveTarget(ctx.cwd, t);
-    if (!abs) continue;   // 풀 수 없는 대상은 아래의 재귀 삭제 규칙이 본다
-    const norm = C.real(abs);
-    if (!(C.samePath(norm, root) || isAncestor(root, norm))) return `${REASONS.outsideWorker} (대상: ${t})`;
+  const norm = C.real(abs);
+  if (C.samePath(norm, root) || isAncestor(root, norm)) return null;
+  const inMain = ctx.mainRoot && (C.samePath(norm, C.real(ctx.mainRoot)) || isAncestor(C.real(ctx.mainRoot), norm));
+  if (allowTmp && !inMain && tmpRoots().some(r => C.samePath(norm, r) || isAncestor(r, norm))) return null;
+  return `${REASONS.outsideWorker} (대상: ${t})`;
+}
+function outsideWorktree(targets, mode, ctx) {
+  for (const t of targets) { const r = workerTarget(t, mode, ctx, true); if (r) return r; }
+  return null;
+}
+// 작업자 모드에서만 보는 것 — 삭제 말고도 worktree 밖을 바꾸는 길: 리다이렉션 · 쓰기 cmdlet · cp/mv · robocopy · find -delete ·
+//   한 줄 코드 속 삭제/쓰기 경로 · docker 데몬 전체를 바꾸는 명령(자동 보고 caed67b9a2f1 와 같은 계열).
+const WRITE_CMDLETS = new Set(['set-content', 'sc', 'add-content', 'ac', 'clear-content', 'clc', 'out-file', 'tee', 'tee-object', 'new-item', 'ni']);
+const COPY_MOVE = new Set(['cp', 'copy', 'copy-item', 'cpi', 'mv', 'move', 'move-item', 'mi', 'ren', 'rename-item', 'rni', 'xcopy']);
+const DOCKER_GLOBAL = /^(rm|stop|kill|rmi|restart|pause|prune|container|volume|network|image|system|builder)$/i;
+const valueOf = (args, names) => { const k = args.findIndex(a => names.test(a)); return k >= 0 && args[k + 1] != null ? args[k + 1] : null; };
+// Windows 식 옵션(/Y · /MIR · /XD:…) — '/' 뒤에 영문자만 오고 다른 '/' 가 없다. POSIX 절대 경로(/tmp/x)를 옵션으로 버리지 않게.
+const WIN_OPT = /^\/[A-Za-z]+(:[^/]*)?$/;
+const positionals = args => { const out = []; for (let i = 0; i < args.length; i++) { const a = args[i]; if (/^-/.test(a) || (WIN_OPT.test(a) && a.length <= 6)) { if (/^-(path|literalpath|lp|destination|filepath|value|encoding|itemtype|name|filter|include|exclude)$/i.test(a)) i++; continue; } out.push(a); } return out; };
+function checkWorker(p, args, words0, mode, ctx) {
+  // 리다이렉션: `> 파일` · `>>파일` · 붙여 쓴 `x>>/c/k.txt`
+  for (let i = 0; i < words0.length; i++) {
+    const w = String(words0[i]);
+    if (/\s/.test(w)) continue;
+    const m = /^(?:\d*|&)>>?(.*)$/.exec(w) || /^[^<>]*?\d*>>?(.+)$/.exec(w);
+    if (!m) continue;
+    const target = m[1] || words0[i + 1];
+    if (!target || /^&/.test(target)) continue;
+    const r = workerTarget(target, mode, ctx, true); if (r) return r;
+  }
+  if (WRITE_CMDLETS.has(p)) {
+    const t = valueOf(args, /^-(path|literalpath|lp|filepath)$/i) || positionals(args)[0];
+    if (t) { const r = workerTarget(t, mode, ctx, true); if (r) return r; }
+  }
+  if (COPY_MOVE.has(p)) {
+    const pos = positionals(args), dest = valueOf(args, /^-destination$/i) || (pos.length > 1 ? pos[pos.length - 1] : null);
+    const srcs = valueOf(args, /^-(path|literalpath|lp)$/i) ? [valueOf(args, /^-(path|literalpath|lp)$/i)] : (pos.length > 1 ? pos.slice(0, -1) : pos);
+    const moving = /^(mv|move|move-item|mi|ren|rename-item|rni)$/.test(p);
+    for (const t of [...(dest ? [dest] : []), ...(moving ? srcs : [])]) { const r = workerTarget(t, mode, ctx, true); if (r) return r; }
+  }
+  if (p === 'robocopy') {
+    const pos = args.filter(a => !WIN_OPT.test(a));   // /MIR · /XD … 만 옵션 — POSIX 절대 경로(/tmp/…)는 경로다(CI 실측)
+    const moving = args.some(a => /^\/(mov|move)$/i.test(a));
+    for (const t of [pos[1], ...(moving ? [pos[0]] : [])].filter(Boolean)) { const r = workerTarget(t, mode, ctx, true); if (r) return r; }
+  }
+  if (p === 'find' && args.some((a, i) => a === '-delete' || (/^-(exec|execdir|ok|okdir)$/.test(a) && /^(rm|rmdir|unlink|del|shred)$/.test(prog(args[i + 1] || ''))))) {
+    for (const t of args.slice(0, Math.max(0, args.findIndex(a => /^[-(!]/.test(a))))) { const r = workerTarget(t, mode, ctx, true); if (r) return r; }
+  }
+  if (INLINE_CODE[p]) {
+    const k = args.findIndex(a => INLINE_CODE[p].includes(a)), code = k >= 0 ? String(args[k + 1] || '') : '';
+    if (/rmSync|rmdirSync|unlinkSync|rimraf|\brm\(|rmtree|os\.remove|os\.unlink|os\.rmdir|\.unlink\(|writeFileSync|appendFileSync|renameSync|shutil\.move|open\([^)]*['"][wa]/.test(code)) {
+      for (const m of code.matchAll(/'((?:\\.|[^'\\])*)'|"((?:\\.|[^"\\])*)"|`((?:\\.|[^`\\])*)`/g)) {
+        const s = (m[1] != null ? m[1] : m[2] != null ? m[2] : m[3]).replace(/\\(.)/g, '$1');
+        if (/^([a-zA-Z]:[\\/]|\/|~|\.\.)/.test(s)) { const r = workerTarget(s, mode, ctx, true); if (r) return r; }
+      }
+    }
+  }
+  if (p === 'docker' || p === 'docker-compose') {
+    const sub = args.find(a => !a.startsWith('-')) || '';
+    const compose = p === 'docker-compose' || sub === 'compose';
+    if (compose && args.some(a => /^(-p|--project-name)(=|$)/.test(a))) return REASONS.dockerProject;
+    if (!compose && DOCKER_GLOBAL.test(sub)) return REASONS.dockerGlobal;
   }
   return null;
 }
