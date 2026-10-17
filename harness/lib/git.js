@@ -312,6 +312,51 @@ function clearWorktreeSlot(root, wt, branch, waitMs, o) {
   }
 }
 
+// 줄바꿈 복원 — [2026-10-17 자동 보고 5d6643b86c24] Windows 작업자가 LF 파일을 CRLF 로 통째로 바꿔 저장해 변경 규모가 몇 배로 부풀고
+//   메인과 파일 전체가 충돌했다. 커밋 전에, 고친 파일 중 HEAD 와 줄바꿈이 통째로 달라진 것(새 줄바꿈이 절반 이상)을 HEAD 의 줄바꿈으로 되돌린다.
+//   git 이 줄바꿈을 바꾸는 저장소(core.autocrlf · text/eol 속성)와 바이너리는 손대지 않는다. → 되돌린 파일(저장소 상대)
+function eolStats(buf) {
+  let crlf = 0, lf = 0;
+  for (let i = 0; i < buf.length; i++) if (buf[i] === 0x0a) { if (i > 0 && buf[i - 1] === 0x0d) crlf++; else lf++; }
+  return { crlf, lf };
+}
+function toEol(buf, crlf) {
+  const out = [];
+  for (let i = 0; i < buf.length; i++) {
+    const b = buf[i];
+    if (!crlf && b === 0x0d && buf[i + 1] === 0x0a) continue;
+    if (crlf && b === 0x0a && !(i > 0 && buf[i - 1] === 0x0d)) out.push(0x0d);
+    out.push(b);
+  }
+  return Buffer.from(out);
+}
+function keepEol(wt) {
+  const ac = git(wt, ['config', '--get', 'core.autocrlf'], { allowFail: true }).out.trim().toLowerCase();
+  if (ac === 'true' || ac === 'input') return [];
+  const files = statusEntries(wt).filter(e => /M/.test(e.code)).map(e => e.path.replace(/\\/g, '/'));
+  if (!files.length) return [];
+  const normalized = new Set();
+  for (const l of git(wt, ['check-attr', 'text', 'eol', '--', ...files], { allowFail: true }).out.split(/\r?\n/)) {
+    const m = /^(.*): (text|eol): (.*)$/.exec(l);
+    if (m && !/^(unset|unspecified)$/.test(m[3])) normalized.add(m[1]);
+  }
+  const fixed = [];
+  for (const f of files) {
+    if (normalized.has(f)) continue;
+    const abs = path.join(wt, f);
+    let cur; try { cur = fs.readFileSync(abs); } catch { continue; }
+    if (cur.length > 8 * 1024 * 1024 || cur.includes(0)) continue;
+    const b = spawnSync('git', ['show', `HEAD:${f}`], { cwd: wt, windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: 30000 });
+    if (b.status !== 0 || !b.stdout || b.stdout.includes(0)) continue;
+    const sb = eolStats(b.stdout), sc = eolStats(cur), total = sc.crlf + sc.lf;
+    let fixedBuf = null;
+    if (sb.crlf === 0 && sb.lf > 0 && sc.crlf > 0 && sc.crlf * 2 >= total) fixedBuf = toEol(cur, false);
+    else if (sb.lf === 0 && sb.crlf > 0 && sc.lf > 0 && sc.lf * 2 >= total) fixedBuf = toEol(cur, true);
+    if (!fixedBuf) continue;
+    try { fs.writeFileSync(abs, fixedBuf); fixed.push(f); } catch { /* 다음 턴에 */ }
+  }
+  return fixed;
+}
 // 원래 자리를 비우지 못했을 때 옆 경로(<wt>-2, -3 …)를 쓴다 — 비어 있거나 이미 그 브랜치의 worktree 인 첫 자리. 찾으면 P 를 옮기고 true.
 //   [2026-10-16 자동 이슈 #16] 편집기 언어 서버 · 빌드 서버가 남은 폴더를 잠가 accept 가 반복 거부됐다(손으로 지워도 다시 잠김).
 //   잠근 프로세스는 끝내지 않는다(사용자의 편집기일 수 있다) — 남은 폴더는 gc 가 다시 치운다.
@@ -483,7 +528,7 @@ function copyWorktreeInclude(root, wt) {
 }
 
 module.exports = {
-  git, identityArgs, headSha, isWorktreeRoot, removeEmptyDir, clearWorktreeSlot, slotOpts, useAltWorktree, procsIn, killProcsIn, salvageLeftover, currentBranch, branchExists, tagExists, isAncestor, ensureRepo, isRepo, statusEntries, dirtyFiles, isClean, ignoredChanges,
+  git, identityArgs, headSha, isWorktreeRoot, removeEmptyDir, clearWorktreeSlot, slotOpts, useAltWorktree, keepEol, procsIn, killProcsIn, salvageLeftover, currentBranch, branchExists, tagExists, isAncestor, ensureRepo, isRepo, statusEntries, dirtyFiles, isClean, ignoredChanges,
   commitAll, unaddablePaths, isSecretPath, ensureExclude, addWorktree, worktreeList, worktreeRegistered, checkoutOf, mainWorktree, removeWorktree, samePath,
   diffNames, mergeBase, unmergedFiles, mergeInProgress, hasConflictMarkers, hasConflictMarkersText, MARKER_RE, worktreeIncludeFiles, copyWorktreeInclude, sha1, LOCK_ERR,
   gitlinks, fillSubmodules, dropSubmoduleClones, worktreeLinks,

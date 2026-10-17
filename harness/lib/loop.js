@@ -297,6 +297,11 @@ function checkpoint(c, label, o) {
   const { task, P, root } = c;
   const excluded = [], skipped = [];
   let sha = null;
+  // 커밋 전에 통째로 바뀐 줄바꿈을 원래대로(자동 보고 5d6643b86c24) — 변경 규모 · 충돌이 실제 바꾼 줄만큼이 되게.
+  try {
+    const eol = G.keepEol(P.wt);
+    if (eol.length) { task.eol_restored = [...new Set([...(task.eol_restored || []), ...eol])]; S.log(root, task.id, { event: 'eol_restored', label, files: eol }); }
+  } catch { /* 줄바꿈 복원 실패는 커밋을 막지 않는다 */ }
   // 작업 브랜치에서만 커밋한다 — 세션이 worktree 를 다른 브랜치로 옮겼으면(권한 규칙은 경계가 아니다) 그 브랜치에 쌓지 않는다.
   try { sha = G.commitAll(P.wt, `harness(${task.id}): ${label}`, { excluded, skipped, branch: task.branch }); }
   catch (e) {
@@ -523,6 +528,7 @@ function finish(c, status, reason) {
       task.diff = { insertions: Number((/(\d+) insertion/.exec(st) || [])[1] || 0), deletions: Number((/(\d+) deletion/.exec(st) || [])[1] || 0),
         added_files: G.diffNames(root, task.base_commit, task.branch, ['--diff-filter=A']).filter(f => !f.startsWith('.harness/')).length };
       task.tests_modified = G.diffNames(root, task.base_commit, task.branch, ['--diff-filter=MD']).filter(isTestFile);
+      task.tests_added = G.diffNames(root, task.base_commit, task.branch, ['--diff-filter=A']).filter(isTestFile);
       task.checks_modified = checksModifiedOf(root, task, all);
       task.head = G.headSha(root, task.branch);
     }
@@ -625,6 +631,9 @@ function summaryKo(task) {
   out.push(`다음: ${next}`);
   const warn = [];
   if ((task.checks_modified || []).length) warn.push(`작업이 검사 정의를 고쳤다(${task.checks_modified.join(', ')}) — 통과를 그대로 믿지 마세요`);
+  // [2026-10-17 자동 이슈 #17] 새 시험을 더했는데 검사 명령이 그 프로젝트를 돌리지 않아 판정에서 빠졌다 — 시험 수가 그대로면 알린다.
+  const runCount = x => x ? Number(x.pass || 0) + Number(x.fail || 0) : null;
+  if ((task.tests_added || []).length && last && ch.baseline && runCount(last) === runCount(ch.baseline)) warn.push(`새 시험 파일 ${task.tests_added.length}개(${listOf(task.tests_added, 3)})를 더했는데 검사의 시험 수가 작업 전과 같다(${runCount(last)}) — 검사 명령이 그 시험을 돌리지 않는 것 같다`);
   if ((task.tests_modified || []).length) warn.push(`기존 테스트 파일을 고쳤다(${listOf(task.tests_modified, 5)})`);
   if ((task.secrets_excluded || []).length) warn.push('비밀 파일은 커밋하지 않았다(worktree 에만 있다)');
   if (ch.baseline_warning) warn.push('작업 전 검사가 요약 없이 실패했다 — worktree 환경 문제일 수 있다');

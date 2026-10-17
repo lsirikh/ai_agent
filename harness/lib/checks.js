@@ -298,7 +298,7 @@ function runCheck(cwd, argv, o) {
       const ok = code === 0 && !timedOut && !(s.found && s.fail > 0);
       resolve({ command: opt.label || display(argv), argv, exit_code: code, timed_out: timedOut, found: s.found, pass: s.found ? s.pass : (ok ? 1 : 0), fail: s.found ? s.fail : (ok ? 0 : 1), ok, output, ms: Date.now() - t0 });
     };
-    try { child = spawn(spec.cmd, spec.args, { cwd, env: childEnv(opt.bin), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, shell: spec.shell, detached: !IS_WIN }); }
+    try { child = spawn(spec.cmd, spec.args, { cwd, env: { ...childEnv(opt.bin), ...require('./proc').isolationEnv(cwd) }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, shell: spec.shell, detached: !IS_WIN }); }
     catch (e) { return finish(null, e.message); }
     timer = setTimeout(() => { timedOut = true; killTree(child.pid); setTimeout(() => finish(null), 5000).unref(); }, timeoutMs);
     child.stdout.on('data', push); child.stderr.on('data', push);

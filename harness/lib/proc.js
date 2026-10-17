@@ -70,6 +70,13 @@ function refHookDir(common) {
     return dir;
   } catch { return null; }
 }
+// 작업 worktree 에서 도는 프로세스(작업자 · 하네스 검사)의 격리 환경 — [2026-10-17 자동 보고 caed67b9a2f1] 작업자가 worktree 의 compose 로
+//   사용자의 실행 중 컨테이너를 다시 만들었다(프로젝트 이름이 메인과 같았다). COMPOSE_PROJECT_NAME 은 compose 에서 .env · name: 보다 앞선다.
+const WT_RE = /[\\/]\.harness-worktrees[\\/](t-\d{8}-\d{6}-[0-9a-f]{4})(?:-\d+)?(?:[\\/]|$)/;
+function isolationEnv(cwd) {
+  const m = WT_RE.exec(String(cwd || ''));
+  return m ? { COMPOSE_PROJECT_NAME: `harness-${m[1]}` } : {};
+}
 function noPushEnv(extra, cwd) {
   const merged = { ...process.env, ...(extra || {}) };
   const countKey = Object.keys(merged).find(k => k.toUpperCase() === 'GIT_CONFIG_COUNT');
@@ -79,7 +86,7 @@ function noPushEnv(extra, cwd) {
   const pairs = [['push.default', 'nothing'], ['remote.pushDefault', ''], [`url.${PUSH_DISABLED}.pushInsteadOf`, ''],
     ...[...new Set(pushUrls(cwd))].map(u => [`url.${PUSH_DISABLED}.insteadOf`, u]),
     ...(hooks ? [['core.hooksPath', hooks.replace(/\\/g, '/')]] : [])];
-  const out = { ...(extra || {}) };
+  const out = { ...isolationEnv(cwd), ...(extra || {}) };
   pairs.forEach(([k, v], i) => { out[`GIT_CONFIG_KEY_${n + i}`] = k; out[`GIT_CONFIG_VALUE_${n + i}`] = v; });
   out[countKey || 'GIT_CONFIG_COUNT'] = String(n + pairs.length);
   if (hooks) out.HARNESS_PROTECT_GIT_DIR = common;
@@ -175,4 +182,4 @@ function spawnCapture(o) {
   });
 }
 
-module.exports = { IS_WIN, SCRUB, childEnv, noPushEnv, PUSH_DISABLED, killTree, Capture, spawnCapture };
+module.exports = { isolationEnv, IS_WIN, SCRUB, childEnv, noPushEnv, PUSH_DISABLED, killTree, Capture, spawnCapture };
