@@ -68,6 +68,11 @@ _current_session: Dict[str, Any] = {}  # 현재 세션 정보
 DEFAULT_END_PAUSE_SECONDS = 2.0
 _speech_timeout_seconds: float = DEFAULT_END_PAUSE_SECONDS
 _last_speech_time: Optional[float] = None  # 마지막 음성 감지 시간
+# 호출어 뒤 질문을 시작하기까지 기다리는 시간.
+# 이 안에서는 무음이어도 녹음을 끝내지 않는다
+# (호출어를 말하는 도중에 감지되면 바로 '말 끝' 이 돼 질문 전에 녹음이 끝났다 — 실측)
+WAIT_FOR_QUESTION_SECONDS = 4.0
+_question_wait_until: Optional[float] = None
 
 # Phase 46: 녹음 진행 추적
 _recording_chunk_count: int = 0  # 녹음 중 청크 카운트
@@ -87,6 +92,8 @@ def check_speech_timeout() -> bool:
     global _last_speech_time, _speech_timeout_seconds
 
     if _last_speech_time is None:
+        return False
+    if _question_wait_until is not None and time.time() < _question_wait_until:
         return False
 
     elapsed = time.time() - _last_speech_time
@@ -143,11 +150,13 @@ async def reset_session() -> None:
     STT 완료 후 또는 세션 종료 시 모든 상태를 초기화합니다.
     """
     global _current_session, _listening_mode, _is_recording, _last_speech_time
+    global _question_wait_until
 
     _current_session = {}
     _listening_mode = False
     _is_recording = False
     _last_speech_time = None
+    _question_wait_until = None
 
     await _logger.info(
         "session_reset",
@@ -195,11 +204,12 @@ async def handle_wake_word_event(event_data: Dict[str, Any]) -> None:
     # Phase 49: Wake Word 직후 바로 음성 녹음 시작
     # 사용자가 "헤이 자비스, 오늘 날씨 어때?" 처럼 연속 발화 시
     # speech_started 이벤트 없이도 녹음이 시작되어야 함
-    global _is_recording, _last_speech_time
+    global _is_recording, _last_speech_time, _question_wait_until
     if not _is_recording:
         await on_speech_started()
         _is_recording = True
         _last_speech_time = time.time()
+    _question_wait_until = time.time() + WAIT_FOR_QUESTION_SECONDS
 
     await _logger.info(
         "wake_word_received",
