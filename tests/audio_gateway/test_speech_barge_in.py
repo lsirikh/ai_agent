@@ -262,3 +262,20 @@ def test_user_voice_over_echo_interrupts_once_delay_is_known() -> None:
     hit, _ = _play(30.0, delay=0.3, gain=0.3, voice_from=15.0, voice_rms=0.25)
 
     assert hit is not None and 15.0 < hit <= 15.6
+
+
+def test_barge_in_status_shows_learned_echo() -> None:
+    # 실제 스피커·마이크에서 왜 끊었는지/못 끊었는지 볼 수 있게
+    from unittest.mock import patch
+
+    from app import main
+    from app.speech_barge_in import EchoDelay
+    from fastapi.testclient import TestClient
+
+    echo = EchoDelay()
+    echo.delay = 0.3
+    with patch.object(main, "echo_delay", echo):
+        data = TestClient(main.app).get("/barge-in/status").json()
+
+    assert data["speech"]["echo_delay"] == 0.3
+    assert "echo_ratio" in data["speech"]

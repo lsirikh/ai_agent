@@ -1417,7 +1417,13 @@ async def barge_in_status():
         "playback_state": barge_in_detector.playback_state.name,
         "in_cooldown": barge_in_detector._in_cooldown,
         "energy_threshold": barge_in_detector.energy_threshold,
-        "vad_threshold": barge_in_detector.vad_threshold
+        "vad_threshold": barge_in_detector.vad_threshold,
+        # 말소리 끼어들기: 익힌 에코 시차(초)와 에코 비율
+        "speech": {
+            "echo_delay": echo_delay.delay,
+            "echo_ratio": round(speech_barge.echo_ratio(), 4),
+            "last": speech_barge.last,
+        },
     }
 
 
