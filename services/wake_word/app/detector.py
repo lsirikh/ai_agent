@@ -249,6 +249,54 @@ class WakeWordDetector:
             "confidence": best_confidence
         }
 
+    async def _publish_detection(self, wake_word: str, confidence: float) -> None:
+        """감지를 로그로 남기고 Redis 로 알린다."""
+
+        # 콘솔 로그 출력 (Phase 40.5)
+        print(f"[WakeWord] ★★★ DETECTED! {wake_word} = {confidence:.2%} ★★★")
+
+        # Log wake word detection
+        await self._logger.info(
+            "wake_word_detected",
+            f"Wake word '{wake_word}' detected (confidence: {confidence:.2f})",
+            metadata={
+                "wake_word": wake_word,
+                "confidence": float(confidence),  # numpy.float32 → Python float
+                "threshold": self.confidence_threshold
+            }
+        )
+
+        # Log listening mode activation (Phase 17.2)
+        await self._logger.info(
+            "listening_mode_activated",
+            "음성 수신 모드 전환 - 사용자 명령을 기다리는 중",
+            metadata={
+                "wake_word": wake_word,
+                "previous_state": "IDLE",
+                "new_state": "LISTENING"
+            }
+        )
+
+        # Publish to Redis
+        if self.redis_client:
+            message = json.dumps({
+                "type": "wake_word_detected",
+                "wake_word": wake_word,
+                "confidence": float(confidence),  # numpy.float32 → Python float
+                "timestamp": time.time()
+            })
+            await self.redis_client.publish(self.redis_channel, message)
+
+            # Log Redis publish
+            await self._logger.info(
+                "wake_word_published",
+                f"Wake word event published to Redis channel: {self.redis_channel}",
+                metadata={
+                    "channel": self.redis_channel,
+                    "wake_word": wake_word
+                }
+            )
+
     async def detect_and_publish(self, audio_chunk: np.ndarray) -> Dict[str, Any]:
         """
         Wake Word 감지 후 Redis로 이벤트 발행
@@ -294,53 +342,7 @@ class WakeWordDetector:
             )
 
         if result["detected"]:
-            wake_word = result["wake_word"]
-            confidence = result["confidence"]
-
-            # 콘솔 로그 출력 (Phase 40.5)
-            print(f"[WakeWord] ★★★ DETECTED! {wake_word} = {confidence:.2%} ★★★")
-
-            # Log wake word detection
-            await self._logger.info(
-                "wake_word_detected",
-                f"Wake word '{wake_word}' detected (confidence: {confidence:.2f})",
-                metadata={
-                    "wake_word": wake_word,
-                    "confidence": float(confidence),  # numpy.float32 → Python float
-                    "threshold": self.confidence_threshold
-                }
-            )
-
-            # Log listening mode activation (Phase 17.2)
-            await self._logger.info(
-                "listening_mode_activated",
-                "음성 수신 모드 전환 - 사용자 명령을 기다리는 중",
-                metadata={
-                    "wake_word": wake_word,
-                    "previous_state": "IDLE",
-                    "new_state": "LISTENING"
-                }
-            )
-
-            # Publish to Redis
-            if self.redis_client:
-                message = json.dumps({
-                    "type": "wake_word_detected",
-                    "wake_word": wake_word,
-                    "confidence": float(confidence),  # numpy.float32 → Python float
-                    "timestamp": time.time()
-                })
-                await self.redis_client.publish(self.redis_channel, message)
-
-                # Log Redis publish
-                await self._logger.info(
-                    "wake_word_published",
-                    f"Wake word event published to Redis channel: {self.redis_channel}",
-                    metadata={
-                        "channel": self.redis_channel,
-                        "wake_word": wake_word
-                    }
-                )
+            await self._publish_detection(result["wake_word"], result["confidence"])
 
         return result
 
