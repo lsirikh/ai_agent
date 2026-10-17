@@ -18,6 +18,7 @@ public sealed class MicrophoneStreamer : IMicrophoneStream
     private ClientWebSocket? _socket;
     private Channel<byte[]>? _frames;
     private CancellationTokenSource? _cts;
+    private MicAutoGain _gain = new();
 
     public MicrophoneStreamer(EdgeVoiceOptions options) => _options = options;
 
@@ -45,6 +46,7 @@ public sealed class MicrophoneStreamer : IMicrophoneStream
         await _socket.ConnectAsync(new Uri(_options.AudioGatewayWsUrl), _cts.Token);
 
         _frames = Channel.CreateUnbounded<byte[]>();
+        _gain = new MicAutoGain();
         _ = Task.Run(() => SendLoopAsync(_socket, _frames.Reader, _cts.Token));
         _ = Task.Run(() => ReceiveLoopAsync(_socket, _cts.Token));
 
@@ -78,7 +80,8 @@ public sealed class MicrophoneStreamer : IMicrophoneStream
 
     private void OnDataAvailable(object? sender, WaveInEventArgs e)
     {
-        var frame = e.Buffer.AsSpan(0, e.BytesRecorded).ToArray();
+        // 원격 데스크톱 마이크처럼 작은 소리는 키워서 보낸다(VAD·웨이크워드가 반응하도록)
+        var frame = _gain.Process(e.Buffer.AsSpan(0, e.BytesRecorded).ToArray());
         _frames?.Writer.TryWrite(frame);
 
         double sum = 0;
