@@ -11,6 +11,7 @@ EDGEVOICE_LIVE=1 일 때만 돈다.
 """
 
 import os
+import re
 import sys
 
 import pytest
@@ -151,7 +152,10 @@ async def test_live_voice_turn_tells_current_time_despite_stale_history():
         {"role": "user", "content": "지금 몇 시야?"},
         {"role": "assistant", "content": "현재 시간은 17시입니다."},
     ]
-    hour = str(_now().hour)
+    now = _now().hour
+    hour = str(now)
+    # Qwen3.5 는 '밤 10시 10분' 처럼 12시간제로도 말한다(같은 시각)
+    twelve = re.compile(rf"(오전|오후|아침|저녁|밤|새벽|낮)\s*{now % 12 or 12}\s*시")
     correct = 0
     for _ in range(3):
         text, _events = await _run(
@@ -165,7 +169,8 @@ async def test_live_voice_turn_tells_current_time_despite_stale_history():
             )
         )
         assert "<tool_call>" not in text
-        correct += hour in text and "17시" not in text.replace(f"{hour}시", "")
+        said_now = re.search(rf"{hour}\s*시", text) or twelve.search(text)
+        correct += bool(said_now) and "17시" not in text.replace(f"{hour}시", "")
 
     assert correct >= 2, f"3회 중 {correct}회만 지금 시각({hour}시)을 말함"
 

@@ -31,6 +31,8 @@ SETTINGS_ENV_MAP: Dict[str, Dict[str, Optional[str]]] = {
 # UI 표시용 짧은 ID → HuggingFace 전체 경로 매핑
 # Downloaded models only (8 models)
 MODEL_ID_MAP: Dict[str, str] = {
+    # Qwen3.5 (대화·도구·이미지 이해, 권장)
+    "qwen3.5-9b": "RedHatAI/Qwen3.5-9B-quantized.w4a16",
     # Qwen 시리즈 (다운로드됨)
     "qwen2.5-3b-instruct": "Qwen/Qwen2.5-3B-Instruct",
     "qwen2.5-7b-instruct-awq": "Qwen/Qwen2.5-7B-Instruct-AWQ",

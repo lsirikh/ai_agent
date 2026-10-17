@@ -59,7 +59,7 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - HF_TOKEN=${HF_TOKEN:-}
-      - MODEL_NAME=Qwen/Qwen2.5-7B-Instruct-AWQ
+      - MODEL_NAME=RedHatAI/Qwen3.5-9B-quantized.w4a16
       - TENSOR_PARALLEL_SIZE=1
       - GPU_MEMORY_UTILIZATION=0.9
       - DEVICE=cuda
@@ -74,17 +74,36 @@ services:
       - "11003:11003"
     # GPU 0.42(약 10GB): 7B AWQ 가중치 ~5.6GB + 16k KV 캐시 ~1GB 에 넉넉하다.
     # 남는 GPU 는 vision(이미지 이해)이 쓴다
-    command: >
-      --model ${LLM_MODEL:-Qwen/Qwen2.5-14B-Instruct-AWQ}
-      --dtype auto
-      --max-model-len ${LLM_MAX_MODEL_LEN:-16384}
-      --gpu-memory-utilization ${LLM_GPU_UTIL:-0.42}
-      --trust-remote-code
-      --port 11003
-      --enable-auto-tool-choice
-      --tool-call-parser hermes
-      --exclude-tools-when-tool-choice-none
-      --logits-processors edgevoice_guard.han_guard:HanBlockLogitsProcessor
+    # Qwen3.5-9B(4-bit, 이미지 입력 내장)가 대화·도구·이미지 이해를 모두 맡는다.
+    # GPU 0.62(약 15GB) = 예전 llm 0.42 + vision 0.24 몫. 생각 모드는 끈다(지연·형식).
+    # 도구 호출 파서는 qwen3_coder (Qwen3.5 모델 카드), 이전 Qwen2.5 는 hermes 였다.
+    command:
+      - --model
+      - ${LLM_MODEL:-RedHatAI/Qwen3.5-9B-quantized.w4a16}
+      - --dtype
+      - auto
+      - --max-model-len
+      - ${LLM_MAX_MODEL_LEN:-16384}
+      - --gpu-memory-utilization
+      - ${LLM_GPU_UTIL:-0.62}
+      # 한 사람이 쓴다. 기본 256 은 Qwen3.5 의 선형 어텐션 상태 캐시(112블록)를 넘어 시작을 거부했다
+      - --max-num-seqs
+      - "16"
+      - --trust-remote-code
+      - --port
+      - "11003"
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - ${LLM_TOOL_CALL_PARSER:-qwen3_coder}
+      - --reasoning-parser
+      - ${LLM_REASONING_PARSER:-qwen3}
+      - --default-chat-template-kwargs
+      - '{"enable_thinking": false}'
+      - --limit-mm-per-prompt
+      - '{"image": 2}'
+      - --exclude-tools-when-tool-choice-none
+      - --logits-processors
+      - edgevoice_guard.han_guard:HanBlockLogitsProcessor
     deploy:
       resources:
         reservations:
@@ -106,6 +125,9 @@ services:
   vision:
     image: vllm/vllm-openai:latest
     container_name: ev-vision
+    # 기본으로는 띄우지 않는다: llm(Qwen3.5)이 이미지를 직접 이해한다.
+    # 따로 쓰려면 --profile separate-vision 과 VISION_URL=http://vision:11009
+    profiles: [separate-vision]
     runtime: nvidia
     # llm 과 동시에 시작하면 llm 이 메모리를 재는 동안 vision 이 잡은 몫까지 제 것으로 세어
     # 'No available memory for the cache blocks' 로 죽었다(실측). llm 이 뜬 뒤에 시작한다
@@ -324,7 +346,7 @@ services:
       # Phase 52: VLLM_BASE_URL for llm_client.py
       - VLLM_BASE_URL=http://llm:11003
       # vLLM 의 --model 과 같은 값이어야 한다(다르면 vLLM 이 요청을 404 로 거절)
-      - LLM_MODEL_NAME=${LLM_MODEL:-Qwen/Qwen2.5-14B-Instruct-AWQ}
+      - LLM_MODEL_NAME=${LLM_MODEL:-RedHatAI/Qwen3.5-9B-quantized.w4a16}
       # vLLM --max-model-len 과 같은 값(프롬프트 토큰 예산 계산)
       - LLM_MAX_MODEL_LEN=${LLM_MAX_MODEL_LEN:-16384}
       - REDIS_HOST=redis
@@ -436,6 +458,9 @@ services:
       - ORCHESTRATOR_URL=http://orchestrator:8007
       - RAG_SERVICE_URL=http://rag:8006
       - VLLM_BASE_URL=http://llm:11003
+      # 채팅 이미지 설명: 기본은 llm(Qwen3.5, 이미지 입력 내장)이 맡는다
+      - VISION_URL=${VISION_URL:-http://llm:11003}
+      - VISION_MODEL=${LLM_MODEL:-RedHatAI/Qwen3.5-9B-quantized.w4a16}
       - LLM_MAX_MODEL_LEN=${LLM_MAX_MODEL_LEN:-16384}
       - TTS_SERVICE_URL=http://tts:8002
       - STT_SERVICE_URL=http://stt:8001

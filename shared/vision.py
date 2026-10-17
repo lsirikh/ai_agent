@@ -1,5 +1,5 @@
 """
-이미지 이해 (vision 서비스: Qwen2.5-VL-3B, vLLM OpenAI 호환)
+이미지 이해 (llm: Qwen3.5-9B 이미지 입력 / 또는 따로 띄운 vision, vLLM OpenAI 호환)
 
 채팅에 첨부한 사진·화면 캡처를 한국어로 설명한다. 대화 LLM 은 그 설명을 근거로 답한다.
 """
@@ -10,8 +10,10 @@ from typing import Optional
 
 import httpx
 
-VISION_URL = os.getenv("VISION_URL", "http://vision:11009")
-VISION_MODEL = os.getenv("VISION_MODEL", "Qwen/Qwen2.5-VL-3B-Instruct-AWQ")
+# 기본은 llm(Qwen3.5, 이미지 입력 내장).
+# 따로 띄운 vision 을 쓰려면 VISION_URL·VISION_MODEL 을 바꾼다
+VISION_URL = os.getenv("VISION_URL", "http://llm:11003")
+VISION_MODEL = os.getenv("VISION_MODEL", "RedHatAI/Qwen3.5-9B-quantized.w4a16")
 MAX_IMAGES = 2
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 TIMEOUT_SECONDS = 120.0

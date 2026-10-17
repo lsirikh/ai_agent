@@ -9,6 +9,20 @@ from typing import Dict, List, Any
 # ===== Downloaded Models Only (8 models) =====
 # These are the models that have been downloaded locally
 LLM_MODELS: Dict[str, Dict[str, Any]] = {
+    # Qwen3.5 (2026-03, Apache-2.0): 이미지 입력 내장 — 대화·비전을 한 모델로.
+    # RedHatAI 4-bit(w4a16) 빌드 ~11GB. vLLM: --tool-call-parser qwen3_coder,
+    # --reasoning-parser qwen3, 생각 모드는 끈다(enable_thinking=false)
+    "qwen3.5-9b": {
+        "display_name": "Qwen 3.5 9B (4-bit, 이미지 이해)",
+        "vram_gb": 14,
+        "context_length": 16384,
+        "korean_quality": "좋음",
+        "recommended_for": "대화·도구·이미지 이해 (권장)",
+        "quantization": "W4A16",
+        "parameters": "9B",
+        "vision": True,
+        "hf_path": "RedHatAI/Qwen3.5-9B-quantized.w4a16"
+    },
     # Qwen 모델 시리즈 (다운로드됨)
     "qwen2.5-3b-instruct": {
         "display_name": "Qwen 2.5 3B Instruct",
@@ -25,7 +39,7 @@ LLM_MODELS: Dict[str, Dict[str, Any]] = {
         "vram_gb": 5,
         "context_length": 32768,
         "korean_quality": "좋음",
-        "recommended_for": "일반 용도 (권장)",
+        "recommended_for": "일반 용도 (이전 기본)",
         "quantization": "AWQ",
         "parameters": "7B",
         "hf_path": "Qwen/Qwen2.5-7B-Instruct-AWQ"
