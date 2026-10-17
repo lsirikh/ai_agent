@@ -146,6 +146,10 @@ public sealed class ChatViewModel : PageViewModel, IDisposable
         return true;
     }
 
+    /// <summary>여러 파일(끌어다 놓기 등) 중 이미지만 첨부한다. 첨부한 개수.</summary>
+    public int AttachFiles(IEnumerable<(string Name, byte[] Bytes)> files)
+        => files.Count(f => ImageMime(f.Bytes) is not null && AttachImage(f.Bytes, f.Name));
+
     /// <summary>머리 바이트로 이미지 형식을 알아낸다(확장자는 믿지 않는다).</summary>
     public static string? ImageMime(byte[] b) => b switch
     {

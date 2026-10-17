@@ -92,3 +92,23 @@ public class ClipboardImageTests
         Assert.Equal(54, BitConverter.ToInt32(bmp, 10)); // 픽셀 시작 = 14 + 40
     }
 }
+
+public class ChatImageDropTests
+{
+    private static readonly byte[] Png = Convert.FromBase64String(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==");
+
+    [Avalonia.Headless.XUnit.AvaloniaFact]
+    public void 끌어다_놓은_파일_중_이미지만_첨부한다()
+    {
+        // 사용자 요청: 채팅창에 사진을 끌어다 놓아도 분석되게(📎·Ctrl+V 와 같은 첨부)
+        using var s = new Scenario();
+        var chat = s.Main.Chat;
+
+        var attached = chat.AttachFiles(new[] { ("메모.txt", new byte[] { 1, 2, 3 }), ("화면.png", Png) });
+
+        Assert.Equal(1, attached);
+        Assert.Single(chat.Attachments);
+        Assert.Equal("화면.png", chat.Attachments[0].Name);
+    }
+}

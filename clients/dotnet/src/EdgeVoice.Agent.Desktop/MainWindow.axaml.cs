@@ -21,6 +21,11 @@ public partial class MainWindow : Window
         InitializeComponent();
         var input = this.FindControl<TextBox>("ChatInput");
         input?.AddHandler(KeyDownEvent, OnChatInputKeyDown, RoutingStrategies.Tunnel);
+        // 채팅 화면에 사진을 끌어다 놓아도 첨부된다
+        var chatPage = this.FindControl<Border>("ChatPage");
+        chatPage?.AddHandler(DragDrop.DropEvent, OnChatDrop);
+        chatPage?.AddHandler(DragDrop.DragOverEvent, (_, e) =>
+            e.DragEffects = e.Data.Contains(DataFormats.Files) ? DragDropEffects.Copy : DragDropEffects.None);
     }
 
     public MainWindow(MainViewModel viewModel)
@@ -61,6 +66,25 @@ public partial class MainWindow : Window
         }
 
         return picked;
+    }
+
+    private async void OnChatDrop(object? sender, DragEventArgs e)
+    {
+        if (DataContext is not MainViewModel main || e.Data.GetFiles() is not { } items)
+        {
+            return;
+        }
+
+        var files = new List<(string, byte[])>();
+        foreach (var file in items.OfType<IStorageFile>())
+        {
+            await using var stream = await file.OpenReadAsync();
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory);
+            files.Add((file.Name, memory.ToArray()));
+        }
+
+        main.Chat.AttachFiles(files);
     }
 
     /// <summary>입력창 Ctrl+V: 클립보드에 이미지가 있으면 첨부한다(글자 붙여넣기는 그대로).</summary>

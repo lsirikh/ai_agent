@@ -244,7 +244,7 @@
 
             <!-- 채팅 -->
             <TabItem Header="Chat">
-                <Border Classes="page" DataContext="{Binding Chat}">
+                <Border x:Name="ChatPage" Classes="page" DataContext="{Binding Chat}" DragDrop.AllowDrop="True">
                     <DockPanel>
                         <DockPanel DockPanel.Dock="Top">
                             <Button x:Name="NewConversation" DockPanel.Dock="Right" Content="새 대화" Command="{Binding NewConversationCommand}"
