@@ -217,8 +217,11 @@ _PLACE = re.compile(
     r"도서관|박물관|대학|역(?=\s|$|[?.!]|에|근처|앞)"
 )
 _ASK_INFO = re.compile(
-    r"알아|아세요|알고\s*있|알려|어디|뭐야|뭐예요|어때|정보|소개|설명|있어|있나"
+    r"알아|아세요|알고\s*있|알려|어디|뭐야|뭐예요|어때|정보|소개|설명|있어|있나|어떤"
 )
+# 노래·영화·책·인물처럼 기억으로 답하면 지어내기 쉬운 것
+# (실측: '좋은 날' 을 '2008년 5월 8일 발매한 10번째 싱글' 이라고 지어냈다)
+_MEDIA = re.compile(r"노래|곡|앨범|가수|영화|드라마|배우|감독|책|작가|멤버|그룹")
 _ASK_KNOW = re.compile(r"알아\s*[?]|아세요|알고\s*있어")
 _PERSONAL = re.compile(
     r"(^|\s)(내|나|저|제|우리|너|네가|당신)(\s|$|의|가|는|를|한테|랑)"
@@ -229,7 +232,9 @@ def _asks_specific_fact(question: str) -> bool:
     if _PERSONAL.search(question):
         return False
     return bool(_ASK_INFO.search(question)) and bool(
-        _PLACE.search(question) or _ASK_KNOW.search(question)
+        _PLACE.search(question)
+        or _MEDIA.search(question)
+        or _ASK_KNOW.search(question)
     )
 
 # 질문이 이렇다면 그 도구가 분명히 필요하다 (앞쪽이 우선)
