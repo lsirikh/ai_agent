@@ -312,7 +312,10 @@ def test_type_target_is_fixed_to_a_real_input_on_the_current_page() -> None:
     assert (
         state.fix_type_target({"target": "#search-box", "text": "x"})["target"] == "e60"
     )
-    assert state.fix_type_target({"target": "e90", "text": "x"})["target"] == "e90"
+    # 입력칸이 아닌 요소(링크 e90)에는 입력할 수 없다.
+    # 실측: 다른 사이트에서 기억한 'e60' 이 이 페이지에선 입력칸이 아니라
+    # 'Ref e60 not found' 로 실패
+    assert state.fix_type_target({"target": "e90", "text": "x"})["target"] == "e60"
 
 
 def test_click_target_only_drops_ref_brackets() -> None:

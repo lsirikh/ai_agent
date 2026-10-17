@@ -118,11 +118,12 @@ class BrowserState:
 
     def fix_type_target(self, args: dict) -> dict:
         """
-        입력 대상: '[ref=e60]' → 'e60'. 지금 페이지에 없는 대상이면 첫 입력칸으로
-        (실측: 다음에서 '[ref=e60]', 유튜브에서 '#search-box' 로 입력해 실패).
+        입력 대상: '[ref=e60]' → 'e60'. 지금 페이지의 입력칸이 아니면 첫 입력칸으로
+        (실측: 다음에서 '[ref=e60]', 유튜브에서 '#search-box'·기억 속 'e60' 으로
+        입력해 실패).
         """
         target = self._bare(args.get("target", ""))
-        if target not in self.refs and self.inputs:
+        if target not in self.inputs and self.inputs:
             target = self.inputs[0]
         return {**args, "target": target}
 
