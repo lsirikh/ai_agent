@@ -237,6 +237,32 @@ _PROGRAM = re.compile(r"메모장|노트패드|워드|엑셀|파워\s*포인트|
 _WRITE = re.compile(r"저장|작성|써|적어|만들어|기록")
 _WEATHER = re.compile(r"날씨|기온|우산|비\s*(와|오|올|가)|눈\s*(와|오|올|이)")
 _SEARCH = re.compile(r"검색|인터넷|뉴스|최신")
+# 기분을 말한 것('비가 와서 우울해')은 날씨를 묻는 것이 아니다(시나리오 시험)
+# (기분·일상 이야기 — '오늘 하루 어땠어?' 도 검색할 사실이 아니다)
+_MOOD = re.compile(
+    r"우울|기분|슬퍼|슬프|짜증|외로|심심|행복|좋아|피곤|힘들|졸려|하루|어땠"
+)
+# 올해·오늘·요즘의 사실은 기억이 낡았으니 검색한다(시나리오 시험: 노벨상·코스피)
+_CURRENT = re.compile(r"올해|요즘|최근|이번\s*(주|달|해)|오늘|어제|현재")
+_DATE_ONLY = re.compile(r"몇\s*시|며칠|요일|날짜|시각|몇\s*(년|월|일)")
+_ASK_CURRENT = re.compile(r"알려|뭐|누구|얼마|어때|어떻|\?\s*$")
+
+
+def _asks_weather(question: str) -> bool:
+    return bool(_WEATHER.search(question)) and not (
+        _MOOD.search(question) and "날씨" not in question
+    )
+
+
+def _asks_current_fact(question: str) -> bool:
+    return (
+        bool(_CURRENT.search(question))
+        and not _DATE_ONLY.search(question)
+        and not _WEATHER.search(question)
+        and bool(_ASK_CURRENT.search(question.strip()))
+        and not _PERSONAL.search(question)
+        and not _MOOD.search(question)
+    )
 # 구체적인 사실(장소·가게·시장 등)을 묻는 질문은 검색 뒤 답한다
 # (실측: 검색 없이 '원당시장(동작구 원당동)' 이라고 지어냈다)
 _PLACE = re.compile(
@@ -285,10 +311,15 @@ _REQUIRED_TOOLS = [
     # MCP 브라우저(서버__browser_navigate). 크롬·사이트를 직접 말했으면 날씨보다 먼저
     # (실측: '네이버 검색창에 오늘 날씨를 입력해' 가 날씨 도구로 갔다)
     ("browser_navigate", lambda q: _BROWSER.search(q) and _BROWSER_ACTION.search(q)),
-    ("get_weather", _WEATHER.search),
-    ("web_search", lambda q: _SEARCH.search(q) or _asks_specific_fact(q)),
+    ("get_weather", _asks_weather),
+    # (날씨 도구가 꺼져 있으면 날씨도 검색으로 — 꺼 두자 날씨를 지어냈다)
+    ("web_search", lambda q: _SEARCH.search(q) or _asks_specific_fact(q)
+     or _asks_current_fact(q) or _asks_weather(q)),
 ]
 
+WEATHER_OFF_REPLY = (
+    "지금은 날씨를 확인할 수 없어요. 날씨 기능이 꺼져 있거나 인터넷 도구가 꺼져 있어요."
+)
 CANNOT_DO_REPLY = (
     "죄송해요, 지금은 프로그램을 열거나 사이트에 접속할 수 없어요. "
     "그런 일을 하는 도구가 연결되어 있지 않아요."
@@ -345,6 +376,11 @@ def unavailable_action_reply(question: str, offered) -> Optional[str]:
     도구 없이 맡기면 "크롬을 열었습니다" 라고 지어냈다(프롬프트로 막아도 8/12, 실측).
     """
     question = question or ""
+    if _asks_weather(question) and not (
+        _offered_tool("get_weather", offered) or _offered_tool("web_search", offered)
+    ):
+        # 날씨 스킬을 끄자 '강수 확률 100%' 라고 지어냈다(시나리오 시험)
+        return WEATHER_OFF_REPLY
     if _PROGRAM.search(question) and (
         _ACTION.search(question) or _WRITE.search(question)
     ):

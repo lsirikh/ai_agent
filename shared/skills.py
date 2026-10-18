@@ -52,3 +52,15 @@ def with_skills(system_prompt: str, skills: dict) -> str:
         return system_prompt
     body = "\n\n".join(f"## {p['name']}\n{p['instructions']}" for p in prompts)
     return f"{system_prompt}\n\n{SKILLS_HEADER}\n{body}"
+
+
+def turn_instructions(skills: dict) -> str:
+    """
+    켜진 프롬프트 스킬을 이번 질문 옆에도 붙일 글. 시나리오 시험(2026-10-18):
+    시스템 프롬프트 끝에만 두자 9B 모델이 '모든 답 끝에 멍멍!' 을 따르지 않았다.
+    """
+    prompts = [p for p in skills.get("prompts", []) if p.get("enabled", True)]
+    if not prompts:
+        return ""
+    body = "\n".join(f"- {p['instructions']}" for p in prompts)
+    return f"{SKILLS_HEADER}\n{body}"

@@ -316,3 +316,39 @@ def test_daum_github_and_landmarks(question, expected) -> None:
         "browser__browser_type", "browser__browser_click",
     ]
     assert required_tools(question, offered) == expected
+
+
+@pytest.mark.parametrize(
+    "question, expected",
+    [
+        # 시나리오 시험(2026-10-18): 올해·오늘의 사실을 검색 없이 답했다
+        ("올해 노벨 문학상 수상자는?", ["web_search"]),
+        ("오늘 코스피 지수 알려줘", ["web_search"]),
+        ("요즘 유행하는 노래 알려줘", ["web_search"]),
+        # 시각·날짜·날씨 질문은 그대로
+        ("오늘 며칠이야?", []),
+        ("오늘 무슨 요일이야?", []),
+        ("오늘 서울 날씨 어때?", ["get_weather"]),
+        # 시나리오 시험: 기분을 말한 것까지 날씨 도구로 보냈다
+        ("비가 와서 우울해", []),
+        ("눈이 와서 기분 좋아", []),
+        # 오늘·요즘이 들어가도 기분·일상 이야기는 검색하지 않는다
+        ("오늘 기분이 좀 안 좋아", []),
+        ("오늘 하루 어땠어?", []),
+        ("요즘 너무 피곤해", []),
+    ],
+)
+def test_current_facts_search_and_moods_skip_weather(question, expected) -> None:
+    offered = ["get_weather", "web_search", "get_time"]
+    assert required_tools(question, offered) == expected
+
+
+def test_weather_question_without_weather_tool_is_answered_honestly() -> None:
+    # 시나리오 시험: 날씨 스킬을 끄자 '강수 확률 100%' 라고 날씨를 지어냈다
+    reply = unavailable_action_reply("서울 날씨 어때?", ["get_time"])
+
+    assert reply and "날씨" in reply
+    assert unavailable_action_reply("서울 날씨 어때?", ["get_weather"]) is None
+    # 검색할 수 있으면 검색으로 찾는다
+    assert unavailable_action_reply("서울 날씨 어때?", ["web_search"]) is None
+    assert required_tools("서울 날씨 어때?", ["web_search"]) == ["web_search"]

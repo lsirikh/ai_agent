@@ -65,3 +65,19 @@ def test_enabled_prompt_skills_are_appended_to_system_prompt():
 
 def test_no_enabled_prompt_skills_keeps_prompt_unchanged():
     assert with_skills("기본", {"prompts": []}) == "기본"
+
+
+def test_enabled_prompt_skills_are_also_given_with_the_question():
+    # 시나리오 시험(2026-10-18): 시스템 프롬프트 끝에만 두자 9B 모델이 따르지 않았다
+    # ('모든 답 끝에 멍멍!') → 이번 질문 옆에도 붙인다
+    from shared.skills import turn_instructions
+
+    skills = {"prompts": [
+        {"name": "dog", "instructions": "끝에 멍멍!", "enabled": True},
+        {"name": "off", "instructions": "안 보임", "enabled": False},
+    ]}
+
+    text = turn_instructions(skills)
+
+    assert "끝에 멍멍!" in text and "안 보임" not in text
+    assert turn_instructions({"prompts": []}) == ""

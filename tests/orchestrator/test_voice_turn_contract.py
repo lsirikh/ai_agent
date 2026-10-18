@@ -37,9 +37,11 @@ def _orchestrator(sent: list, **kwargs):
 @pytest.mark.parametrize(
     "heard",
     [
-        "Hey Jarvis. 오늘 날씨 어때?",
-        "hey jarvis, 오늘 날씨 어때?",
-        "헤이 자비스 오늘 날씨 어때?",
+        # (날씨 질문은 날씨·검색 도구가 없으면 LLM 없이 '확인할 수 없다' 고 답하므로
+        #  호출어 떼기를 보는 이 시험은 일반 질문을 쓴다)
+        "Hey Jarvis. 파이썬이 뭐야?",
+        "hey jarvis, 파이썬이 뭐야?",
+        "헤이 자비스 파이썬이 뭐야?",
     ],
 )
 async def test_should_strip_wake_phrase_before_llm(heard: str) -> None:
@@ -52,7 +54,7 @@ async def test_should_strip_wake_phrase_before_llm(heard: str) -> None:
     user_turns = [
         without_reference(m["content"]) for m in sent[0] if m["role"] == "user"
     ]
-    assert user_turns == ["오늘 날씨 어때?"]
+    assert user_turns == ["파이썬이 뭐야?"]
 
 
 @pytest.mark.asyncio
@@ -72,7 +74,7 @@ async def test_should_send_korean_voice_system_prompt() -> None:
     orchestrator = _orchestrator(sent)
     await orchestrator.handle_wake_word()
 
-    await orchestrator.handle_stt_result("오늘 날씨 어때?")
+    await orchestrator.handle_stt_result("파이썬이 뭐야?")
 
     system = [m["content"] for m in sent[0] if m["role"] == "system"]
     assert system and "한국어" in system[0]
