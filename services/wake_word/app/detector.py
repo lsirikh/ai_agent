@@ -27,15 +27,61 @@ WAKE_WORD_MODELS = {
 }
 
 
+# STT 로 받아 적은 '자비스' 의 꼴 — '차비스'·'차비즈'·'샤비스'·'자비수' 로도 적는다
+# (끼어들기 시험 2026-10-18)
+NAME = r"(?:[자쟈재저제차챠샤사]\s*[비삐피]\s*[스즈쓰수]|jarvis)"
+HEY = r"(?:헤이|해이|에이|하이|hey|hi)"
 # STT 로 받아 적은 글에 호출어가 있는지 ('헤이 자비스!' · '헤이자비스' · 'Hey Jarvis')
-WAKE_TEXT = re.compile(r"[자쟈재저제차챠]\s*[비삐]\s*[스즈쓰]|jarvis", re.IGNORECASE)
+WAKE_TEXT = re.compile(NAME, re.IGNORECASE)
 VERIFY_SECONDS = 2.5  # STT 로 확인할 최근 소리 길이
 # 짧은 말을 STT 로 받아 적었을 때 호출어로 보는 꼴: '헤이 자비스' 로 시작해야 한다
-# (답이나 대화 속 '자비스' 로는 깨지 않게). STT 는 '자비스' 를 '차비스' 로도 적는다
-WAKE_START = re.compile(
-    r"^\W*(헤이|해이|에이|하이|hey|hi)\W*([자쟈재저제차챠]\s*[비삐]\s*[스즈쓰]|jarvis)",
-    re.IGNORECASE,
+# (답이나 대화 속 '자비스' 로는 깨지 않게)
+WAKE_START = re.compile(r"^\W*" + HEY + r"\W*" + NAME, re.IGNORECASE)
+# 답하는 중: 쉼표 뒤의 약한 '헤이' 는 에코에 묻혀 빠진다 — 이름으로 시작해도 보되
+# 답 속의 '자비스는…' 으로는 깨지 않게 이름 뒤에 글자가 바로 붙으면 아니다
+ANSWER_WAKE = re.compile(
+    r"^\W*(?:" + HEY + r"\W*)?" + NAME + r"(?![가-힣a-z])", re.IGNORECASE
 )
+
+
+class LoudOnsetWindow:
+    """
+    답하는 중: 소리가 최근 3초(위쪽 90%)보다 뚜렷이(1.8배) 커지면 그 0.2초 앞부터
+    2.2초를 돌려준다. 답 음성의 에코가 이어져 짧은 말로 끊어 찾을 수 없었다
+    (끼어들기 시험: 에코 0.1 에서도 4번 중 1번).
+    """
+
+    def __init__(self, sample_rate: int = 16000, ratio: float = 1.8,
+                 min_level: float = 0.03, before: float = 0.2,
+                 seconds: float = 2.2):
+        self.ratio, self.min_level = ratio, min_level
+        self._before = int(before * sample_rate)
+        self._target = int(seconds * sample_rate)
+        self._levels: deque = deque(maxlen=30)
+        self._history: deque = deque()
+        self._window: Optional[list] = None
+
+    def feed(self, chunk: np.ndarray) -> Optional[np.ndarray]:
+        rms = float(np.sqrt(np.mean(chunk ** 2))) if len(chunk) else 0.0
+        enough = len(self._levels) >= 5
+        level = float(np.percentile(self._levels, 90)) if enough else 0.0
+        self._levels.append(rms)
+        found = None
+        if self._window is not None:
+            self._window.append(chunk)
+            audio = np.concatenate(self._window)
+            if len(audio) >= self._target:
+                found, self._window = audio[: self._target], None
+        elif rms > max(self.min_level, self.ratio * level):
+            self._window = list(self._history) + [chunk]
+        self._history.append(chunk)
+        while sum(len(c) for c in self._history) > self._before:
+            self._history.popleft()
+        return found
+
+    def reset(self) -> None:
+        self._history.clear()
+        self._window = None
 
 
 class UtteranceSpotter:
@@ -165,6 +211,7 @@ class WakeWordDetector:
         self._verify_task: Optional[asyncio.Task] = None
         self._verify_quiet_until = 0.0
         self._spotter = UtteranceSpotter(sample_rate=sample_rate)
+        self._onset = LoudOnsetWindow(sample_rate=sample_rate)
 
         # Pipeline logger
         self._logger = get_logger("wake_word")
@@ -273,10 +320,14 @@ class WakeWordDetector:
         """
         self._remember(audio_chunk)
         utterance = self._spotter.feed(audio_chunk)
-        if utterance is not None and not self._is_in_cooldown:
+        window = self._onset.feed(audio_chunk)
+        found, pattern = (
+            (window, ANSWER_WAKE) if self.answering else (utterance, WAKE_START)
+        )
+        if found is not None and not self._is_in_cooldown:
             self._start_verify(
                 {"wake_word": self.wake_word, "confidence": 0.0},
-                audio=utterance, pattern=WAKE_START,
+                audio=found, pattern=pattern,
             )
 
         # 쿨다운 체크
@@ -352,6 +403,7 @@ class WakeWordDetector:
         self._recent.clear()
         self._recent_samples = 0
         self._spotter.reset()
+        self._onset.reset()
 
     def _start_verify(
         self, result: Dict[str, Any], audio: Optional[np.ndarray] = None,
@@ -382,7 +434,8 @@ class WakeWordDetector:
         있으면(WAKE_TEXT), 짧은 말로 찾은 것은 '헤이 자비스' 로 시작할 때만(WAKE_START).
         since 뒤에 이미 감지했으면(모델이 먼저 잡은 같은 호출어) 넘긴다.
         """
-        if audio is None:
+        recent = audio is None  # 애매한 점수: 최근 소리를 다시 볼 수 있다
+        if recent:
             await asyncio.sleep(self.verify_delay)
             audio = np.concatenate(list(self._recent)) if self._recent else np.zeros(0)
         try:
@@ -390,7 +443,8 @@ class WakeWordDetector:
         except Exception as e:
             text = ""
             await self._logger.warning("wake_verify_failed", f"STT 확인 실패: {e}")
-        self._verify_quiet_until = time.time() + 1.5  # 같은 소리로 거듭 확인하지 않게
+        if recent:  # 같은 소리로 거듭 확인하지 않게(짧은 말·창은 겹치지 않는다)
+            self._verify_quiet_until = time.time() + 1.5
         await self._logger.log(
             event="wake_verify",
             data={"message": f"{confidence:.1%} → STT '{text[:40]}'", "text": text},
