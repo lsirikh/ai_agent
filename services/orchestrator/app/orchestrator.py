@@ -55,10 +55,13 @@ WAKE_PHRASE_PATTERN = re.compile(
 # 실측: '하라고 하라고 클릭하라고 클릭해' 를 '네' 로 알아듣지 못했다 → 시키는 말도 '네'
 YES_PATTERN = re.compile(
     r"^\s*(네|예|응|그래|좋아|오케이|yes|ok)"
-    r"|해\s*줘|해\s*[.!~]*$|하라고|해라|실행|클릭|눌러|열어|틀어|진행|부탁",
+    # '다시 말해 줘' 는 실행하라는 뜻이 아니다(시나리오 시험)
+    r"|(?<!말)해\s*줘|(?<!말)해\s*[.!~]*$|하라고|해라|실행|클릭|눌러|열어|틀어|진행|부탁",
     re.IGNORECASE,
 )
-NO_PATTERN = re.compile(r"아니|아뇨|취소|하지\s*마|싫어|그만|\bno\b", re.IGNORECASE)
+NO_PATTERN = re.compile(
+    r"아니|아뇨|취소|하지\s*(마|말)|싫(어|다|습|은데)|그만|\bno\b", re.IGNORECASE
+)
 CANCELLED_REPLY = "알겠어요, 실행하지 않을게요."
 # 말하는 도중 끼어들어 끊긴 답 뒤에 붙인다(대화 기록용)
 INTERRUPTED_NOTE = "…(사용자가 끼어들어 중단됨)"
@@ -115,7 +118,7 @@ LIST_NUMBER_AT_END = re.compile(r"\s+(\d{1,2})[.)]\s*$")
 BULLET_AT_LINE_START = re.compile(r"^\s*[-*•]\s+")
 MARKDOWN_MARKS = re.compile(r"\*\*|__|`|#+\s*")
 TIMEZONE_NOTE = re.compile(
-    r"\s*(KST\s*)?\(\s*UTC\s*[+-]\s*\d{1,2}:?\d{0,2}\s*\)|\s*KST"
+    r"\s*(KST\s*)?\(\s*UTC\s*[+-]\s*\d{1,2}:?\d{0,2}\s*\)|\s*KST\b"
 )
 
 

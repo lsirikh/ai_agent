@@ -290,3 +290,29 @@ async def test_should_ignore_required_tool_missing_from_registry() -> None:
         pass
 
     assert llm.choices == [None]
+
+
+@pytest.mark.parametrize(
+    "question, expected",
+    [
+        # 시나리오 시험(2026-10-18): '다음'·'깃허브' 를 사이트로 보지 않았다
+        ("다음 열어줘", ["browser__browser_navigate"]),
+        ("다음 띄워 줘", ["browser__browser_navigate"]),
+        ("깃허브 열어줘", ["browser__browser_navigate"]),
+        ("다음에서 맛집 검색해줘",
+         ["browser__browser_navigate", "browser__browser_type"]),
+        ("다음에서 오늘 날씨 검색해줘",
+         ["browser__browser_navigate", "browser__browser_type"]),
+        # '다음' 이 사이트가 아닐 때는 그대로
+        ("다음 단계 알려줘", []),
+        ("다음에 또 보자", []),
+        ("롯데월드 어때?", ["web_search"]),
+        ("인천공항 정보 알려줘", ["web_search"]),
+    ],
+)
+def test_daum_github_and_landmarks(question, expected) -> None:
+    offered = [
+        "get_weather", "web_search", "browser__browser_navigate",
+        "browser__browser_type", "browser__browser_click",
+    ]
+    assert required_tools(question, offered) == expected

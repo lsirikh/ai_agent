@@ -614,3 +614,33 @@ def test_refusals_are_still_no(answer) -> None:
     from services.orchestrator.app.orchestrator import NO_PATTERN
 
     assert NO_PATTERN.search(answer)
+
+
+@pytest.mark.parametrize(
+    "sentence, spoken",
+    [
+        ("서울 KST 기준", "서울 기준"),
+        ("지금은 13시 20분 KST(UTC+09:00)입니다", "지금은 십삼 시 이십 분입니다"),
+    ],
+)
+def test_time_zone_mark_is_not_read_aloud(sentence, spoken) -> None:
+    # 시나리오 시험(2026-10-18): 'KST' 만 있으면 그대로 읽었다 — 정규식 끝의 \b 가
+    # 글자 그대로의 백스페이스(0x08)로 들어가 있었다
+    from services.orchestrator.app.orchestrator import to_speech
+
+    assert to_speech(sentence, None)[0] == spoken
+
+
+@pytest.mark.parametrize("answer", ["하지 말아줘", "싫다니까", "하지 말라고"])
+def test_more_refusals_are_no(answer) -> None:
+    from services.orchestrator.app.orchestrator import NO_PATTERN
+
+    assert NO_PATTERN.search(answer)
+
+
+@pytest.mark.parametrize("answer", ["다시 말해 줘", "뭐라고 말해 줘"])
+def test_asking_to_repeat_is_not_yes(answer) -> None:
+    # '말해 줘' 는 실행해도 된다는 뜻이 아니다
+    from services.orchestrator.app.orchestrator import YES_PATTERN
+
+    assert not YES_PATTERN.search(answer)
