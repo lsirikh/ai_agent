@@ -134,3 +134,90 @@ async def test_play_youtube_says_whether_it_is_really_playing(state, said) -> No
 
     assert result.is_error is False
     assert said in result.content
+
+
+class ScriptedBrowser(FakeBrowser):
+    """browser_evaluate 결과를 차례로 준다(광고 자동 건너뛰기 감시용)."""
+
+    def __init__(self, states, replies=None):
+        super().__init__(replies)
+        self.states = list(states)
+
+    async def call_tool(self, name, args):
+        if name == "browser_evaluate" and "SKIP_ONCE" in args["function"]:
+            self.calls.append((name, "once"))
+            state = self.states.pop(0) if self.states else "no_player"
+            return SimpleNamespace(
+                content=[SimpleNamespace(text=f'### Result\n"state:{state}"\n')],
+                is_error=False,
+            )
+        return await super().call_tool(name, args)
+
+
+@pytest.mark.asyncio
+async def test_playing_skips_ads_by_itself_until_the_video_is_gone() -> None:
+    # 사용자 요청(2026-10-19): 광고 건너뛰기 버튼이 나오면 말하지 않아도 누른다
+    snapshot = '- link "아이유 밤편지 4분 14초" [ref=e10]'
+    browser = ScriptedBrowser(
+        ["ad_waiting", "ad_waiting", "skipped", "no_ad", "skipped", "no_ad"],
+        {
+            "browser_snapshot": (snapshot, False),
+            "browser_click": ("- Page URL: https://www.youtube.com/watch?v=x", False),
+            "browser_evaluate": ('### Result\n"state:ad"\n', False),
+        },
+    )
+    manager = MCPManager([MCPServerConfig(
+        name="browser", url="http://x/mcp", trusted=True,
+        allowed_tools=["browser_navigate", "browser_snapshot", "browser_click"],
+    )])
+    server = manager.servers[0]
+    server.client, server.stale = browser, False
+    server.tools = [
+        SimpleNamespace(name=n, description=n, input_schema={}, annotations=None)
+        for n in SERVER_TOOLS
+    ]
+    manager.ad_watch_interval = 0
+    tools = {t.name: t for t in await manager.tools()}
+
+    result = await tools["browser__play_youtube"].run({"query": "아이유 밤편지"})
+    await manager.ad_watch
+
+    assert "자동으로" in result.content
+    checks = [c for c in browser.calls if c == ("browser_evaluate", "once")]
+    # 영상이 사라지면(no_player 3번) 그만 본다
+    assert len(checks) == 9
+    assert manager.ad_watch.done()
+
+
+@pytest.mark.asyncio
+async def test_closing_the_browser_stops_watching_ads() -> None:
+    import asyncio
+
+    browser = FakeBrowser({"browser_run_code_unsafe": (CLOSED, True)})
+    manager = MCPManager([MCPServerConfig(
+        name="browser", url="http://x/mcp", trusted=True,
+        allowed_tools=["browser_navigate", "browser_snapshot", "browser_click"],
+    )])
+    server = manager.servers[0]
+    server.client, server.stale = browser, False
+    server.tools = [
+        SimpleNamespace(name=n, description=n, input_schema={}, annotations=None)
+        for n in SERVER_TOOLS
+    ]
+    watching = asyncio.ensure_future(asyncio.sleep(10))
+    manager.ad_watch = watching
+    tools = {t.name: t for t in await manager.tools()}
+
+    await tools["browser__close_browser"].run({})
+    await asyncio.sleep(0)
+
+    assert watching.cancelled()
+
+
+def test_manual_skip_finishes_within_the_tool_time_limit() -> None:
+    # 실측: 15초를 기다려 도구 시간 제한(15초)에 걸려 끊겼다
+    from shared import browser_assist
+    from shared.tools import TOOL_TIMEOUT_SECONDS
+
+    wait_ms = int(browser_assist.SKIP_AD_SCRIPT.split("Date.now() + ")[1].split(";")[0])
+    assert wait_ms / 1000 <= TOOL_TIMEOUT_SECONDS - 3

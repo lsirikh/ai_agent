@@ -258,12 +258,13 @@ PLAYBACK_SCRIPT = (
 _SKIP_BUTTONS = (
     ".ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern"
 )
-# 건너뛰기 버튼은 광고가 5초쯤 나온 뒤에 생긴다 — 15초까지 기다리며 광고가 이어지면
-# (두 개 연속) 또 누른다
+# 건너뛰기 버튼은 광고가 5초쯤 나온 뒤에 생긴다 — 10초까지 기다리며 광고가 이어지면
+# (두 개 연속) 또 누른다. 도구 시간 제한(15초) 안에 끝나야 한다
+# (실측: 15초를 기다려 시간 제한에 걸려 끊겼다)
 SKIP_AD_SCRIPT = (
     "async () => {"
     f" const p = {_PLAYER}; if (!p) return 'state:no_player';"
-    " let skipped = 0; const end = Date.now() + 15000;"
+    " let skipped = 0; const end = Date.now() + 10000;"
     " while (Date.now() < end) {"
     "   if (!p.classList.contains('ad-showing'))"
     "     return skipped ? 'state:skipped:' + skipped : 'state:no_ad';"
@@ -272,6 +273,16 @@ SKIP_AD_SCRIPT = (
     "   if (b) { b.click(); skipped++; }"
     "   await new Promise(r => setTimeout(r, b ? 1000 : 500)); }"
     " return 'state:ad_unskippable:' + skipped; }"
+)
+# 한 번만 본다(틀어 둔 동안 1초마다 — 광고 자동 건너뛰기): 버튼이 있으면 누른다
+SKIP_AD_ONCE_SCRIPT = (
+    "async () => { /* SKIP_ONCE */"
+    f" const p = {_PLAYER}; if (!p) return 'state:no_player';"
+    " if (!p.classList.contains('ad-showing')) return 'state:no_ad';"
+    f" const b = [...document.querySelectorAll('{_SKIP_BUTTONS}')]"
+    "   .find(e => e.offsetParent !== null);"
+    " if (b) { b.click(); return 'state:skipped'; }"
+    " return 'state:ad_waiting'; }"
 )
 _STATE = re.compile(r"state:([a-z_]+)")
 

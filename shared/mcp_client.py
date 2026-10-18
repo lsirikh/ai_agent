@@ -55,6 +55,10 @@ PLAY_YOUTUBE_NEEDS = {"browser_navigate", "browser_snapshot", "browser_click"}
 # (모델이 코드를 주지 않는다). 열기(browser_navigate)를 허용했을 때만 만든다
 RUN_CODE_TOOLS = ("browser_run_code_unsafe", "browser_run_code")
 CLOSE_CONTEXT_CODE = "async (page) => { await page.context().close(); }"
+# 유튜브를 틀어 두면 광고 건너뛰기 버튼을 저절로 누른다(사용자 요청 2026-10-19:
+# 말하지 않아도) — 1초마다 보고, 동영상이 사라지면(3번 연속) 또는 한 시간 뒤 그만
+AD_WATCH_SECONDS = 3600
+AD_WATCH_GONE_CHECKS = 3
 
 
 @dataclass
@@ -233,6 +237,9 @@ class MCPManager:
         # LLM 에 보인 이름 → (서버 이름, 원래 도구 이름)
         self.name_map: dict = {}
         self._apply_lock = asyncio.Lock()
+        # 틀어 둔 유튜브의 광고 자동 건너뛰기
+        self.ad_watch: Optional[asyncio.Task] = None
+        self.ad_watch_interval = 1.0
 
     async def start(self) -> None:
         for server in self.servers:
@@ -326,6 +333,7 @@ class MCPManager:
         """
 
         async def run(args: dict) -> ToolResult:
+            self.stop_ad_watch()
             await self.call(server, "browser_navigate", {"url": "about:blank"})
             closed = await self.call(server, run_code, {"code": CLOSE_CONTEXT_CODE})
             # 닫히는 도중이라 성공해도 '…has been closed' 오류로 온다(실측)
@@ -349,7 +357,7 @@ class MCPManager:
         )
 
     def _skip_youtube_ad_tool(self, server: "_Server", name: str) -> Tool:
-        """유튜브 광고의 '건너뛰기' 버튼이 나오면 누른다(15초까지 기다린다)."""
+        """유튜브 광고의 '건너뛰기' 버튼이 나오면 누른다(10초까지 기다린다)."""
 
         async def run(args: dict) -> ToolResult:
             result = await self.call(
@@ -365,7 +373,7 @@ class MCPManager:
                 return ToolResult("지금은 광고가 나오지 않습니다(동영상 재생 중).")
             if state == "ad_unskippable":
                 return ToolResult(
-                    "15초 동안 광고에 건너뛰기 버튼이 나오지 않았습니다"
+                    "10초 동안 광고에 건너뛰기 버튼이 나오지 않았습니다"
                     "(건너뛸 수 없는 광고입니다)."
                 )
             return ToolResult(
@@ -421,7 +429,11 @@ class MCPManager:
                     is_error=True,
                 )
             played = f"유튜브에서 '{title}' 을(를) 틀었습니다"
-            return ToolResult(played + await self._playback_note(server))
+            note = await self._playback_note(server)
+            if "browser_evaluate" in {t.name for t in server.tools}:
+                self._start_ad_watch(server)
+                note += " 광고가 나오면 건너뛰기 버튼을 자동으로 누릅니다."
+            return ToolResult(played + note)
 
         return Tool(
             name=name,
@@ -441,6 +453,31 @@ class MCPManager:
             run=run,
             announce="유튜브에서 찾아 틀어 볼게요.",
         )
+
+    def stop_ad_watch(self) -> None:
+        if self.ad_watch is not None and not self.ad_watch.done():
+            self.ad_watch.cancel()
+
+    def _start_ad_watch(self, server: "_Server") -> None:
+        self.stop_ad_watch()
+        self.ad_watch = asyncio.create_task(self._skip_ads_while_watching(server))
+
+    async def _skip_ads_while_watching(self, server: "_Server") -> None:
+        """틀어 둔 동안 광고 건너뛰기 버튼이 보이면 누른다(중간 광고까지)."""
+        loop = asyncio.get_running_loop()
+        end, gone = loop.time() + AD_WATCH_SECONDS, 0
+        while loop.time() < end and gone < AD_WATCH_GONE_CHECKS:
+            checked = await self.call(
+                server, "browser_evaluate",
+                {"function": browser_assist.SKIP_AD_ONCE_SCRIPT},
+            )
+            state = "" if checked.is_error else browser_assist.page_state(
+                checked.content
+            )
+            if state == "skipped":
+                audit_log.info("youtube ad skipped automatically")
+            gone = gone + 1 if state in ("", "no_player") else 0
+            await asyncio.sleep(self.ad_watch_interval)
 
     async def _playback_note(self, server: "_Server") -> str:
         """
