@@ -11,7 +11,7 @@ namespace EdgeVoice.Agent.Desktop.ViewModels;
 
 public sealed record OptionItem(string Id, string Label);
 
-/// <summary>설정: 모델 선택/적용·LLM 재시작, 일반 설정, Wake Word 바꾸기, LLM 컨텍스트, MCP·스킬. 선택값은 실행 중인 서비스 값.</summary>
+/// <summary>설정: 모델 선택, 일반 설정, LLM 컨텍스트, 도구·지역, MCP·스킬. 모델 선택값은 실행 중인 서비스 값. 저장은 저장 막대(SettingsViewModel.Save.cs).</summary>
 public sealed partial class SettingsViewModel : PageViewModel
 {
     // 저장값과 실행값이 다를 때 배지에 보일 이름
@@ -49,15 +49,11 @@ public sealed partial class SettingsViewModel : PageViewModel
     private string _timeComparison = "";
     private JsonNode? _toolSettings;
 
-    public SettingsViewModel(EdgeVoiceApiClient api)
+    public SettingsViewModel(EdgeVoiceApiClient api, EdgeVoiceOptions options)
     {
         _api = api;
-        ApplyModelsCommand = new DelegateCommand(ApplyModels);
-        RestartLlmCommand = new DelegateCommand(RestartLlm);
-        SaveGeneralCommand = new DelegateCommand(SaveGeneral);
-        RegisterWakeWordCommand = new DelegateCommand(RegisterWakeWord);
-        SaveContextCommand = new DelegateCommand(SaveContext);
-        SaveToolsCommand = new DelegateCommand(SaveTools);
+        HostRestart = service => HostCompose.RestartAsync(new System.Uri(options.BackendUrl), service);
+        CreateSaveCommands();
         CreateExtensionCommands();
         Load();
     }
@@ -77,18 +73,6 @@ public sealed partial class SettingsViewModel : PageViewModel
     {
         new OptionItem("ko", "한국어"), new OptionItem("en", "English"), new OptionItem("ja", "日本語"),
     };
-
-    public DelegateCommand ApplyModelsCommand { get; }
-
-    public DelegateCommand RestartLlmCommand { get; }
-
-    public DelegateCommand SaveGeneralCommand { get; }
-
-    public DelegateCommand RegisterWakeWordCommand { get; }
-
-    public DelegateCommand SaveContextCommand { get; }
-
-    public DelegateCommand SaveToolsCommand { get; }
 
     /// <summary>LLM 인터넷 도구(web_search·web_fetch). 기본 꺼짐.</summary>
     public bool InternetToolsEnabled { get => _internetToolsEnabled; set => SetProperty(ref _internetToolsEnabled, value); }
@@ -206,6 +190,7 @@ public sealed partial class SettingsViewModel : PageViewModel
             EndPauseSeconds = g?["end_pause_seconds"]?.GetValue<double>() ?? EndPauseSeconds;
             ListeningTimeoutSeconds = g?["listening_timeout_seconds"]?.GetValue<double>() ?? ListeningTimeoutSeconds;
         });
+        Remember("general");
 
         await RunAsync(async () =>
         {
@@ -213,6 +198,7 @@ public sealed partial class SettingsViewModel : PageViewModel
             ContextEnabled = c?["context_enabled"]?.GetValue<bool>() ?? true;
             ContextWindowSize = c?["context_window_size"]?.GetValue<int>() ?? 20;
         });
+        Remember("context");
 
         await RunAsync(async () =>
         {
@@ -225,6 +211,7 @@ public sealed partial class SettingsViewModel : PageViewModel
                 ShowTools(await _api.SendAsync(HttpMethod.Put, "api/settings/tools", ToolSettingsBody()));
             }
         });
+        Remember("tools");
 
         await LoadExtensions();
     }
@@ -243,10 +230,6 @@ public sealed partial class SettingsViewModel : PageViewModel
             tools?["tools"]?.AsArray().Select(t => t?.ToString()) ?? Enumerable.Empty<string?>());
     }
 
-    private async void SaveTools() => await RunAsync(async () =>
-        ShowTools(await _api.SendAsync(HttpMethod.Put, "api/settings/tools", ToolSettingsBody())),
-        "도구·지역 설정 저장 완료");
-
     private object ToolSettingsBody() => new
     {
         internet_enabled = InternetToolsEnabled,
@@ -258,7 +241,13 @@ public sealed partial class SettingsViewModel : PageViewModel
         follow_pc_timezone = FollowPcTimeZone,
     };
 
-    private Task LoadOptions() => RunAsync(async () =>
+    private async Task LoadOptions()
+    {
+        await RunAsync(ShowOptions);
+        Remember("models");
+    }
+
+    private async Task ShowOptions()
     {
         var data = await _api.GetAsync("api/settings/options");
         var current = data?["current"];
@@ -277,7 +266,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         PendingRestart = string.Join(", ", (data?["pending_restart"]?.AsArray() ?? new JsonArray())
             .Select(n => n?.ToString() ?? "")
             .Select(key => $"{PendingNames.GetValueOrDefault(key, key)}(저장 {saved?[key]} · 실행 {current?[key]})"));
-    });
+    }
 
     private static void Fill(ObservableCollection<OptionItem> target, JsonNode? items, System.Func<JsonNode, string> label, JsonNode? current)
     {
@@ -311,36 +300,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         TtsVoice = keep is not null && TtsVoices.Contains(keep) ? keep : TtsVoices.FirstOrDefault();
     }
 
-    private async void ApplyModels() => await RunAsync(async () =>
-    {
-        var changes = new
-        {
-            tts = new { engine = TtsEngine, voice = TtsVoice },
-            stt = new { model_size = SttModel },
-            llm = new { model = LlmModel },
-        };
-        var res = await _api.SendAsync(HttpMethod.Post, "api/settings/apply", new { changes });
-        var restart = res?["restart_required"]?.AsArray().Select(n => n?.ToString()).ToList();
-        await LoadOptions();
-        Status = res?["message"]?.ToString() ?? "설정 저장 완료";
-        if (restart is { Count: > 0 } && await Dialogs.ConfirmAsync(
-                "다시 시작 필요",
-                $"다음 서비스를 다시 만들어야 적용됩니다: {string.Join(", ", restart)}\n" +
-                "LLM 을 다시 만들면 진행 중인 대화가 중단됩니다. 지금 시도할까요?"))
-        {
-            RestartLlm();
-        }
-    });
-
-    // 재생성할 수 없는 환경이면 백엔드가 503 과 직접 실행할 명령을 돌려준다 → 상태줄에 그대로 보인다
-    private async void RestartLlm() => await RunAsync(async () =>
-    {
-        Status = "LLM 다시 만드는 중...";
-        var res = await _api.SendAsync(HttpMethod.Post, "api/services/llm/restart", null);
-        Status = $"LLM: {res?["status"]} - {res?["message"]}";
-    });
-
-    private async void SaveGeneral() => await RunAsync(() => _api.SendAsync(HttpMethod.Put, "api/settings/general", new
+    private object GeneralBody() => new
     {
         wake_word = WakeWord,
         language = Language,
@@ -348,17 +308,11 @@ public sealed partial class SettingsViewModel : PageViewModel
         wake_word_threshold = WakeWordThreshold,
         end_pause_seconds = EndPauseSeconds,
         listening_timeout_seconds = ListeningTimeoutSeconds,
-    }), "일반 설정 저장 완료");
+    };
 
-    private async void RegisterWakeWord() => await RunAsync(async () =>
-    {
-        var res = await _api.SendAsync(HttpMethod.Put, "api/settings/wake-word", new { wake_word = WakeWord });
-        Status = $"호출어를 바꿨습니다: {res?["wake_word"]}";
-    });
-
-    private async void SaveContext() => await RunAsync(() => _api.SendAsync(HttpMethod.Put, "api/settings/llm/context", new
+    private object ContextBody() => new
     {
         context_enabled = ContextEnabled,
         context_window_size = ContextWindowSize,
-    }), "LLM 컨텍스트 설정 저장 완료");
+    };
 }

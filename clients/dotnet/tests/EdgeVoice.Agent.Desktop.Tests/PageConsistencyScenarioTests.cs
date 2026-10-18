@@ -93,26 +93,6 @@ public class PageConsistencyScenarioTests
     }
 
     [AvaloniaFact]
-    public async Task LLM_재생성_실패는_실패로_보인다()
-    {
-        using var s = new Scenario(setup: b =>
-        {
-            b.Json["/api/services/llm/restart"] =
-                """{"service":"llm","status":"failed","message":"docker 가 없습니다. 호스트에서 직접 실행하세요: docker compose up -d llm"}""";
-            b.StatusCodes["/api/services/llm/restart"] = 503;
-        });
-        s.Show();
-        var settings = s.Main.Settings;
-        await Scenario.WaitUntil(() => settings.LlmModel == "qwen");
-
-        settings.RestartLlmCommand.Execute();
-        // 백엔드가 503 을 주면 성공 문구가 아니라 실패와 직접 실행할 명령이 보인다
-        await Scenario.WaitUntil(() => settings.Status.StartsWith("오류"));
-        Assert.Contains("503", settings.Status);
-        Assert.Contains("docker compose up -d llm", settings.Status);
-    }
-
-    [AvaloniaFact]
     public async Task 로그_기본_필터는_전체와_INFO_이상이고_레벨_필터가_쿼리에_반영된다()
     {
         using var s = new Scenario();

@@ -151,6 +151,18 @@ class TestStartupEnvSync:
         assert writer.read("STT_MODEL_SIZE") == "large-v3"
         assert writer.read("TTS_ENGINE") == "kokoro"
 
+    def test_stt_model_goes_to_variable_compose_reads(self, tmp_path):
+        """compose 의 stt 는 MODEL_SIZE=${STT_MODEL} 을 읽는다 (재생성 = 저장한 모델)"""
+        env_path = tmp_path / ".env"
+
+        from services.backend.app.services.env_writer import EnvWriterService
+        from services.backend.app.services.settings_env_sync import sync_settings_to_env
+
+        stt = {"model_size": "medium", "model": "medium"}
+        sync_settings_to_env({"stt": stt}, env_path=str(env_path))
+
+        assert EnvWriterService(env_path=str(env_path)).read("STT_MODEL") == "medium"
+
     def test_startup_creates_env_if_missing(self, tmp_path):
         """
         .env 파일이 없으면 생성해야 함

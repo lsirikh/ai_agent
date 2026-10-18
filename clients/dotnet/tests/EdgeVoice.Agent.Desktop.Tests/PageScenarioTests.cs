@@ -85,8 +85,8 @@ public class PageScenarioTests
         Assert.Single(settings.TtsEngines);
 
         settings.VoiceSpeed = 1.2;
-        settings.SaveGeneralCommand.Execute();
-        await Scenario.WaitUntil(() => settings.Status == "일반 설정 저장 완료");
+        settings.SaveCommand.Execute();
+        await Scenario.WaitUntil(() => settings.SaveResult.Contains("말하기 속도: 바로 반영됨"));
 
         var put = s.Backend.Requests.Single(r => r.Request == "PUT /api/settings/general");
         Assert.Contains("\"voice_speed\":1.2", put.Body);

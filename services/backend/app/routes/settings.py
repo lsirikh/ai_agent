@@ -186,11 +186,12 @@ def get_current_settings_as_dict() -> Dict[str, Any]:
     LLM 모델은 뺀다: .env 의 LLM_MODEL 이 vLLM 의 단일 출처이고,
     바꾸는 길은 검증을 거친 apply 뿐이다 (DB 에 남은 잘못된 모델이
     시작 때 .env 를 덮어써 vLLM 이 기동하지 못하던 문제).
+    STT 모델(STT_MODEL)도 같은 까닭으로 apply 때만 쓴다.
     """
     return {
         "llm": _current_settings.llm.model_dump(exclude={"model"}),
         "tts": _current_settings.tts.model_dump(),
-        "stt": _current_settings.stt.model_dump(),
+        "stt": _current_settings.stt.model_dump(exclude={"model"}),
     }
 
 
@@ -830,7 +831,6 @@ TTS_VOICES: Dict[str, List[str]] = {
 # vLLM(OpenAI 호환) 주소와 받아 둔 모델 폴더(HuggingFace 캐시 hub)
 LLM_SERVICE_URL = os.getenv("VLLM_BASE_URL", "http://llm:11003")
 LLM_HUB_DIR = os.getenv("LLM_MODELS_HUB_DIR", "/models/llm/hub")
-LLM_RECREATE_COMMAND = "docker compose up -d llm"
 
 
 def voice_for_engine(engine: Optional[str], voice: Optional[str]) -> Optional[str]:
@@ -933,6 +933,8 @@ class SettingsOptionsResponse(BaseModel):
     # saved = 저장값
     current: Dict[str, Any]
     saved: Dict[str, Any]
+    # 응답한 서비스의 실행 값만 (다시 시작 뒤 저장값과 같아졌는지 확인용)
+    runtime: Dict[str, Any]
     # 저장값과 실행값이 다른 항목 (다시 시작해야 저장값이 적용됨)
     pending_restart: List[str]
 
@@ -962,6 +964,7 @@ async def get_settings_options():
         llm_models=get_llm_options(),
         current={**saved, **runtime},
         saved=saved,
+        runtime=runtime,
         pending_restart=[k for k, v in runtime.items() if saved[k] != v],
     )
 
@@ -1092,13 +1095,13 @@ class ServiceRestartResponse(BaseModel):
     message: str
 
 
-@services_router.post("/llm/restart", response_model=ServiceRestartResponse)
-async def restart_llm_service():
+@services_router.post("/{service}/restart", response_model=ServiceRestartResponse)
+async def restart_service(service: Literal["llm", "stt", "tts"]):
     """
-    LLM 서비스 재시작
+    LLM·STT·TTS 서비스 다시 만들기
 
-    LLM 모델 변경 후 재생성이 필요할 때 사용.
-    모델은 vLLM 재생성(.env 다시 읽기)으로만 바뀐다.
+    모델·엔진을 바꾼 뒤 재생성이 필요할 때 사용.
+    모델은 컨테이너 재생성(.env 다시 읽기)으로만 바뀐다.
     재생성하지 못하면 503 으로 실패를 돌려준다 (거짓 성공 금지).
 
     Returns:
@@ -1106,6 +1109,8 @@ async def restart_llm_service():
     """
     import subprocess
 
+    recreate_command = f"docker compose up -d {service}"
+    name = service.upper()
     # compose 프로젝트 폴더를 명시한 환경에서만 실행
     # (엉뚱한 폴더에서 새 compose 프로젝트를 만들지 않게)
     compose_dir = os.getenv("COMPOSE_PROJECT_DIR")
@@ -1113,7 +1118,7 @@ async def restart_llm_service():
         if not compose_dir:
             raise LookupError
         result = subprocess.run(
-            LLM_RECREATE_COMMAND.split(),
+            recreate_command.split(),
             cwd=compose_dir,
             capture_output=True,
             text=True,
@@ -1122,9 +1127,9 @@ async def restart_llm_service():
         output = (result.stderr or result.stdout).strip()
         failure = None if result.returncode == 0 else output
     except LookupError:
-        failure = "COMPOSE_PROJECT_DIR 가 없어 LLM 을 다시 만들 수 없습니다"
+        failure = f"COMPOSE_PROJECT_DIR 가 없어 {name} 을 다시 만들 수 없습니다"
     except FileNotFoundError:
-        failure = "이 환경에는 docker 가 없어 LLM 을 다시 만들 수 없습니다"
+        failure = f"이 환경에는 docker 가 없어 {name} 을 다시 만들 수 없습니다"
     except subprocess.TimeoutExpired:
         failure = "재생성 명령이 시간 안에 끝나지 않았습니다"
     except Exception as e:
@@ -1132,12 +1137,12 @@ async def restart_llm_service():
 
     if failure is None:
         return ServiceRestartResponse(
-            service="llm",
+            service=service,
             status="restarting",
-            message="LLM 을 다시 만드는 중입니다. healthy 가 될 때까지 기다리세요."
+            message=f"{name} 을 다시 만드는 중입니다. healthy 가 될 때까지 기다리세요."
         )
     return JSONResponse(status_code=503, content=ServiceRestartResponse(
-        service="llm",
+        service=service,
         status="failed",
-        message=f"{failure}. 호스트에서 직접 실행하세요: {LLM_RECREATE_COMMAND}"
+        message=f"{failure}. 호스트에서 직접 실행하세요: {recreate_command}"
     ).model_dump())

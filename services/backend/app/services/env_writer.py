@@ -19,6 +19,9 @@ SETTINGS_ENV_MAP: Dict[str, Dict[str, Optional[str]]] = {
     },
     "stt": {
         "model_size": "STT_MODEL_SIZE",
+        # compose 의 stt 는 MODEL_SIZE=${STT_MODEL} 을 읽는다
+        # (다시 만들 때 저장한 모델이 뜨게)
+        "model": "STT_MODEL",
         "language": None,     # 런타임 설정
     },
     "tts": {
