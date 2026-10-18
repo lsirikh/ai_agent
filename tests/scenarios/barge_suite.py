@@ -219,8 +219,6 @@ def part_a() -> list:
 
 # ── B. '헤이 자비스' 끼어들기(돌고 있는 웨이크워드 서비스) ─────
 async def part_b() -> list:
-    import redis.asyncio as aioredis
-
     a16, _ = answer16()
     wakes = []
     for name, rate in WAKES:
@@ -228,7 +226,7 @@ async def part_b() -> list:
         wakes.append(
             (f"{name}{'' if rate is None else f'(속도 {rate})'}", read16(path))
         )
-    r = aioredis.Redis(host=REDIS[0], port=REDIS[1])
+    r = run.redis_client()
     ps = r.pubsub()
     await ps.subscribe(WAKE_CHANNEL)
     out = []
@@ -361,10 +359,9 @@ async def part_c() -> list:
 
 async def stop_case(client, wake: Path) -> dict:
     """긴 답을 듣다가 [중단] 을 누르면 3초 안에 대기로, 그 뒤로 답 음성이 안 온다."""
-    import redis.asyncio as aioredis
     import websockets
 
-    r = aioredis.Redis(host=REDIS[0], port=REDIS[1])
+    r = run.redis_client()
     ps = r.pubsub()
     await ps.subscribe(STATE_CHANNEL, "edgevoice:tts:request")
     states, requests, audio_after = [], [], {"bytes": 0}

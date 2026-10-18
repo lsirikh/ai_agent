@@ -201,6 +201,24 @@ class SessionPool:
 SESSIONS = SessionPool()
 
 
+def redis_client():
+    """시험용 Redis — 호스트↔도커 연결이 잠깐 끊겨도 다시 붙는다.
+
+    (끼어들기 4차 실행: 읽기 시간 초과로 멈췄다)
+    """
+    import redis.asyncio as aioredis
+    from redis.asyncio.retry import Retry
+    from redis.backoff import ExponentialBackoff
+    from redis.exceptions import ConnectionError, TimeoutError
+
+    return aioredis.Redis(
+        host=REDIS[0],
+        port=REDIS[1],
+        retry=Retry(ExponentialBackoff(), 3),
+        retry_on_error=[ConnectionError, TimeoutError],
+    )
+
+
 # ── 실시간: 채팅 ────────────────────────────────────────────
 async def chat_once(
     client, message: str, session_id: str, use_rag: bool = False
@@ -830,11 +848,10 @@ class VoiceRunner:
 
     async def run(self, s: dict) -> dict:
         import numpy as np
-        import redis.asyncio as aioredis
         import websockets
 
         expect = s["expect"]
-        r = aioredis.Redis(host=REDIS[0], port=REDIS[1])
+        r = redis_client()
         ps = r.pubsub()
         await ps.subscribe(
             "edgevoice:stt:result",
