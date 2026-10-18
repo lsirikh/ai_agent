@@ -37,10 +37,12 @@ VERIFY_SECONDS = 2.5  # STT 로 확인할 최근 소리 길이
 # 짧은 말을 STT 로 받아 적었을 때 호출어로 보는 꼴: '헤이 자비스' 로 시작해야 한다
 # (답이나 대화 속 '자비스' 로는 깨지 않게)
 WAKE_START = re.compile(r"^\W*" + HEY + r"\W*" + NAME, re.IGNORECASE)
-# 답하는 중: 쉼표 뒤의 약한 '헤이' 는 에코에 묻혀 빠진다 — 이름으로 시작해도 보되
-# 답 속의 '자비스는…' 으로는 깨지 않게 이름 뒤에 글자가 바로 붙으면 아니다
+# 답하는 중: 쉼표 뒤의 약한 '헤이' 는 에코에 묻혀 빠지고, 에코로 먼저 열린 창이면
+# 호출어가 뒤쪽에 들어간다 — 이름이 따로 떨어져 있으면 어디서든 보되
+# 답 속의 '자비스는…'·'자비스입니다' 로는 깨지 않게 이름 앞뒤에 글자가 붙으면 아니다
 ANSWER_WAKE = re.compile(
-    r"^\W*(?:" + HEY + r"\W*)?" + NAME + r"(?![가-힣a-z])", re.IGNORECASE
+    r"(?<![가-힣a-z])(?:" + HEY + r"\W*)?" + NAME + r"(?![가-힣a-z])",
+    re.IGNORECASE,
 )
 
 
@@ -445,13 +447,17 @@ class WakeWordDetector:
             await self._logger.warning("wake_verify_failed", f"STT 확인 실패: {e}")
         if recent:  # 같은 소리로 거듭 확인하지 않게(짧은 말·창은 겹치지 않는다)
             self._verify_quiet_until = time.time() + 1.5
+        heard = bool(pattern.search(text))
+        # 호출어가 아니면 받아 적은 글은 남기지 않는다 — 짧은 말 확인은 방 안의 대화도
+        # 받아 적는다(끼어들기 시험 3차: 가족 대화가 로그에 남았다)
+        said = f"STT '{text[:40]}'" if heard else f"호출어 아님({len(text)}자)"
         await self._logger.log(
             event="wake_verify",
-            data={"message": f"{confidence:.1%} → STT '{text[:40]}'", "text": text},
+            data={"message": f"{confidence:.1%} → {said}", "heard": heard},
             level="debug",
         )
         already = (self._last_detection_time or 0.0) >= since
-        if self._is_in_cooldown or already or not pattern.search(text):
+        if self._is_in_cooldown or already or not heard:
             return
         self._last_detection_time = time.time()
         self._is_in_cooldown = True

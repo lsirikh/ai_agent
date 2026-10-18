@@ -108,3 +108,13 @@ def test_speech_to_text_spellings_of_the_name() -> None:
     for text in ["헤이 샤비스", "헤이 차비즈", "헤이, 자비수.", "Hey Jarvis"]:
         assert WAKE_START.search(text), text
     assert not WAKE_START.search("헤이 서비스 센터")
+
+
+def test_name_later_in_the_window_wakes_while_answering() -> None:
+    # 에코로 먼저 열린 창 뒤쪽에 호출어가 들어간다(끼어들기 시험 3차)
+    detector = _answering_detector("10월 중순으로 자비스 한국")
+    assert _speak_over_echo(detector) == 1
+
+
+def test_name_with_a_particle_does_not_wake_while_answering() -> None:
+    assert _speak_over_echo(_answering_detector("저는 자비스입니다")) == 0

@@ -150,3 +150,15 @@ def test_listening_forgets_the_utterance_being_heard() -> None:
     spotter.reset()
 
     assert all(spotter.feed(c) is None for c in _chunks(np.zeros(8000)))
+
+
+def test_what_was_said_is_not_logged_when_it_is_not_the_wake_word() -> None:
+    # 방 안의 대화가 짧은 말로 잡혀 받아 적은 글이 로그(DB)에 남았다(끼어들기 시험 3차)
+    verifier = AsyncMock(return_value="가만있어 움직이지 마")
+    detector = _detector(verifier)
+
+    asyncio.run(_speak(detector, np.concatenate(
+        [np.zeros(16000), _tone(1.0), np.zeros(8000)])))
+
+    verifier.assert_awaited()
+    assert "움직이지" not in str(detector._logger.mock_calls)
