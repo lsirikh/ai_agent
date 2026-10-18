@@ -25,8 +25,7 @@ public class RegionTimeHeadedTests
             var nav = w.FindControl<TabControl>("Nav")!;
             nav.SelectedItem = nav.Items.Cast<TabItem>().Single(t => (string)t.Header! == "Settings");
             await Task.Delay(500);
-            w.GetVisualDescendants().OfType<Button>()
-                .Single(b => (b.Content as string) == "지역·시간 설정 저장").BringIntoView();
+            Named<TextBox>(w, "LocationBox").BringIntoView();
             await Task.Delay(500);
             HeadedApp.Shot(w, "headed-region-time");
 

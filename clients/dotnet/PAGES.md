@@ -36,8 +36,8 @@ EdgeVoice Agent 데스크톱(Avalonia, `src/EdgeVoice.Agent.Desktop`)의 6개 �
 ## Settings
 - 목적: 실행 중인 구성을 보고 바꾼다. 콤보박스 선택값 = 실행 중인 서비스 값.
 - 표시(2단 카드): 음성 인식(STT 모델·호출어·민감도·무음·제한 시간) · 답변 음성(엔진·엔진별 음성·속도) · 언어 모델(받아 둔 LLM 만) · 대화(컨텍스트) · 일반(언어: 한국어/English/日本語).
-- 출처: `GET /api/settings/options` — `current`=실행 값(vLLM `/v1/models`, stt·tts·wake-word `/info`), `saved`=저장값, `pending_restart`, `tts_voices`(엔진별). `GET/PUT /api/settings/general`, `PUT /api/settings/wake-word`, `GET/PUT /api/settings/llm/context`, `POST /api/settings/apply`, `POST /api/services/llm/restart`.
-- 조작: 모델 적용(받아 두지 않은 LLM 은 거부), LLM 다시 만들기(못 하면 503 과 `docker compose up -d llm` 안내), 호출어 바로 바꾸기, 일반 설정 저장, 컨텍스트 저장.
+- 출처: `GET /api/settings/options` — `current`=실행 값(vLLM `/v1/models`, stt·tts·wake-word `/info`), `saved`=저장값, `runtime`=응답한 서비스의 실행 값, `pending_restart`, `tts_voices`(엔진별). `GET/PUT /api/settings/general`, `GET/PUT /api/settings/llm/context`, `GET/PUT /api/settings/tools`, `PUT /api/settings/mcp/{name}`, `PUT /api/settings/skills`, `POST /api/settings/apply`(바꾼 종류만), `POST /api/services/{llm|stt|tts}/restart`.
+- 조작: 화면 아래 저장 막대 하나 — '저장하지 않은 변경 n개' + [저장] [되돌리기]. 저장하면 항목마다 '바로 반영됨 / 다음 질문부터 / 다시 시작해야 반영됨' 을 보이고, 모델을 바꿨으면 '○○을(를) 다시 시작합니다(약 N초)' + [다시 시작] [나중에]. 다시 시작은 백엔드가 못 하면(503) 이 PC 의 docker 로 같은 compose 프로젝트를 다시 만들고, 실행 값이 저장값과 같아지면 '반영됨'. MCP·스킬의 '추가'·'삭제' 는 바로 저장.
 - 빈 상태: 없음(실행 값이 목록에 없으면 "(실행 중)" 항목을 붙여 콤보박스가 비지 않게 함).
 - 오류 상태: 저장값≠실행값이면 "다시 시작 후 적용: 항목(저장 X · 실행 Y)" 배지, 실패는 상태줄.
 

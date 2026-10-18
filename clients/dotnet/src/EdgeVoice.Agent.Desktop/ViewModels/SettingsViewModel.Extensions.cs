@@ -10,7 +10,7 @@ using Prism.Mvvm;
 
 namespace EdgeVoice.Agent.Desktop.ViewModels;
 
-/// <summary>설정 화면 체크박스 한 줄 (MCP 서버·스킬). 체크를 바꾸면 바로 저장한다.</summary>
+/// <summary>설정 화면 체크박스 한 줄 (MCP 서버·스킬). 체크를 바꾸면 알린다 (저장은 저장 막대).</summary>
 public sealed class ToggleItem : BindableBase
 {
     private readonly Action<ToggleItem> _changed;
@@ -79,15 +79,11 @@ public sealed partial class SettingsViewModel
 
     public DelegateCommand AddMcpServerCommand { get; private set; } = null!;
 
-    public DelegateCommand UpdateMcpServerCommand { get; private set; } = null!;
-
     public DelegateCommand DeleteMcpServerCommand { get; private set; } = null!;
 
     public DelegateCommand RefreshMcpCommand { get; private set; } = null!;
 
     public DelegateCommand AddSkillCommand { get; private set; } = null!;
-
-    public DelegateCommand UpdateSkillCommand { get; private set; } = null!;
 
     public DelegateCommand DeleteSkillCommand { get; private set; } = null!;
 
@@ -97,17 +93,9 @@ public sealed partial class SettingsViewModel
         get => _selectedMcpServer;
         set
         {
-            if (SetProperty(ref _selectedMcpServer, value) && value?.Data is { } d)
+            if (SetProperty(ref _selectedMcpServer, value) && value is not null)
             {
-                McpName = value.Name;
-                McpUrl = d["url"]?.ToString() ?? "";
-                McpCommand = d["command"]?.ToString() ?? "";
-                McpArgs = Join(d["args"]);
-                McpAllowedTools = Join(d["allowed_tools"]);
-                McpAlwaysConfirm = Join(d["always_confirm"]);
-                McpNoConfirm = Join(d["no_confirm"]);
-                McpTrusted = d["trusted"]?.GetValue<bool>() ?? false;
-                McpTimeout = d["timeout"]?.GetValue<double>() ?? 30;
+                FillMcpEditor(value);
             }
         }
     }
@@ -139,11 +127,9 @@ public sealed partial class SettingsViewModel
         get => _selectedPromptSkill;
         set
         {
-            if (SetProperty(ref _selectedPromptSkill, value) && value?.Data is { } d)
+            if (SetProperty(ref _selectedPromptSkill, value) && value is not null)
             {
-                SkillName = value.Name;
-                SkillDescription = d["description"]?.ToString() ?? "";
-                SkillInstructions = d["instructions"]?.ToString() ?? "";
+                FillSkillEditor(value);
             }
         }
     }
@@ -158,11 +144,9 @@ public sealed partial class SettingsViewModel
     private void CreateExtensionCommands()
     {
         AddMcpServerCommand = new DelegateCommand(AddMcpServer);
-        UpdateMcpServerCommand = new DelegateCommand(UpdateMcpServer);
         DeleteMcpServerCommand = new DelegateCommand(DeleteMcpServer);
         RefreshMcpCommand = new DelegateCommand(async () => await RunAsync(async () => ShowMcp(await _api.GetAsync("api/settings/mcp")), "MCP 연결 상태를 새로 받았습니다"));
         AddSkillCommand = new DelegateCommand(AddSkill);
-        UpdateSkillCommand = new DelegateCommand(UpdateSkill);
         DeleteSkillCommand = new DelegateCommand(DeleteSkill);
     }
 
@@ -181,6 +165,37 @@ public sealed partial class SettingsViewModel
     private static string McpPath(string name) => "api/settings/mcp/" + Uri.EscapeDataString(name);
 
     // ===== MCP 서버 =====
+
+    private void FillMcpEditor(ToggleItem item)
+    {
+        var d = item.Data;
+        McpName = item.Name;
+        McpUrl = d?["url"]?.ToString() ?? "";
+        McpCommand = d?["command"]?.ToString() ?? "";
+        McpArgs = Join(d?["args"]);
+        McpAllowedTools = Join(d?["allowed_tools"]);
+        McpAlwaysConfirm = Join(d?["always_confirm"]);
+        McpNoConfirm = Join(d?["no_confirm"]);
+        McpTrusted = d?["trusted"]?.GetValue<bool>() ?? false;
+        McpTimeout = d?["timeout"]?.GetValue<double>() ?? 30;
+    }
+
+    // 편집 칸과 서버 값을 같은 모양의 글자로 만들어 비교한다 (저장 막대의 바뀐 항목)
+    private static string McpText(string name, string url, string command, string args, string allowed,
+        string always, string no, bool trusted, double timeout)
+        => string.Join("|", name.Trim(), url.Trim(), command.Trim(), string.Join(",", Split(args)), string.Join(",", Split(allowed)),
+            string.Join(",", Split(always)), string.Join(",", Split(no)), trusted, timeout);
+
+    private string McpEditorText()
+        => McpText(McpName, McpUrl, McpCommand, McpArgs, McpAllowedTools, McpAlwaysConfirm, McpNoConfirm, McpTrusted, McpTimeout);
+
+    private static string McpDataText(ToggleItem item)
+    {
+        var d = item.Data;
+        return McpText(item.Name, d?["url"]?.ToString() ?? "", d?["command"]?.ToString() ?? "", Join(d?["args"]),
+            Join(d?["allowed_tools"]), Join(d?["always_confirm"]), Join(d?["no_confirm"]),
+            d?["trusted"]?.GetValue<bool>() ?? false, d?["timeout"]?.GetValue<double>() ?? 30);
+    }
 
     private void ShowMcp(JsonNode? res)
     {
@@ -201,12 +216,20 @@ public sealed partial class SettingsViewModel
             }
 
             McpServers.Add(new ToggleItem(server["name"]?.ToString() ?? "", detail,
-                server["enabled"]?.GetValue<bool>() ?? true, server, ToggleMcpServer));
+                server["enabled"]?.GetValue<bool>() ?? true, server, _ => RefreshChanges()));
         }
 
         // 목록을 다시 그려도 고른 서버를 유지한다
         _selectedMcpServer = McpServers.FirstOrDefault(x => x.Name == selected);
         RaisePropertyChanged(nameof(SelectedMcpServer));
+    }
+
+    // 체크만 바꾼 서버는 서버가 준 나머지 값을 그대로 보낸다
+    private static JsonObject EnabledBody(ToggleItem item)
+    {
+        var body = item.Data!.DeepClone().AsObject();
+        body["enabled"] = item.Enabled;
+        return body;
     }
 
     private object McpBody(bool enabled, JsonNode? env = null) => new
@@ -225,30 +248,9 @@ public sealed partial class SettingsViewModel
         enabled,
     };
 
-    // 켜면 연결하고 끄면 닫는다 (채팅은 바로, 음성은 다음 질문부터)
-    private async void ToggleMcpServer(ToggleItem item) => await RunAsync(async () =>
-    {
-        var body = item.Data!.DeepClone().AsObject();
-        body["enabled"] = item.Enabled;
-        ShowMcp(await _api.SendAsync(HttpMethod.Put, McpPath(item.Name), body));
-    }, $"MCP 서버 '{item.Name}' {(item.Enabled ? "켬" : "끔")}");
-
     private async void AddMcpServer() => await RunAsync(async () =>
         ShowMcp(await _api.SendAsync(HttpMethod.Post, "api/settings/mcp", McpBody(enabled: true))),
         $"MCP 서버 '{McpName}' 추가");
-
-    private async void UpdateMcpServer()
-    {
-        if (SelectedMcpServer is not { } item)
-        {
-            Status = "고칠 MCP 서버를 목록에서 먼저 고르세요";
-            return;
-        }
-
-        await RunAsync(async () =>
-            ShowMcp(await _api.SendAsync(HttpMethod.Put, McpPath(item.Name), McpBody(item.Enabled, item.Data?["env"]))),
-            $"MCP 서버 '{McpName}' 저장");
-    }
 
     private async void DeleteMcpServer()
     {
@@ -265,6 +267,18 @@ public sealed partial class SettingsViewModel
 
     // ===== 스킬 =====
 
+    private void FillSkillEditor(ToggleItem item)
+    {
+        SkillName = item.Name;
+        SkillDescription = item.Data?["description"]?.ToString() ?? "";
+        SkillInstructions = item.Data?["instructions"]?.ToString() ?? "";
+    }
+
+    private string SkillEditorText() => string.Join("|", SkillName.Trim(), SkillDescription, SkillInstructions);
+
+    private static string SkillDataText(ToggleItem item)
+        => string.Join("|", item.Name, item.Data?["description"]?.ToString() ?? "", item.Data?["instructions"]?.ToString() ?? "");
+
     private void ShowSkills(JsonNode? res)
     {
         BuiltinSkills.Clear();
@@ -277,7 +291,7 @@ public sealed partial class SettingsViewModel
                 detail += " (지금 사용 안 됨)";
             }
 
-            BuiltinSkills.Add(new ToggleItem(skill["name"]?.ToString() ?? "", detail, enabled, skill, _ => SaveSkillsFromList()));
+            BuiltinSkills.Add(new ToggleItem(skill["name"]?.ToString() ?? "", detail, enabled, skill, _ => RefreshChanges()));
         }
 
         var selected = SelectedPromptSkill?.Name;
@@ -285,7 +299,7 @@ public sealed partial class SettingsViewModel
         foreach (var skill in res?["prompts"]?.AsArray().OfType<JsonNode>() ?? Enumerable.Empty<JsonNode>())
         {
             PromptSkills.Add(new ToggleItem(skill["name"]?.ToString() ?? "", skill["description"]?.ToString() ?? "",
-                skill["enabled"]?.GetValue<bool>() ?? true, skill, _ => SaveSkillsFromList()));
+                skill["enabled"]?.GetValue<bool>() ?? true, skill, _ => RefreshChanges()));
         }
 
         _selectedPromptSkill = PromptSkills.FirstOrDefault(x => x.Name == selected);
@@ -308,27 +322,16 @@ public sealed partial class SettingsViewModel
         enabled,
     };
 
-    private async void SaveSkills(IEnumerable<object> prompts, string done) => await RunAsync(async () =>
-        ShowSkills(await _api.SendAsync(HttpMethod.Put, "api/settings/skills", new
-        {
-            disabled_tools = BuiltinSkills.Where(x => !x.Enabled).Select(x => x.Name).ToList(),
-            prompts = prompts.ToList(),
-        })), done);
+    private object SkillsBody(IEnumerable<object> prompts) => new
+    {
+        disabled_tools = BuiltinSkills.Where(x => !x.Enabled).Select(x => x.Name).ToList(),
+        prompts = prompts.ToList(),
+    };
 
-    private void SaveSkillsFromList() => SaveSkills(PromptSkills.Select(PromptBody), "스킬 설정 저장 완료");
+    private async void SaveSkills(IEnumerable<object> prompts, string done) => await RunAsync(async () =>
+        ShowSkills(await _api.SendAsync(HttpMethod.Put, "api/settings/skills", SkillsBody(prompts))), done);
 
     private void AddSkill() => SaveSkills(PromptSkills.Select(PromptBody).Append(EditorPrompt(enabled: true)), $"스킬 '{SkillName}' 추가");
-
-    private void UpdateSkill()
-    {
-        if (SelectedPromptSkill is not { } item)
-        {
-            Status = "고칠 스킬을 목록에서 먼저 고르세요";
-            return;
-        }
-
-        SaveSkills(PromptSkills.Select(p => p == item ? EditorPrompt(p.Enabled) : PromptBody(p)), $"스킬 '{SkillName}' 저장");
-    }
 
     private void DeleteSkill()
     {

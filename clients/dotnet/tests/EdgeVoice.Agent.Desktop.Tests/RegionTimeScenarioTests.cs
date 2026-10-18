@@ -44,7 +44,7 @@ public class RegionTimeScenarioTests
 
         settings.FollowPcTimeZone = true;
         settings.Location = "제주";
-        settings.SaveToolsCommand.Execute();
+        settings.SaveCommand.Execute();
         await Scenario.WaitUntil(() => s.Backend.Requests.Any(r => r.Request == "PUT /api/settings/tools"));
 
         var body = LastToolsPut(s.Backend);

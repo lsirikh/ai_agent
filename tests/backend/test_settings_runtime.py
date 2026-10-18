@@ -2,6 +2,9 @@
 설정 화면이 실제 실행 값을 보여 주는지 (저장값과 실행값 구분, 정직한 재시작)
 """
 
+import subprocess
+
+import pytest
 from fastapi.testclient import TestClient
 
 from services.backend.app.main import app
@@ -73,6 +76,19 @@ def test_options_current_is_runtime_and_marks_pending(monkeypatch):
     assert data["saved"]["stt_model"] == "medium"
     assert "stt_model" in data["pending_restart"]
     assert data["tts_voices"]["melo"] == ["KR"]
+    # 응답한 서비스의 실행 값만 따로 (다시 시작 뒤 '반영됨' 확인용)
+    assert data["runtime"] == runtime
+
+
+def test_options_runtime_skips_services_not_answering(monkeypatch):
+    async def fake_runtime():
+        return {"llm_model": "qwen2.5-7b-instruct-awq"}
+
+    monkeypatch.setattr(settings_route, "read_runtime_settings", fake_runtime)
+    data = TestClient(app).get("/api/settings/options").json()
+
+    assert "stt_model" not in data["runtime"]
+    assert "stt_model" in data["current"]
 
 
 def test_apply_rejects_not_downloaded_llm(tmp_path, monkeypatch):
@@ -117,5 +133,42 @@ def test_llm_restart_fails_honestly(monkeypatch):
     assert "docker compose up -d llm" in response.json()["message"]
 
 
+@pytest.mark.parametrize("service", ["stt", "tts"])
+def test_model_service_restart_fails_honestly(monkeypatch, service):
+    monkeypatch.delenv("COMPOSE_PROJECT_DIR", raising=False)
+    response = TestClient(app).post(f"/api/services/{service}/restart")
+
+    assert response.status_code == 503
+    assert response.json()["service"] == service
+    assert f"docker compose up -d {service}" in response.json()["message"]
+
+
+def test_service_restart_recreates_with_compose(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs["cwd"]))
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setenv("COMPOSE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    response = TestClient(app).post("/api/services/stt/restart")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "restarting"
+    assert calls == [(["docker", "compose", "up", "-d", "stt"], str(tmp_path))]
+
+
+def test_unknown_service_restart_is_rejected():
+    response = TestClient(app).post("/api/services/postgres/restart")
+
+    assert response.status_code == 422
+
+
 def test_startup_env_sync_skips_llm_model():
     assert "model" not in settings_route.get_current_settings_as_dict()["llm"]
+
+
+def test_startup_env_sync_skips_stt_model():
+    # compose 가 읽는 STT_MODEL 은 사용자가 STT 모델을 저장할 때만 쓴다
+    assert "model" not in settings_route.get_current_settings_as_dict()["stt"]

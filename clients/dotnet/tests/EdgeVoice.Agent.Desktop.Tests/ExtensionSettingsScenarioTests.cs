@@ -66,12 +66,14 @@ public class ExtensionSettingsScenarioTests
     }
 
     [AvaloniaFact]
-    public async Task MCP_체크를_끄면_그_서버를_끄는_요청을_보낸다()
+    public async Task MCP_체크를_끄고_저장하면_그_서버를_끄는_요청을_보낸다()
     {
         using var s = Open();
         await Loaded(s);
 
         s.Main.Settings.McpServers[0].Enabled = false;
+        Assert.DoesNotContain(s.Backend.Requests, r => r.Request == "PUT /api/settings/mcp/browser");
+        s.Main.Settings.SaveCommand.Execute();
         await Scenario.WaitUntil(() => s.Backend.Requests.Any(r => r.Request == "PUT /api/settings/mcp/browser"));
 
         var body = LastBody(s.Backend, "PUT /api/settings/mcp/browser");
@@ -103,12 +105,14 @@ public class ExtensionSettingsScenarioTests
         Assert.Equal(new[] { "list", "read" }, added["allowed_tools"]!.AsArray().Select(a => a!.ToString()));
         Assert.True(added["enabled"]!.GetValue<bool>());
 
-        // 목록에서 고르면 편집 칸에 채워지고, 고쳐서 저장하면 그 이름으로 PUT
+        // 목록에서 고르면 편집 칸에 채워지고, 고쳐서 저장 막대로 저장하면 그 이름으로 PUT
         settings.SelectedMcpServer = settings.McpServers[1];
         Assert.Equal("desktop", settings.McpName);
         Assert.Equal("open_app", settings.McpAllowedTools);
+        Assert.False(settings.HasChanges);
         settings.McpAllowedTools = "open_app, write_document";
-        settings.UpdateMcpServerCommand.Execute();
+        Assert.Contains("MCP 서버 'desktop' 설정", settings.ChangeSummary);
+        settings.SaveCommand.Execute();
         await Scenario.WaitUntil(() => s.Backend.Requests.Any(r => r.Request == "PUT /api/settings/mcp/desktop"));
 
         var updated = LastBody(s.Backend, "PUT /api/settings/mcp/desktop");
@@ -120,12 +124,13 @@ public class ExtensionSettingsScenarioTests
     }
 
     [AvaloniaFact]
-    public async Task 내장_스킬_체크를_끄면_끈_도구_목록을_저장한다()
+    public async Task 내장_스킬_체크를_끄고_저장하면_끈_도구_목록을_저장한다()
     {
         using var s = Open();
         await Loaded(s);
 
         s.Main.Settings.BuiltinSkills[0].Enabled = false;
+        s.Main.Settings.SaveCommand.Execute();
         await Scenario.WaitUntil(() => s.Backend.Requests.Any(r => r.Request == "PUT /api/settings/skills"));
 
         var body = LastBody(s.Backend, "PUT /api/settings/skills");
