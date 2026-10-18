@@ -20,7 +20,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from shared import vision
-from shared.mcp_client import start_mcp_from_env
+from shared.mcp_client import MCPManager, load_mcp_servers
 from shared.tools import build_registry, load_tool_settings
 
 from ..constants.redis_channels import RedisChannels
@@ -41,10 +41,21 @@ _chat_service = None
 _mcp = None
 
 
-async def start_mcp():
-    """MCP_CONFIG_PATH 에 설정한 MCP 서버에 붙는다(채팅 도구로 쓴다)."""
+async def sync_mcp() -> MCPManager:
+    """
+    설정 화면에서 저장한 MCP 서버(없으면 MCP_CONFIG_PATH)에 연결을 맞춘다
+    (켜진 서버 중 바뀐 것만 다시 연결한다).
+    """
     global _mcp
-    _mcp = await start_mcp_from_env()
+    if _mcp is None:
+        _mcp = MCPManager([])
+    await _mcp.apply(await load_mcp_servers(conversation._get_redis()))
+    return _mcp
+
+
+async def start_mcp():
+    """설정한 MCP 서버에 붙는다(채팅 도구로 쓴다)."""
+    await sync_mcp()
 
 
 async def stop_mcp():
@@ -58,11 +69,11 @@ async def get_tools():
     """이번 턴에 쓸 도구: 설정(인터넷 토글, Redis) + MCP 허용 도구."""
     settings = await load_tool_settings(conversation._get_redis())
     mcp_tools = []
-    if _mcp is not None:
-        try:
-            mcp_tools = await _mcp.tools()
-        except Exception as e:
-            print(f"[Chat] MCP tools unavailable: {e}")
+    try:
+        # 설정 화면에서 켜고 끈 서버를 재시작 없이 반영한다
+        mcp_tools = await (await sync_mcp()).tools()
+    except Exception as e:
+        print(f"[Chat] MCP tools unavailable: {e}")
     return build_registry(settings, mcp_tools)
 
 

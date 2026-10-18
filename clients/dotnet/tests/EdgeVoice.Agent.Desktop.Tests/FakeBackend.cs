@@ -50,6 +50,8 @@ public sealed class FakeBackend : IDisposable
             """,
         ["/api/settings/general"] = """{"wake_word":"alexa","language":"en","voice_speed":1.5,"wake_word_threshold":0.6,"end_pause_seconds":2,"listening_timeout_seconds":20}""",
         ["/api/settings/llm/context"] = """{"context_enabled":false,"context_window_size":10}""",
+        ["/api/settings/mcp"] = """{"servers":[]}""",
+        ["/api/settings/skills"] = """{"builtin":[],"disabled_tools":[],"prompts":[]}""",
     };
 
     /// <summary>경로 → HTTP 상태 코드 (없으면 200). 실패 응답 시나리오용.</summary>

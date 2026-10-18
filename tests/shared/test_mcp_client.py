@@ -268,6 +268,106 @@ class TestReconnect:
         assert result.is_error is False and "정상" in result.content
 
 
+class FakeRedis:
+    def __init__(self, values=None):
+        self.values = dict(values or {})
+
+    async def get(self, key):
+        return self.values.get(key)
+
+
+class TestSettings:
+    """설정 화면에서 MCP 서버를 켜고 끄고 고친다 (사용자 요청 2026-10-18)."""
+
+    @pytest.mark.asyncio
+    async def test_saved_servers_win_over_config_file(self, tmp_path, monkeypatch):
+        from shared.mcp_client import MCP_SETTINGS_KEY, load_mcp_servers
+
+        path = tmp_path / "mcp.json"
+        path.write_text(json.dumps({"servers": [{"name": "file", "url": "http://f/mcp"}]}))
+        monkeypatch.setenv("MCP_CONFIG_PATH", str(path))
+        saved = [{"name": "saved", "url": "http://s/mcp", "enabled": False}]
+
+        from_file = await load_mcp_servers(FakeRedis())
+        from_redis = await load_mcp_servers(
+            FakeRedis({MCP_SETTINGS_KEY: json.dumps(saved)})
+        )
+
+        assert [s.name for s in from_file] == ["file"] and from_file[0].enabled
+        assert [s.name for s in from_redis] == ["saved"]
+        assert from_redis[0].enabled is False
+
+    @pytest.mark.asyncio
+    async def test_apply_connects_only_enabled_servers(self):
+        mcp = MCPManager([])
+        try:
+            await mcp.apply([config(), config(name="off", enabled=False)])
+            names = sorted(t.name for t in await mcp.tools())
+        finally:
+            await mcp.close()
+
+        assert names == ["ironwall__restart", "ironwall__status"]
+
+    @pytest.mark.asyncio
+    async def test_apply_keeps_unchanged_servers_and_reconnects_changed(self):
+        mcp = MCPManager([])
+        try:
+            await mcp.apply([config(), config(name="other")])
+            kept, changed = (s.client for s in mcp.servers)
+
+            await mcp.apply([config(), config(name="other", allowed_tools=["status"])])
+            names = sorted(t.name for t in await mcp.tools())
+            assert mcp.servers[0].client is kept
+            assert mcp.servers[1].client is not changed
+        finally:
+            await mcp.close()
+
+        assert names == ["ironwall__restart", "ironwall__status", "other__status"]
+
+    @pytest.mark.asyncio
+    async def test_apply_closes_disabled_and_removed_servers(self):
+        mcp = MCPManager([])
+        try:
+            await mcp.apply([config(), config(name="other")])
+            other = mcp.servers[1]
+
+            await mcp.apply([config(enabled=False)])
+
+            assert mcp.servers == [] and other.client is None
+            assert await mcp.tools() == []
+        finally:
+            await mcp.close()
+
+    @pytest.mark.asyncio
+    async def test_server_turned_back_on_still_reconnects_when_listing(self):
+        # 켜기/끄기로 다시 만든 서버도 끊기면 목록 받을 때 다시 연결한다 (master 동작)
+        mcp = MCPManager([])
+        try:
+            await mcp.apply([config(enabled=False)])
+            await mcp.apply([config()])
+            server = mcp.servers[0]
+            await server.stop()
+
+            names = [t.name for t in await mcp.tools()]
+        finally:
+            await mcp.close()
+
+        assert "ironwall__status" in names
+
+
+def test_project_config_offers_new_desktop_tools():
+    # 설정 화면의 MCP 목록은 이 파일을 처음 값으로 보여 준다
+    root = os.path.join(os.path.dirname(__file__), "..", "..")
+    path = os.path.join(root, "config", "mcp", "servers.json")
+    servers = {s.name: s for s in load_mcp_config(path)}
+
+    desktop = servers["desktop"]
+    new_tools = {"draw_picture", "mouse_click", "mouse_drag", "type_text", "press_keys"}
+    assert new_tools <= set(desktop.allowed_tools) and desktop.enabled
+    assert new_tools <= set(desktop.no_confirm)
+    assert "browser_click" in servers["browser"].no_confirm
+
+
 class TestReconnectOnListing:
     """
     실측(2026-10-18): 브라우저 MCP 를 다시 띄운 뒤 연결이 끊긴 서버를 도구 목록에서

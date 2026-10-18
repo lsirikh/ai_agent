@@ -8,7 +8,7 @@ import asyncio
 from typing import Any, AsyncIterator, Awaitable, Callable, List, Optional, Tuple
 
 import shared.tools as tools
-from shared import vision
+from shared import skills, vision
 from shared.knowledge_filter import relevant_results
 
 from . import conversation
@@ -147,13 +147,16 @@ class ChatService:
 
         # 3. 시스템 프롬프트 생성
         # (고정 — RAG 근거는 이번 질문에 붙여 접두사 캐시를 지킨다)
-        system_prompt = self._build_system_prompt()
+        # 설정 화면에서 켠 프롬프트 스킬은 시스템 프롬프트 뒤에 붙인다
+        redis = conversation._get_redis()
+        system_prompt = skills.with_skills(
+            self._build_system_prompt(), await skills.load_skills(redis)
+        )
         extra = {}
         if summary:
             extra["summary"] = summary
         # 세션 기록의 옛 시각 답을 따라 하지 않도록 지금 시각을 근거로 붙인다
         # (이번 질문에 붙어 앞쪽 접두사 캐시는 그대로)
-        redis = conversation._get_redis()
         extra["reference"] = await tools.current_time_reference(redis)
         if image_note:
             extra["reference"] += f"\n\n{image_note}"

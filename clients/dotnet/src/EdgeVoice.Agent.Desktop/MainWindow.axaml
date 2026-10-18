@@ -393,6 +393,43 @@
                                             <Slider Minimum="0.5" Maximum="2.0" TickFrequency="0.1" IsSnapToTickEnabled="True" Value="{Binding VoiceSpeed}" />
                                         </StackPanel>
                                     </Border>
+                                    <Border Classes="card">
+                                        <StackPanel>
+                                            <TextBlock Text="MCP 서버" Classes="cardTitle" />
+                                            <TextBlock Text="체크하면 연결하고 끄면 연결을 닫습니다 (채팅은 바로, 음성은 다음 질문부터). 목록에서 고르면 아래 칸에 채워집니다." Classes="help" TextWrapping="Wrap" />
+                                            <ListBox x:Name="McpServerList" ItemsSource="{Binding McpServers}" SelectedItem="{Binding SelectedMcpServer}">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel>
+                                                            <CheckBox Content="{Binding Name}" IsChecked="{Binding Enabled}" />
+                                                            <TextBlock Text="{Binding Detail}" Classes="help" TextWrapping="Wrap" />
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                            <TextBlock Text="이름" Classes="label" />
+                                            <TextBox Text="{Binding McpName}" Watermark="예: browser" />
+                                            <TextBlock Text="주소 (streamable HTTP)" Classes="label" />
+                                            <TextBox Text="{Binding McpUrl}" Watermark="예: http://host.docker.internal:8931/mcp" />
+                                            <TextBlock Text="또는 실행 명령 (stdio) · 인자" Classes="label" />
+                                            <TextBox Text="{Binding McpCommand}" Watermark="예: python" />
+                                            <TextBox Text="{Binding McpArgs}" Watermark="인자 (쉼표로 구분)" />
+                                            <TextBlock Text="허용 도구 (이 목록의 도구만 LLM 에 보입니다)" Classes="label" />
+                                            <TextBox Text="{Binding McpAllowedTools}" Watermark="쉼표로 구분" />
+                                            <TextBlock Text="항상 확인할 도구 · 확인 없이 실행할 도구" Classes="label" />
+                                            <TextBox Text="{Binding McpAlwaysConfirm}" Watermark="항상 확인 (쉼표로 구분)" />
+                                            <TextBox Text="{Binding McpNoConfirm}" Watermark="확인 없이 (쉼표로 구분)" />
+                                            <CheckBox Content="신뢰하는 서버 (읽기 전용 도구는 묻지 않고 실행)" IsChecked="{Binding McpTrusted}" />
+                                            <TextBlock Classes="label" Text="{Binding McpTimeout, StringFormat='시간 제한: {0:0}초'}" />
+                                            <Slider Minimum="5" Maximum="300" TickFrequency="5" IsSnapToTickEnabled="True" Value="{Binding McpTimeout}" />
+                                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                                <Button Classes="accent" Content="추가" Command="{Binding AddMcpServerCommand}" />
+                                                <Button Content="고른 서버 저장" Command="{Binding UpdateMcpServerCommand}" />
+                                                <Button Content="삭제" Command="{Binding DeleteMcpServerCommand}" />
+                                                <Button Content="연결 상태 새로고침" Command="{Binding RefreshMcpCommand}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1">
                                     <Border Classes="card">
@@ -449,6 +486,43 @@
                                                       SelectedValueBinding="{Binding Id}" SelectedValue="{Binding Language}" HorizontalAlignment="Stretch" />
                                             <Button Classes="accent" Content="일반 설정 저장" Command="{Binding SaveGeneralCommand}" HorizontalAlignment="Left" Margin="0,10,0,0" />
                                             <TextBlock Text="호출어·민감도·무음·제한 시간·말하기 속도·언어를 저장하고 서비스에 바로 반영합니다." Classes="help" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Classes="card">
+                                        <StackPanel>
+                                            <TextBlock Text="스킬" Classes="cardTitle" />
+                                            <TextBlock Text="내장 스킬 (LLM 도구) — 끄면 음성·채팅 모두 쓰지 않습니다." Classes="help" TextWrapping="Wrap" />
+                                            <ListBox x:Name="BuiltinSkillList" ItemsSource="{Binding BuiltinSkills}">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel>
+                                                            <CheckBox Content="{Binding Name}" IsChecked="{Binding Enabled}" />
+                                                            <TextBlock Text="{Binding Detail}" Classes="help" TextWrapping="Wrap" />
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                            <TextBlock Text="프롬프트 스킬 — 켜면 지시문이 시스템 프롬프트에 붙습니다." Classes="help" TextWrapping="Wrap" />
+                                            <ListBox x:Name="PromptSkillList" ItemsSource="{Binding PromptSkills}" SelectedItem="{Binding SelectedPromptSkill}">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel>
+                                                            <CheckBox Content="{Binding Name}" IsChecked="{Binding Enabled}" />
+                                                            <TextBlock Text="{Binding Detail}" Classes="help" TextWrapping="Wrap" />
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                            <TextBlock Text="이름 · 설명" Classes="label" />
+                                            <TextBox Text="{Binding SkillName}" Watermark="예: 존댓말" />
+                                            <TextBox Text="{Binding SkillDescription}" Watermark="설명 (화면에만 보임)" />
+                                            <TextBlock Text="지시문" Classes="label" />
+                                            <TextBox Text="{Binding SkillInstructions}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60" Watermark="예: 항상 존댓말로 답한다." />
+                                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                                <Button Classes="accent" Content="추가" Command="{Binding AddSkillCommand}" />
+                                                <Button Content="고른 스킬 저장" Command="{Binding UpdateSkillCommand}" />
+                                                <Button Content="삭제" Command="{Binding DeleteSkillCommand}" />
+                                            </StackPanel>
                                         </StackPanel>
                                     </Border>
                                 </StackPanel>
