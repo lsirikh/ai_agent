@@ -16,7 +16,7 @@ import shared.tools as tools
 from shared.knowledge_filter import relevant_results
 from shared.korean_numbers import read_numbers
 from shared.mcp_client import load_mcp_servers
-from shared.skills import load_skills, with_skills
+from shared.skills import load_skills, turn_instructions, with_skills
 from shared.tool_calling import wrap_untrusted
 from shared.tools import ToolRegistry, build_registry, load_tool_settings
 
@@ -679,9 +679,17 @@ class Orchestrator:
                         "source": "시계",
                     }
                 ]
+            skill_settings = await load_skills(self.redis)
             self.llm_client.set_system_prompt(
-                with_skills(self._voice_prompt, await load_skills(self.redis))
+                with_skills(self._voice_prompt, skill_settings)
             )
+            # 켠 프롬프트 스킬은 이번 질문 옆에도 붙인다(9B 모델이 시스템 프롬프트
+            # 끝의 지시를 따르지 않았다 — 시나리오 시험)
+            turn_skills = turn_instructions(skill_settings)
+            if turn_skills:
+                rag_context = (rag_context or []) + [
+                    {"content": turn_skills, "source": "스킬"}
+                ]
             async for token in self.llm_client.generate_stream(
                 text, history=history, summary=summary, rag_context=rag_context,
                 tools=registry, confirm=self._defer_confirm

@@ -149,9 +149,8 @@ class ChatService:
         # (고정 — RAG 근거는 이번 질문에 붙여 접두사 캐시를 지킨다)
         # 설정 화면에서 켠 프롬프트 스킬은 시스템 프롬프트 뒤에 붙인다
         redis = conversation._get_redis()
-        system_prompt = skills.with_skills(
-            self._build_system_prompt(), await skills.load_skills(redis)
-        )
+        skill_settings = await skills.load_skills(redis)
+        system_prompt = skills.with_skills(self._build_system_prompt(), skill_settings)
         extra = {}
         if summary:
             extra["summary"] = summary
@@ -163,6 +162,11 @@ class ChatService:
             if tools.needs_time_reference(message)
             else ""
         )
+        # 켠 프롬프트 스킬은 이번 질문 옆에도 붙인다(시스템 프롬프트 끝에만 두면
+        # 9B 모델이 따르지 않았다 — 시나리오 시험)
+        turn_skills = skills.turn_instructions(skill_settings)
+        if turn_skills:
+            extra["reference"] += f"\n\n{turn_skills}"
         if image_note:
             extra["reference"] += f"\n\n{image_note}"
         if rag_context:
