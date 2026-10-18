@@ -629,11 +629,18 @@ class KnowledgeRunner:
 
 
 # ── 실시간: 음성 ────────────────────────────────────────────
+def _audio_name(text: str) -> str:
+    """질문 글 → 늘 같은 파일 이름(실행마다 새 파일이 쌓이지 않게)."""
+    import hashlib
+
+    return hashlib.md5(text.encode("utf-8")).hexdigest()[:16]
+
+
 def synthesize(texts: list) -> None:
     """한국어 음성(Windows 'Heami')으로 질문 WAV 를 만든다(없는 것만)."""
     AUDIO.mkdir(parents=True, exist_ok=True)
     missing = [
-        t for t in texts if not (AUDIO / f"{abs(hash(t)) % 10**10}.wav").exists()
+        t for t in texts if not (AUDIO / f"{_audio_name(t)}.wav").exists()
     ]
     if not missing:
         return
@@ -648,7 +655,7 @@ def synthesize(texts: list) -> None:
         "[System.Speech.AudioFormat.AudioChannel]::Mono)",
     ]
     for text in missing:
-        path = AUDIO / f"{abs(hash(text)) % 10**10}.wav"
+        path = AUDIO / f"{_audio_name(text)}.wav"
         quoted = text.replace("'", "''")
         lines.append(f"$s.SetOutputToWaveFile('{path}', $f); $s.Speak('{quoted}')")
     lines.append("$s.SetOutputToNull()")
@@ -671,7 +678,7 @@ def synthesize(texts: list) -> None:
 def wav_of(text: str):
     import numpy as np
 
-    with wave.open(str(AUDIO / f"{abs(hash(text)) % 10**10}.wav"), "rb") as w:
+    with wave.open(str(AUDIO / f"{_audio_name(text)}.wav"), "rb") as w:
         return np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
 
 
@@ -782,7 +789,9 @@ class VoiceRunner:
                         if speaking.is_set():
                             break
                         await stream(sil(0.1))
-                    await stream(sil(2.5))
+                    # 답이 5초쯤 흐른 뒤 끼어든다(에코 시차를 익히는 데 3초쯤 걸린다 —
+                    # 그 전에는 에코보다 크게 말해야 끊긴다)
+                    await stream(sil(5.0))
                     ready_after_answer.clear()
                     second = wav_of(s["input"])
                     if expect.get("wake_barge"):
