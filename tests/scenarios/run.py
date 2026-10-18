@@ -204,7 +204,7 @@ SESSIONS = SessionPool()
 def redis_client():
     """시험용 Redis — 호스트↔도커 연결이 잠깐 끊겨도 다시 붙는다.
 
-    (끼어들기 4차 실행: 읽기 시간 초과로 멈췄다)
+    (끼어들기 4·5차 실행: 읽기 시간 초과로 멈췄다 — 짧게 세 번으로는 모자랐다)
     """
     import redis.asyncio as aioredis
     from redis.asyncio.retry import Retry
@@ -214,7 +214,8 @@ def redis_client():
     return aioredis.Redis(
         host=REDIS[0],
         port=REDIS[1],
-        retry=Retry(ExponentialBackoff(), 3),
+        retry=Retry(ExponentialBackoff(cap=10, base=1), 6),  # 30초쯤까지
+        socket_timeout=10,
         retry_on_error=[ConnectionError, TimeoutError],
     )
 
