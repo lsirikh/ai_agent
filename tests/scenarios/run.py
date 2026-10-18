@@ -20,7 +20,6 @@ import re
 import subprocess
 import sys
 import time
-import uuid
 import wave
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -132,6 +131,72 @@ def run_deterministic(s: dict) -> dict:
     raise ValueError(kind)
 
 
+# ── 시험 전용 세션 ──────────────────────────────────────────
+class SessionPool:
+    """
+    시나리오마다 시험 전용 대화 세션을 만들고 끝나면 그것만 지운다.
+
+    백엔드는 DB 에 없는 session_id 를 받으면 사용자의 '활성 통합 세션' 에 이어
+    쓴다 — 처음 실행에서 시험 메시지 1200여 개가 사용자 대화에 섞였다(2026-10-18).
+    세션을 만들면 그 세션이 활성이 되므로 곧바로 원래 활성 세션으로 되돌린다
+    (음성은 활성 세션에 저장하므로 음성 시험 동안만 시험 세션을 활성으로 둔다).
+    """
+
+    def __init__(self):
+        self.client = None
+        self.original = None
+        self.created = []
+
+    async def start(self, client) -> None:
+        self.client = client
+        response = await client.get(f"{BACKEND}/api/sessions/active", timeout=30)
+        self.original = response.json()["session_id"]
+
+    def _set_active(self, session_id: str) -> None:
+        """활성 세션을 되돌린다(SQL 은 표준 입력으로 넘겨 따옴표가 깨지지 않게)."""
+        value = json.dumps({"session_id": session_id})
+        sql = (
+            f"UPDATE settings SET value = '{value}'::jsonb, updated_at = NOW() "
+            "WHERE key = 'active_session';"
+        )
+        subprocess.run(
+            [
+                "docker",
+                "exec",
+                "-i",
+                "ev-postgres",
+                "sh",
+                "-c",
+                'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -qAt -v ON_ERROR_STOP=1',
+            ],
+            input=sql.encode("utf-8"),
+            capture_output=True,
+            check=True,
+        )
+
+    async def new(self, keep_active: bool = False) -> str:
+        response = await self.client.post(f"{BACKEND}/api/sessions", timeout=30)
+        session_id = response.json()["session_id"]
+        self.created.append(session_id)
+        if not keep_active:
+            self._set_active(self.original)
+        return session_id
+
+    async def cleanup(self) -> list:
+        self._set_active(self.original)
+        removed = []
+        for session_id in self.created:
+            response = await self.client.delete(
+                f"{BACKEND}/api/history/sessions/{session_id}", timeout=30
+            )
+            removed.append((session_id, response.status_code))
+        self.created = []
+        return removed
+
+
+SESSIONS = SessionPool()
+
+
 # ── 실시간: 채팅 ────────────────────────────────────────────
 async def chat_once(
     client, message: str, session_id: str, use_rag: bool = False
@@ -205,7 +270,7 @@ def judge_chat(expect: dict, turn: dict) -> tuple:
 
 
 async def run_chat(s: dict, client) -> dict:
-    session = str(uuid.uuid4())
+    session = await SESSIONS.new()
     for earlier in s["expect"].get("history", []):
         await chat_once(client, earlier, session)
     turn = await chat_once(client, s["input"], session)
@@ -349,7 +414,7 @@ class SettingsRunner:
         return await self.put("/api/settings/skills", body)
 
     async def ask(self, message):
-        return await chat_once(self.client, message, str(uuid.uuid4()))
+        return await chat_once(self.client, message, await SESSIONS.new())
 
     async def step(self, name: str) -> tuple:
         if self.saved_skills is None:
@@ -571,7 +636,7 @@ class KnowledgeRunner:
             turn = await chat_once(
                 self.client,
                 "파란우체통 주식회사 대표가 누구야?",
-                str(uuid.uuid4()),
+                await SESSIONS.new(),
                 use_rag=True,
             )
             return "홍길순" in turn["text"], turn["text"][:300]
@@ -579,7 +644,7 @@ class KnowledgeRunner:
             turn = await chat_once(
                 self.client,
                 f"기억해: {MARKER}용 비밀 단어는 '보라색 기린'이야",
-                str(uuid.uuid4()),
+                await SESSIONS.new(),
             )
             return "learn_note" in turn["tools"], {
                 "tools": turn["tools"],
@@ -590,7 +655,7 @@ class KnowledgeRunner:
             turn = await chat_once(
                 self.client,
                 f"{MARKER}용 비밀 단어가 뭐였지?",
-                str(uuid.uuid4()),
+                await SESSIONS.new(),
                 use_rag=True,
             )
             return "기린" in turn["text"], turn["text"][:300]
@@ -639,9 +704,7 @@ def _audio_name(text: str) -> str:
 def synthesize(texts: list) -> None:
     """한국어 음성(Windows 'Heami')으로 질문 WAV 를 만든다(없는 것만)."""
     AUDIO.mkdir(parents=True, exist_ok=True)
-    missing = [
-        t for t in texts if not (AUDIO / f"{_audio_name(t)}.wav").exists()
-    ]
+    missing = [t for t in texts if not (AUDIO / f"{_audio_name(t)}.wav").exists()]
     if not missing:
         return
     lines = [
@@ -877,56 +940,66 @@ async def run_live(items: list, results: dict, save) -> None:
 
     by_kind = {k: [s for s in items if s["kind"] == k] for k in LIVE_ORDER}
     async with httpx.AsyncClient(timeout=300) as client:
-        semaphore = asyncio.Semaphore(CHAT_CONCURRENCY)
+        await SESSIONS.start(client)
+        try:
+            await run_text_kinds(by_kind, client, results, save)
+            if by_kind["voice"]:
+                await SESSIONS.new(keep_active=True)  # 음성은 활성 세션에 저장한다
+                await run_voice(by_kind["voice"], results, save)
+        finally:
+            await SESSIONS.cleanup()
 
-        async def one_chat(s):
-            async with semaphore:
-                started = time.perf_counter()
-                try:
-                    results[s["id"]] = await run_chat(s, client)
-                except Exception as e:
-                    results[s["id"]] = _result(False, None, f"예외: {e!r}")
-                results[s["id"]]["seconds"] = round(time.perf_counter() - started, 1)
-                save()
 
-        await asyncio.gather(*(one_chat(s) for s in by_kind["chat"]))
+async def run_text_kinds(by_kind: dict, client, results: dict, save) -> None:
+    semaphore = asyncio.Semaphore(CHAT_CONCURRENCY)
 
-        for kind, runner in (
-            ("settings", SettingsRunner(client)),
-            ("knowledge", KnowledgeRunner(client)),
-        ):
-            try:
-                for s in by_kind[kind]:
-                    started = time.perf_counter()
-                    try:
-                        ok, actual = await runner.step(s["input"])
-                        results[s["id"]] = (
-                            skipped(actual) if ok is None else _result(ok, actual)
-                        )
-                    except Exception as e:
-                        results[s["id"]] = _result(False, None, f"예외: {e!r}")
-                    results[s["id"]]["seconds"] = round(
-                        time.perf_counter() - started, 1
-                    )
-                    save()
-            finally:
-                if kind == "settings":
-                    await runner.restore()
-                else:
-                    await runner.cleanup()
-
-        for s in by_kind["browser"] + by_kind["desktop"]:
+    async def one_chat(s):
+        async with semaphore:
             started = time.perf_counter()
             try:
-                run = run_desktop if s["kind"] == "desktop" else run_chat
-                results[s["id"]] = await run(s, client)
+                results[s["id"]] = await run_chat(s, client)
             except Exception as e:
                 results[s["id"]] = _result(False, None, f"예외: {e!r}")
             results[s["id"]]["seconds"] = round(time.perf_counter() - started, 1)
             save()
 
-    if by_kind["voice"]:
-        voice_items = by_kind["voice"]
+    await asyncio.gather(*(one_chat(s) for s in by_kind["chat"]))
+
+    for kind, runner in (
+        ("settings", SettingsRunner(client)),
+        ("knowledge", KnowledgeRunner(client)),
+    ):
+        try:
+            for s in by_kind[kind]:
+                started = time.perf_counter()
+                try:
+                    ok, actual = await runner.step(s["input"])
+                    results[s["id"]] = (
+                        skipped(actual) if ok is None else _result(ok, actual)
+                    )
+                except Exception as e:
+                    results[s["id"]] = _result(False, None, f"예외: {e!r}")
+                results[s["id"]]["seconds"] = round(time.perf_counter() - started, 1)
+                save()
+        finally:
+            if kind == "settings":
+                await runner.restore()
+            else:
+                await runner.cleanup()
+
+    for s in by_kind["browser"] + by_kind["desktop"]:
+        started = time.perf_counter()
+        try:
+            run = run_desktop if s["kind"] == "desktop" else run_chat
+            results[s["id"]] = await run(s, client)
+        except Exception as e:
+            results[s["id"]] = _result(False, None, f"예외: {e!r}")
+        results[s["id"]]["seconds"] = round(time.perf_counter() - started, 1)
+        save()
+
+
+async def run_voice(voice_items: list, results: dict, save) -> None:
+    if voice_items:
         synthesize(
             [s["input"] for s in voice_items if s["input"]]
             + [VoiceRunner.LONG, VoiceRunner.BACKGROUND]
