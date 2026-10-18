@@ -36,6 +36,12 @@
 - why: 설정 탭에 앱을 다시 띄워야 하는 설정이 없다(백엔드 주소 등은 설정 탭에 없다).
 - effect: 생기면 AppRestart.Restart 를 저장 결과의 '앱 다시 시작' 항목에서 부르면 된다.
 
+## 8. `restart_service` 는 '쓰이지 않는 함수' 가 아니다 (그대로 둔다)
+- options: (a) 지운다 · (b) 그대로 둔다
+- chosen: (b)
+- why: `services/backend/app/routes/settings.py` 의 `restart_service` 는 `@services_router.post("/{service}/restart")` 로 등록된 FastAPI 경로 함수라 파이썬 코드에서 직접 부르는 곳이 없을 뿐, HTTP 로 불린다 — 데스크톱 앱의 저장 막대 [다시 시작](`SettingsViewModel.Save.cs` 의 `api/services/{service}/restart`)과 기존 `/api/services/llm/restart` 호출, `tests/backend/test_settings_runtime.py`·`test_hot_reload.py` 가 쓴다. 기존 `restart_llm_service` 를 일반화한 것이다.
+- effect: 지우면 다시 시작 API 가 사라진다.
+
 ## 7. 카드별 버튼 정리
 - options: 모두 제거 vs 저장 성격만 제거
 - chosen: 저장 버튼(일반·도구·지역·시간·컨텍스트 저장, 모델 적용, 고른 서버/스킬 저장, 호출어 바로 바꾸기, LLM 다시 만들기)은 없애고 저장 막대로. MCP·스킬의 '추가'·'삭제'·'연결 상태 새로고침' 은 목록 편집 동작이라 그대로 둔다. MCP·스킬 체크박스도 바로 저장하지 않고 저장 막대로 모은다.
