@@ -670,12 +670,14 @@ class Orchestrator:
                 rag_context = await self._relevant_knowledge(text)
             # 세션 기록의 옛 시각 답을 따라 하지 않도록 지금 시각을 근거로 붙인다
             # (질문 뒤쪽이라 접두사 캐시 유지)
-            rag_context = (rag_context or []) + [
-                {
-                    "content": await tools.current_time_reference(self.redis),
-                    "source": "시계",
-                }
-            ]
+            # 시각·날짜와 상관없는 질문에는 붙이지 않는다(붙이면 답에 시각을 끼워 넣었다)
+            if tools.needs_time_reference(text):
+                rag_context = (rag_context or []) + [
+                    {
+                        "content": await tools.current_time_reference(self.redis),
+                        "source": "시계",
+                    }
+                ]
             self.llm_client.set_system_prompt(
                 with_skills(self._voice_prompt, await load_skills(self.redis))
             )

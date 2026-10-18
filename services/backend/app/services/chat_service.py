@@ -157,7 +157,12 @@ class ChatService:
             extra["summary"] = summary
         # 세션 기록의 옛 시각 답을 따라 하지 않도록 지금 시각을 근거로 붙인다
         # (이번 질문에 붙어 앞쪽 접두사 캐시는 그대로)
-        extra["reference"] = await tools.current_time_reference(redis)
+        # 시각·날짜와 상관없는 질문에는 붙이지 않는다(붙이면 답에 시각을 끼워 넣었다)
+        extra["reference"] = (
+            await tools.current_time_reference(redis)
+            if tools.needs_time_reference(message)
+            else ""
+        )
         if image_note:
             extra["reference"] += f"\n\n{image_note}"
         if rag_context:

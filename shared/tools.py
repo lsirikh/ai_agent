@@ -184,6 +184,22 @@ TIME_REFERENCE_RULE = (
 )
 
 
+# 시각·날짜가 답에 필요한 질문(지금·오늘·내일·요일·올해·요즘 …)
+_TIME_WORDS = re.compile(
+    r"몇\s*시|시각|시간|날짜|며칠|요일|오늘|내일|모레|어제|그제|지금|현재|"
+    r"올해|작년|내년|이번\s*(주|달|해)|지난\s*(주|달)|다음\s*(주|달)|요즘|최근|최신|"
+    r"오전|오후|아침|저녁|밤|주말|몇\s*(년|월|일)"
+)
+
+
+def needs_time_reference(question: str) -> bool:
+    """
+    이번 질문에 '지금 시각' 근거를 붙일지. 시나리오 시험(2026-10-18): 늘 붙이면
+    '반가워'·'농담 해줘' 같은 답에도 시각을 끼워 넣었다(규칙을 붙여도 30개 중 5개).
+    """
+    return bool(_TIME_WORDS.search(question or ""))
+
+
 async def current_time_reference(redis: Any) -> str:
     """매 턴 이번 질문에 붙이는 시각 근거 — 설정한 시간대로."""
     settings = await load_tool_settings(redis)
