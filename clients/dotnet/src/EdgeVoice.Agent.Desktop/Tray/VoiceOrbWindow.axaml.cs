@@ -29,6 +29,8 @@ public partial class VoiceOrbWindow : Window
     public VoiceOrbWindow()
     {
         InitializeComponent();
+        StopButton.Click += (_, _) => StopRequested?.Invoke();
+        MuteButton.Click += (_, _) => TalkRequested?.Invoke();
         if (Screens.Primary is { } screen)
         {
             var area = screen.WorkingArea;
@@ -42,6 +44,9 @@ public partial class VoiceOrbWindow : Window
     public event Action? TalkRequested;
 
     public event Action? OpenRequested;
+
+    /// <summary>[중단] 버튼: 말하던 답을 멈추고 대기로(사용자 요청 2026-10-18).</summary>
+    public event Action? StopRequested;
 
     private static readonly (PipelineStage Stage, Color Accent)[] StageAccents =
     {

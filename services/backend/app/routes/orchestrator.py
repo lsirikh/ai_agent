@@ -6,6 +6,8 @@ Phase 18.1.3: Orchestrator 상태 수신 API
 - POST /api/orchestrator/state: Orchestrator 상태 업데이트
 - GET /api/orchestrator/state: 현재 상태 조회
 """
+import json
+import time
 from typing import Optional
 from uuid import UUID
 
@@ -60,6 +62,23 @@ async def get_state_manager_instance() -> StateManager:
     if _state_manager is None:
         _state_manager = StateManager.get_instance(redis=_redis_client)
     return _state_manager
+
+
+# 앱의 [중단] 버튼 — 오케스트레이터·게이트웨이가 구독한다
+VOICE_STOP_CHANNEL = "edgevoice:voice:stop"
+
+
+@router.post("/stop")
+async def stop_voice():
+    """
+    말하는 도중 멈추기(사용자 요청 2026-10-18: '말을 한번 시작하면 중단을 못 해').
+    오케스트레이터는 답을 멈추고 대기로, 게이트웨이는 남은 답 음성을 버린다.
+    """
+    from ..services import conversation
+
+    event = {"type": "stop", "source": "button", "timestamp": time.time()}
+    await conversation._get_redis().publish(VOICE_STOP_CHANNEL, json.dumps(event))
+    return {"status": "stopping"}
 
 
 @router.post("/state", response_model=StateUpdateResponse)

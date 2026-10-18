@@ -189,7 +189,9 @@ class Orchestrator:
         "barge_in": "edgevoice:barge_in:detected",
         "tts_request": "edgevoice:tts:request",
         "tts_complete": "edgevoice:tts:complete",
-        "state_change": "edgevoice:orchestrator:state"
+        "state_change": "edgevoice:orchestrator:state",
+        # 앱의 [중단] 버튼(백엔드 POST /api/orchestrator/stop)
+        "voice_stop": "edgevoice:voice:stop",
     }
 
     # 백엔드 StateManager 의 ORCHESTRATOR_STATE_KEY 와 같은 키
@@ -479,6 +481,28 @@ class Orchestrator:
 
         # 상태 전이
         return self.state_machine.handle_barge_in()
+
+    async def handle_stop(self) -> bool:
+        """
+        [중단] 버튼(사용자 요청 2026-10-18: 말을 한번 시작하면 중단을 못 한다).
+        답을 쓰고·말하는 도중이든 듣는 중이든 멈추고 대기로
+        (끼어들기와 달리 다시 듣지 않는다).
+        """
+        await self._logger.log(
+            event="voice_stopped",
+            session_id=self._current_session_id,
+            data={"message": "중단 버튼 — 답을 멈추고 대기로"},
+        )
+        for task in (self._processing_task, self._stt_task):
+            if task and not task.done():
+                task.cancel()
+        self.queue_manager.clear_on_barge_in()
+        self._pending_tts = 0
+        self._pending_confirm = None
+        self._cancel_listening_timeout()
+        if self.state_machine.current_state == State.LISTENING:
+            return self.state_machine.transition_to(State.READY)
+        return self._finish_turn()
 
     async def handle_timeout(self) -> bool:
         """
@@ -935,7 +959,8 @@ class Orchestrator:
             self.CHANNELS["wake_word"],
             self.CHANNELS["stt_result"],
             self.CHANNELS["barge_in"],
-            self.CHANNELS["tts_complete"]
+            self.CHANNELS["tts_complete"],
+            self.CHANNELS["voice_stop"],
         )
 
     async def reset_session(self) -> None:
@@ -979,7 +1004,8 @@ class Orchestrator:
             self.CHANNELS["wake_word"],
             self.CHANNELS["stt_result"],
             self.CHANNELS["barge_in"],
-            self.CHANNELS["tts_complete"]
+            self.CHANNELS["tts_complete"],
+            self.CHANNELS["voice_stop"],
         )
 
         try:
@@ -1025,6 +1051,9 @@ class Orchestrator:
                 self._start_listening_timeout()
             else:
                 await self.handle_wake_word()
+
+        elif channel == self.CHANNELS["voice_stop"]:
+            await self.handle_stop()
 
         elif channel == self.CHANNELS["tts_complete"]:
             # audio_length: float32 24kHz 바이트 수

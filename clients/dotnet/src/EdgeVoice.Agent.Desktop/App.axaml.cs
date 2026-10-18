@@ -39,7 +39,9 @@ public partial class App : Application
                 _container.Resolve<MicrophoneStreamer>(),
                 _container.Resolve<AlwaysOnMicrophone>(),
                 OpenMainWindow,
-                () => desktop.Shutdown());
+                () => desktop.Shutdown(),
+                () => _container.Resolve<EdgeVoiceApiClient>()
+                    .SendAsync(System.Net.Http.HttpMethod.Post, "api/orchestrator/stop", null));
 
             desktop.Exit += (_, _) =>
             {

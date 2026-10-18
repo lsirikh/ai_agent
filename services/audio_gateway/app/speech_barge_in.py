@@ -76,7 +76,8 @@ class PlaybackTracker:
         return level
 
     def clear(self) -> None:
-        self._until = self.clock()
+        """남은 재생을 지운다(끼어들기·중단 — 앱도 곧바로 재생을 멈춘다)."""
+        self._until = 0.0
         self._segments.clear()
         self._starts.clear()
 
