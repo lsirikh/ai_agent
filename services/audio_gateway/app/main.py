@@ -82,6 +82,11 @@ _last_speech_time: Optional[float] = None  # 마지막 음성 감지 시간
 # 이 안에서는 무음이어도 녹음을 끝내지 않는다
 # (호출어를 말하는 도중에 감지되면 바로 '말 끝' 이 돼 질문 전에 녹음이 끝났다 — 실측)
 WAIT_FOR_QUESTION_SECONDS = 4.0
+# 호출어 뒤 아직 목소리를 못 들었으면 질문을 시작하기까지 이만큼 기다린다
+# (실측 2026-10-18: 사용자가 5초쯤 쉬었다가 질문해 4초 만에 끝내 놓쳤다)
+NO_QUESTION_TIMEOUT_SECONDS = 8.0
+_listen_started_at: Optional[float] = None
+_voice_heard = False  # 이번 듣기에서 사용자 목소리를 들었는지
 # STT 로 보낼 때 마지막 목소리 뒤로 남길 길이(말끝이 잘리지 않을 만큼)
 QUESTION_TAIL_SECONDS = 0.5
 _question_wait_until: Optional[float] = None
@@ -105,6 +110,9 @@ def check_speech_timeout() -> bool:
 
     if _last_speech_time is None:
         return False
+    if _listen_started_at is not None and not _voice_heard:
+        # 아직 질문을 시작하지 않았다 — 무음 2초가 아니라 질문을 기다리는 시간으로 끝낸다
+        return time.time() - _listen_started_at >= NO_QUESTION_TIMEOUT_SECONDS
     if _question_wait_until is not None and time.time() < _question_wait_until:
         return False
 
@@ -148,7 +156,9 @@ async def process_speech_timeout() -> Optional[str]:
     # 녹음 종료 및 STT 호출. 마지막 목소리 뒤 배경 소리는 받아 적지 않게 잘라 낸다
     _is_recording = False
     trim = 0.0
-    if _last_speech_time is not None:
+    # 목소리를 들었을 때만 자른다 — 못 들었으면 '마지막 목소리' 가 호출어 순간이라
+    # 0.5초만 남아 빈 결과가 됐다(실측)
+    if _last_speech_time is not None and _voice_heard:
         trim = max(0.0, time.time() - _last_speech_time - QUESTION_TAIL_SECONDS)
     result = await on_speech_ended(session_id=session_id, trim_seconds=trim)
 
@@ -165,13 +175,14 @@ async def reset_session() -> None:
     STT 완료 후 또는 세션 종료 시 모든 상태를 초기화합니다.
     """
     global _current_session, _listening_mode, _is_recording, _last_speech_time
-    global _question_wait_until
+    global _question_wait_until, _listen_started_at, _voice_heard
 
     _current_session = {}
     _listening_mode = False
     _is_recording = False
     _last_speech_time = None
     _question_wait_until = None
+    _listen_started_at, _voice_heard = None, False
     voice_level.reset()  # 다음 질문은 목소리 크기를 새로 익힌다
 
     await _logger.info(
@@ -221,6 +232,7 @@ async def handle_wake_word_event(event_data: Dict[str, Any]) -> None:
     # 사용자가 "헤이 자비스, 오늘 날씨 어때?" 처럼 연속 발화 시
     # speech_started 이벤트 없이도 녹음이 시작되어야 함
     global _is_recording, _last_speech_time, _question_wait_until
+    global _listen_started_at, _voice_heard
     # 말하는 도중의 호출어 = 끼어들기: 재생을 끝내고 듣는다
     barge_in_detector.set_playback_state(PlaybackState.IDLE)
     aec.clear_playback_reference()
@@ -229,6 +241,7 @@ async def handle_wake_word_event(event_data: Dict[str, Any]) -> None:
         _is_recording = True
         _last_speech_time = time.time()
     _question_wait_until = time.time() + WAIT_FOR_QUESTION_SECONDS
+    _listen_started_at, _voice_heard = time.time(), False
 
     await _logger.info(
         "wake_word_received",
@@ -638,7 +651,7 @@ async def handle_vad_result(
     Returns:
         STT 결과 텍스트 (음성 종료 시), 그 외에는 None
     """
-    global _is_recording, _previous_is_speech, _last_speech_time
+    global _is_recording, _previous_is_speech, _last_speech_time, _voice_heard
 
     # Listening 모드가 아니면 무시
     if not _listening_mode:
@@ -668,6 +681,7 @@ async def handle_vad_result(
         heard = voice_level.is_voice(rms, is_speech) and voice_level.steady
     if heard and _is_recording:
         _last_speech_time = time.time()
+        _voice_heard = True
 
     # 녹음 중이면 청크 추가 (Phase 49: 무음 구간도 포함하여 전체 녹음)
     # 사용자 발화 중 잠깐의 멈춤도 포함해야 자연스러운 STT 결과 생성
