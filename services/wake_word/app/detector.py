@@ -28,28 +28,30 @@ WAKE_WORD_MODELS = {
 
 
 # STT 로 받아 적은 글에 호출어가 있는지 ('헤이 자비스!' · '헤이자비스' · 'Hey Jarvis')
-WAKE_TEXT = re.compile(r"[자쟈재저제]\s*[비삐]\s*[스즈쓰]|jarvis", re.IGNORECASE)
+WAKE_TEXT = re.compile(r"[자쟈재저제차챠]\s*[비삐]\s*[스즈쓰]|jarvis", re.IGNORECASE)
 VERIFY_SECONDS = 2.5  # STT 로 확인할 최근 소리 길이
 # 짧은 말을 STT 로 받아 적었을 때 호출어로 보는 꼴: '헤이 자비스' 로 시작해야 한다
-# (답이나 대화 속 '자비스' 로는 깨지 않게)
+# (답이나 대화 속 '자비스' 로는 깨지 않게). STT 는 '자비스' 를 '차비스' 로도 적는다
 WAKE_START = re.compile(
-    r"^\W*(헤이|해이|에이|하이|hey|hi)\W*([자쟈재저제]\s*[비삐]\s*[스즈쓰]|jarvis)",
+    r"^\W*(헤이|해이|에이|하이|hey|hi)\W*([자쟈재저제차챠]\s*[비삐]\s*[스즈쓰]|jarvis)",
     re.IGNORECASE,
 )
 
 
 class UtteranceSpotter:
     """
-    짧은 말(0.6~2.5초)을 소리 크기로 찾는다 — 끝나면(0.4초 조용) 그 소리를 돌려준다.
+    짧은 말(0.4~2.5초)을 소리 크기로 찾는다 — 끝나면(0.4초 조용) 그 소리를 돌려준다.
     한국어 발음 '헤이 자비스' 는 openwakeword 점수가 0~10% 라(끼어들기 시험 2026-10-18)
     이렇게 찾은 짧은 말을 STT 로 확인한다. 긴 말(TV·대화)은 건너뛴다.
     """
 
-    def __init__(self, sample_rate: int = 16000, min_seconds: float = 0.6,
-                 max_seconds: float = 2.5, end_silence: float = 0.4):
+    def __init__(self, sample_rate: int = 16000, min_seconds: float = 0.4,
+                 max_seconds: float = 2.5, end_silence: float = 0.4,
+                 max_pause: float = 1.0):
         self.sample_rate = sample_rate
         self.min_seconds, self.max_seconds = min_seconds, max_seconds
         self.end_silence = end_silence
+        self.max_pause = max_pause
         # 최근 10초 소리 크기 — 그중 조용한 쪽(10%)을 바탕 소음으로 본다
         # (가운데 값이면 긴 말 도중에 바탕이 말소리만큼 올라가 말이 끝난 것으로 봤다)
         self._recent: deque = deque(maxlen=100)
@@ -75,9 +77,15 @@ class UtteranceSpotter:
         if self._silent < self.end_silence:
             return None
         audio = np.concatenate(self._buffer)
-        self._buffer, self._speaking, self._silent = [], False, 0.0
-        spoken = len(audio) / self.sample_rate - self.end_silence
+        spoken = len(audio) / self.sample_rate - self._silent
+        if spoken < self.min_seconds and self._silent < self.max_pause:
+            return None  # '헤이,' 뒤의 쉼 — 이어질 '자비스' 를 기다린다
+        self.reset()
         return audio if self.min_seconds <= spoken <= self.max_seconds else None
+
+    def reset(self) -> None:
+        """듣고 있던 말을 잊는다."""
+        self._buffer, self._speaking, self._silent = [], False, 0.0
 
 
 class WakeWordDetector:
@@ -343,6 +351,7 @@ class WakeWordDetector:
             self.model.reset()
         self._recent.clear()
         self._recent_samples = 0
+        self._spotter.reset()
 
     def _start_verify(
         self, result: Dict[str, Any], audio: Optional[np.ndarray] = None,
@@ -356,17 +365,22 @@ class WakeWordDetector:
         except RuntimeError:
             return  # 이벤트 루프 밖(동기 detect 시험)에서는 확인하지 않는다
         wake_word = result.get("wake_word") or self.wake_word
+        # 확인할 소리가 시작된 때 — 그 뒤에 이미 감지했으면 같은 호출어다
+        seconds = VERIFY_SECONDS if audio is None else len(audio) / self.sample_rate
+        since = time.time() - seconds
         self._verify_task = asyncio.create_task(
-            self._verify(wake_word, result["confidence"], audio, strict)
+            self._verify(wake_word, result["confidence"], audio, strict, since)
         )
 
     async def _verify(
         self, wake_word: str, confidence: float,
         audio: Optional[np.ndarray] = None, strict: bool = False,
+        since: float = 0.0,
     ) -> None:
         """
         애매한 점수: 최근 소리를 받아 적어 '자비스' 가 있으면 감지로 본다.
         strict(짧은 말로 찾은 것): '헤이 자비스' 로 시작할 때만.
+        since 뒤에 이미 감지했으면(모델이 먼저 잡은 같은 호출어) 넘긴다.
         """
         if audio is None:
             await asyncio.sleep(self.verify_delay)
@@ -383,7 +397,8 @@ class WakeWordDetector:
             level="debug",
         )
         pattern = WAKE_START if strict else WAKE_TEXT
-        if self._is_in_cooldown or not pattern.search(text):
+        already = (self._last_detection_time or 0.0) >= since
+        if self._is_in_cooldown or already or not pattern.search(text):
             return
         self._last_detection_time = time.time()
         self._is_in_cooldown = True
