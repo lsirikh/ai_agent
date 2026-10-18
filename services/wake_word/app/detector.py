@@ -276,7 +276,7 @@ class WakeWordDetector:
         if utterance is not None and not self._is_in_cooldown:
             self._start_verify(
                 {"wake_word": self.wake_word, "confidence": 0.0},
-                audio=utterance, strict=True,
+                audio=utterance, pattern=WAKE_START,
             )
 
         # 쿨다운 체크
@@ -355,7 +355,7 @@ class WakeWordDetector:
 
     def _start_verify(
         self, result: Dict[str, Any], audio: Optional[np.ndarray] = None,
-        strict: bool = False,
+        pattern: re.Pattern = WAKE_TEXT,
     ) -> None:
         busy = self._verify_task is not None and not self._verify_task.done()
         if busy or self.verifier is None or time.time() < self._verify_quiet_until:
@@ -369,17 +369,17 @@ class WakeWordDetector:
         seconds = VERIFY_SECONDS if audio is None else len(audio) / self.sample_rate
         since = time.time() - seconds
         self._verify_task = asyncio.create_task(
-            self._verify(wake_word, result["confidence"], audio, strict, since)
+            self._verify(wake_word, result["confidence"], audio, pattern, since)
         )
 
     async def _verify(
         self, wake_word: str, confidence: float,
-        audio: Optional[np.ndarray] = None, strict: bool = False,
+        audio: Optional[np.ndarray] = None, pattern: re.Pattern = WAKE_TEXT,
         since: float = 0.0,
     ) -> None:
         """
-        애매한 점수: 최근 소리를 받아 적어 '자비스' 가 있으면 감지로 본다.
-        strict(짧은 말로 찾은 것): '헤이 자비스' 로 시작할 때만.
+        최근 소리를 받아 적어 pattern 에 맞으면 감지로 본다 — 애매한 점수는 '자비스' 가
+        있으면(WAKE_TEXT), 짧은 말로 찾은 것은 '헤이 자비스' 로 시작할 때만(WAKE_START).
         since 뒤에 이미 감지했으면(모델이 먼저 잡은 같은 호출어) 넘긴다.
         """
         if audio is None:
@@ -396,7 +396,6 @@ class WakeWordDetector:
             data={"message": f"{confidence:.1%} → STT '{text[:40]}'", "text": text},
             level="debug",
         )
-        pattern = WAKE_START if strict else WAKE_TEXT
         already = (self._last_detection_time or 0.0) >= since
         if self._is_in_cooldown or already or not pattern.search(text):
             return
