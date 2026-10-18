@@ -245,6 +245,8 @@ _MOOD = re.compile(
 # 올해·오늘·요즘의 사실은 기억이 낡았으니 검색한다(시나리오 시험: 노벨상·코스피)
 _CURRENT = re.compile(r"올해|요즘|최근|이번\s*(주|달|해)|오늘|어제|현재")
 _DATE_ONLY = re.compile(r"몇\s*시|며칠|요일|날짜|시각|몇\s*(년|월|일)")
+# 추천·제안을 바라는 말('오늘 점심 뭐 먹을까?')은 검색할 사실이 아니다(시나리오 시험)
+_SUGGEST = re.compile(r"까\s*[?？]?\s*$|추천|골라|정해\s*줘")
 _ASK_CURRENT = re.compile(r"알려|뭐|누구|얼마|어때|어떻|\?\s*$")
 
 
@@ -262,6 +264,7 @@ def _asks_current_fact(question: str) -> bool:
         and bool(_ASK_CURRENT.search(question.strip()))
         and not _PERSONAL.search(question)
         and not _MOOD.search(question)
+        and not _SUGGEST.search(question)
     )
 # 구체적인 사실(장소·가게·시장 등)을 묻는 질문은 검색 뒤 답한다
 # (실측: 검색 없이 '원당시장(동작구 원당동)' 이라고 지어냈다)

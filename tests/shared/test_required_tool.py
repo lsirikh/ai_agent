@@ -336,6 +336,10 @@ def test_daum_github_and_landmarks(question, expected) -> None:
         ("오늘 기분이 좀 안 좋아", []),
         ("오늘 하루 어땠어?", []),
         ("요즘 너무 피곤해", []),
+        # 시나리오 시험(2026-10-18): 추천·제안을 바라는 말을 사실 검색으로 보냈다
+        ("오늘 점심 뭐 먹을까?", []),
+        ("오늘 뭐 할까?", []),
+        ("요즘 볼 만한 거 추천해 줘", []),
     ],
 )
 def test_current_facts_search_and_moods_skip_weather(question, expected) -> None:
