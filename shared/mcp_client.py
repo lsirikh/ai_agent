@@ -51,6 +51,10 @@ MCP_SETTINGS_KEY = "edgevoice:settings:mcp"
 # 브라우저 서버가 이 도구들을 내주면 play_youtube 도 만든다
 RECONNECT_INTERVAL_SECONDS = 30.0
 PLAY_YOUTUBE_NEEDS = {"browser_navigate", "browser_snapshot", "browser_click"}
+# 크롬 닫기 · 광고 건너뛰기는 허용 목록 밖의 서버 도구를 정해진 코드로만 쓴다
+# (모델이 코드를 주지 않는다). 열기(browser_navigate)를 허용했을 때만 만든다
+RUN_CODE_TOOLS = ("browser_run_code_unsafe", "browser_run_code")
+CLOSE_CONTEXT_CODE = "async (page) => { await page.context().close(); }"
 
 
 @dataclass
@@ -295,11 +299,90 @@ class MCPManager:
                 taken.add(name)
                 self.name_map[name] = (server.config.name, tool.name)
                 result.append(self._wrap(server, tool, name))
-            if PLAY_YOUTUBE_NEEDS <= allowed & {t.name for t in server.tools}:
+            on_server = {t.name for t in server.tools}
+            if PLAY_YOUTUBE_NEEDS <= allowed & on_server:
                 name = sanitize_tool_name(server.config.name, "play_youtube", taken)
                 taken.add(name)
                 result.append(self._play_youtube_tool(server, name))
+            if "browser_navigate" not in allowed:
+                continue
+            run_code = next((t for t in RUN_CODE_TOOLS if t in on_server), None)
+            if run_code:
+                name = sanitize_tool_name(server.config.name, "close_browser", taken)
+                taken.add(name)
+                result.append(self._close_browser_tool(server, name, run_code))
+            if "browser_evaluate" in on_server:
+                name = sanitize_tool_name(server.config.name, "skip_youtube_ad", taken)
+                taken.add(name)
+                result.append(self._skip_youtube_ad_tool(server, name))
         return result
+
+    def _close_browser_tool(self, server: "_Server", name: str, run_code: str) -> Tool:
+        """
+        EdgeVoice 크롬 창을 닫는다(사용자 보고 2026-10-19: '크롬 꺼' 를 못 했다).
+        공유 브라우저라 browser_close 는 실패하고, 마지막 탭을 닫아도 창이 남는다 →
+        소리부터 멈추고(빈 페이지) 브라우저 컨텍스트를 닫는다.
+        다음 요청에서 다시 열린다.
+        """
+
+        async def run(args: dict) -> ToolResult:
+            await self.call(server, "browser_navigate", {"url": "about:blank"})
+            closed = await self.call(server, run_code, {"code": CLOSE_CONTEXT_CODE})
+            # 닫히는 도중이라 성공해도 '…has been closed' 오류로 온다(실측)
+            if closed.is_error and "has been closed" not in closed.content:
+                return ToolResult(
+                    "크롬 창을 닫지 못했습니다(재생은 멈추고 빈 페이지로 바꿨습니다): "
+                    + closed.content[:200],
+                    is_error=True,
+                )
+            return ToolResult("EdgeVoice 크롬 창을 닫았습니다.")
+
+        return Tool(
+            name=name,
+            description=(
+                "EdgeVoice 가 쓰는 크롬 창을 닫는다(재생 중인 유튜브도 멈춘다). "
+                "'크롬 꺼 줘'·'유튜브 꺼'·'브라우저 종료해' 같은 요청에 쓴다."
+            ),
+            parameters={"type": "object", "properties": {}},
+            run=run,
+            announce="크롬을 닫을게요.",
+        )
+
+    def _skip_youtube_ad_tool(self, server: "_Server", name: str) -> Tool:
+        """유튜브 광고의 '건너뛰기' 버튼이 나오면 누른다(15초까지 기다린다)."""
+
+        async def run(args: dict) -> ToolResult:
+            result = await self.call(
+                server, "browser_evaluate",
+                {"function": browser_assist.SKIP_AD_SCRIPT},
+            )
+            if result.is_error:
+                return result
+            state = browser_assist.page_state(result.content)
+            if state == "skipped":
+                return ToolResult("유튜브 광고를 건너뛰었습니다. 동영상이 재생됩니다.")
+            if state == "no_ad":
+                return ToolResult("지금은 광고가 나오지 않습니다(동영상 재생 중).")
+            if state == "ad_unskippable":
+                return ToolResult(
+                    "15초 동안 광고에 건너뛰기 버튼이 나오지 않았습니다"
+                    "(건너뛸 수 없는 광고입니다)."
+                )
+            return ToolResult(
+                "지금 크롬 화면이 유튜브 동영상이 아니라 광고를 건너뛸 수 없습니다.",
+                is_error=True,
+            )
+
+        return Tool(
+            name=name,
+            description=(
+                "크롬에서 재생 중인 유튜브 광고의 '건너뛰기' 버튼이 나오면 누른다. "
+                "'광고 건너뛰어 줘' 같은 요청에 쓴다."
+            ),
+            parameters={"type": "object", "properties": {}},
+            run=run,
+            announce="광고 건너뛰기 버튼을 기다려 볼게요.",
+        )
 
     def _play_youtube_tool(self, server: "_Server", name: str) -> Tool:
         """
@@ -337,7 +420,8 @@ class MCPManager:
                     f"'{title}' 을(를) 눌렀지만 동영상이 열리지 않았습니다",
                     is_error=True,
                 )
-            return ToolResult(f"유튜브에서 '{title}' 을(를) 틀었습니다.")
+            played = f"유튜브에서 '{title}' 을(를) 틀었습니다"
+            return ToolResult(played + await self._playback_note(server))
 
         return Tool(
             name=name,
@@ -357,6 +441,26 @@ class MCPManager:
             run=run,
             announce="유튜브에서 찾아 틀어 볼게요.",
         )
+
+    async def _playback_note(self, server: "_Server") -> str:
+        """
+        튼 뒤 실제로 나오는지 덧붙인다(사용자 보고 2026-10-19: 광고가 나오는데
+        '재생되고 있습니다' 라고 해 '안 나온다' 고 했다). 볼 수 없으면 마침표만.
+        """
+        if "browser_evaluate" not in {t.name for t in server.tools}:
+            return "."
+        checked = await self.call(
+            server, "browser_evaluate", {"function": browser_assist.PLAYBACK_SCRIPT}
+        )
+        state = "" if checked.is_error else browser_assist.page_state(checked.content)
+        return {
+            "playing": "(재생 중).",
+            "ad": (
+                ". 지금은 광고가 나오는 중입니다"
+                "(건너뛰기 버튼은 몇 초 뒤에 나옵니다)."
+            ),
+            "paused": ". 그런데 동영상이 멈춰 있습니다.",
+        }.get(state, ".")
 
     async def _retry_connect(self, server: "_Server") -> bool:
         """

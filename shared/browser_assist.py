@@ -240,3 +240,43 @@ def adapt_to_question(registry, question: str):
             tool = replace(tool, normalize=submit_typed)
         adapted.add(tool)
     return adapted
+
+
+# ── 유튜브 재생 상태 · 광고 건너뛰기 (browser_evaluate 로 페이지에서 돌린다) ──
+# 결과는 'state:…' 글 하나: 사용자 보고(2026-10-19) — 튼 뒤 광고가 나와 '안 나온다' 고
+# 했고, 광고 건너뛰기를 '하겠다' 고만 했다
+_PLAYER = "document.querySelector('#movie_player')"
+PLAYBACK_SCRIPT = (
+    "async () => {"
+    f" const p = {_PLAYER}; const v = document.querySelector('video');"
+    " if (!p || !v) return 'state:no_player';"
+    " for (let i = 0; i < 6 && v.paused && !p.classList.contains('ad-showing'); i++)"
+    "   await new Promise(r => setTimeout(r, 500));"
+    " if (p.classList.contains('ad-showing')) return 'state:ad';"
+    " return v.paused ? 'state:paused' : 'state:playing'; }"
+)
+_SKIP_BUTTONS = (
+    ".ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern"
+)
+# 건너뛰기 버튼은 광고가 5초쯤 나온 뒤에 생긴다 — 15초까지 기다리며 광고가 이어지면
+# (두 개 연속) 또 누른다
+SKIP_AD_SCRIPT = (
+    "async () => {"
+    f" const p = {_PLAYER}; if (!p) return 'state:no_player';"
+    " let skipped = 0; const end = Date.now() + 15000;"
+    " while (Date.now() < end) {"
+    "   if (!p.classList.contains('ad-showing'))"
+    "     return skipped ? 'state:skipped:' + skipped : 'state:no_ad';"
+    f"   const b = [...document.querySelectorAll('{_SKIP_BUTTONS}')]"
+    "     .find(e => e.offsetParent !== null);"
+    "   if (b) { b.click(); skipped++; }"
+    "   await new Promise(r => setTimeout(r, b ? 1000 : 500)); }"
+    " return 'state:ad_unskippable:' + skipped; }"
+)
+_STATE = re.compile(r"state:([a-z_]+)")
+
+
+def page_state(content: str) -> str:
+    """browser_evaluate 결과에서 'state:…' 의 이름. 없으면 ''."""
+    match = _STATE.search(content or "")
+    return match.group(1) if match else ""
