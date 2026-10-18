@@ -847,6 +847,7 @@ class VoiceRunner:
             asyncio.Event(),
         )
         stop = asyncio.Event()
+        playback = {"until": 0.0}  # 답 음성이 끝나는 시각(앱이 끝까지 튼다고 본다)
 
         async def listen():
             while not stop.is_set():
@@ -863,6 +864,7 @@ class VoiceRunner:
                 if ch == "orchestrator:state":
                     if data.get("new_state") == "LISTENING":
                         echo.clear()  # 앱처럼 남은 답 음성을 버린다
+                        playback["until"] = time.perf_counter()
                     if data.get("new_state") == "READY":
                         ready_after_answer.set()
 
@@ -876,6 +878,10 @@ class VoiceRunner:
                             if isinstance(msg, (bytes, bytearray)) and len(msg) >= 4:
                                 f = np.frombuffer(
                                     bytes(msg)[: len(msg) // 4 * 4], dtype=np.float32
+                                )
+                                now = time.perf_counter()
+                                playback["until"] = (
+                                    max(now, playback["until"]) + len(f) / 24000
                                 )
                                 x = np.interp(
                                     np.arange(0, len(f), 1.5), np.arange(len(f)), f
@@ -938,7 +944,11 @@ class VoiceRunner:
                     time.perf_counter() < deadline and not ready_after_answer.is_set()
                 ):
                     await stream(sil(0.5))
-                await stream(sil(1.0))
+                # 답 음성을 끝까지 '재생' 한 뒤 끝낸다 — 앱은 끝까지 트는데 시험이 먼저
+                # 다음 시나리오의 호출어를 보내 말소리 끼어들기로 잡혔다(2차 실행)
+                end = min(playback["until"], time.perf_counter() + 90)
+                while time.perf_counter() < end + 0.8:
+                    await stream(sil(0.5))
                 drainer.cancel()
         finally:
             stop.set()
@@ -1081,6 +1091,7 @@ async def run_voice(voice_items: list, results: dict, save) -> None:
         try:
             for s in voice_items:
                 started = time.perf_counter()
+                await SESSIONS.new(keep_active=True)  # 음성 시나리오마다 새 세션
                 try:
                     results[s["id"]] = await runner.run(s)
                 except Exception as e:
