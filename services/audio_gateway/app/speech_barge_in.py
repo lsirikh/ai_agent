@@ -87,6 +87,14 @@ def _chunk_middle(tracker: PlaybackTracker) -> float:
     return tracker.clock() - SEGMENT_SECONDS / 2
 
 
+# 시차를 셈하기 시작할 기록 수(1.5초). 3초였을 때 처음 답의 2초쯤 끼어들기를 놓쳤다
+MIN_HISTORY = 15
+COLD_HEADROOM = 1.5
+# 시차를 모를 때 비율을 쓰기 전 모을 조각 수(2초) — 에코가 늦게(최대 1.5초) 들어오기 전의
+# 0 만 보고 '에코 없음' 으로 잘못 보지 않게(끼어들기 시험: 1초 늦은 큰 에코에 끊었다)
+COLD_MIN_SAMPLES = 20
+
+
 class EchoDelay:
     """에코가 재생보다 몇 초 늦게 마이크에 들어오는지 익힌다.
 
@@ -100,7 +108,7 @@ class EchoDelay:
         max_delay: float = 1.5,
         history: int = 80,
         min_correlation: float = 0.6,
-        every: int = 10,
+        every: int = 5,
     ):
         self.max_delay = max_delay
         self.min_correlation = min_correlation
@@ -123,7 +131,7 @@ class EchoDelay:
         """마이크 조각 하나를 기록한다. 시차를 새로 익혔거나 바꿨으면 True."""
         self._history.append((_chunk_middle(tracker), mic_rms))
         self._seen += 1
-        if self._seen % self.every or len(self._history) < 30:
+        if self._seen % self.every or len(self._history) < MIN_HISTORY:
             return False
         found = self._estimate(tracker)
         if found is None or (
@@ -175,7 +183,9 @@ class SpeechBargeIn:
         self.need_chunks = need_chunks
         self.default_echo_ratio = default_echo_ratio
         self.min_far = min_far
-        self._ratios: deque = deque(maxlen=200)  # 끼어들지 않은 구간의 마이크/재생 비율
+        # 끼어들지 않은 구간의 마이크/재생 비율(시차를 알 때 · 모를 때)
+        self._ratios: deque = deque(maxlen=200)
+        self._cold: deque = deque(maxlen=200)
         self._streak = 0
         self.last: dict = {}
 
@@ -184,9 +194,15 @@ class SpeechBargeIn:
 
         (중앙값은 에코가 늦게 들어오기 전의 0 에 끌려 내려가 에코에 끊었다 — 실측)
         """
-        if len(self._ratios) < 10:
-            return self.default_echo_ratio
-        return float(np.percentile(list(self._ratios), 95))
+        if len(self._ratios) >= 10:
+            return float(np.percentile(list(self._ratios), 95))
+        if len(self._cold) >= COLD_MIN_SAMPLES:
+            # 시차를 아직 모를 때(처음 답 · 에코가 전혀 없는 헤드셋): 최근 1.2초 최대 재생
+            # 크기와 견준 비율을 넉넉히(1.5배) 쓴다 — 에코가 없으면 거의 0 이라 보통
+            # 목소리로 끊을 수 있다(끼어들기 시험: 헤드셋에서 끝내 끊지 못했다)
+            cold = COLD_HEADROOM * float(np.percentile(list(self._cold), 95))
+            return min(self.default_echo_ratio, cold)
+        return self.default_echo_ratio
 
     def forget_echo(self, ratios: Sequence[float] = ()) -> None:
         """재생 크기를 보는 방법이 바뀌었다(에코 시차를 익힘) — 비율을 다시 익힌다.
@@ -208,9 +224,9 @@ class SpeechBargeIn:
         expected_echo = self.echo_ratio() * far_level
         self.last = {"mic": mic_rms, "far": far_level, "ratio": self.echo_ratio()}
         loud = mic_rms > max(self.min_level, self.margin * expected_echo)
-        if learn and not loud and far_level >= self.min_far:
-            # 에코만 들리는 구간으로 비율을 익힌다
-            self._ratios.append(mic_rms / far_level)
+        if not loud and far_level >= self.min_far:
+            # 에코만 들리는 구간으로 비율을 익힌다(시차를 모르면 따로 넉넉히)
+            (self._ratios if learn else self._cold).append(mic_rms / far_level)
         if loud and vad_prob >= self.vad_threshold:
             self._streak += 1
         else:

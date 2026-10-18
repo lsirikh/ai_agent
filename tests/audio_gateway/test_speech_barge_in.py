@@ -288,3 +288,25 @@ def test_user_voice_right_after_delay_is_learned_interrupts() -> None:
 
     assert echo_delay.known
     assert hit is not None and 3.3 < hit <= 3.9
+
+
+def test_voice_interrupts_when_there_is_no_echo_at_all() -> None:
+    # 끼어들기 시험(2026-10-18): 에코가 전혀 없으면(헤드셋) 시차를 익힐 수 없어 기본
+    # 비율(재생 크기의 1.8배)과 견주다 보니 보통 목소리로는 끝내 끊지 못했다
+    hit, _ = _play(20.0, delay=0.0, gain=0.0, voice_from=2.0, voice_rms=0.08)
+
+    assert hit is not None and 2.0 < hit <= 2.6
+
+
+def test_first_answer_can_be_interrupted_after_two_seconds() -> None:
+    # 끼어들기 시험: 처음 답에서 2초쯤 끼어들면 시차를 아직 못 익혀(3초 필요) 끊지 못했다
+    hit, _ = _play(20.0, delay=0.3, gain=0.2, voice_from=2.2, voice_rms=0.2)
+
+    assert hit is not None and 2.2 < hit <= 3.2
+
+
+def test_loud_late_echo_still_never_interrupts_with_faster_learning() -> None:
+    for seed in range(4):
+        for delay in (0.0, 0.6, 1.0):
+            hit, _ = _play(30.0, delay=delay, gain=0.8, seed=seed)
+            assert hit is None, (seed, delay)
