@@ -222,16 +222,29 @@ _BROWSER = re.compile(
     r"다음(?=\s*(사이트|에서|으로|홈|열|켜|띄워|들어가|접속))",
     re.IGNORECASE,
 )
+# '켜' 는 켜기만 — '종료시켜'·'켜져 있거든' 의 '켜' 를 열기로 봐서 끄라는 말에 페이지를
+# 열었다(사용자 보고 2026-10-19)
+_TURN_ON = r"(?<!시)켜(?!\s*(져|진|있))"
 # 브라우저로 하는 일: 어미와 상관없이 본다
 # (실측: STT 가 '들어가 줘' 를 '들어가죠', '열어서' 를 '열어가지고' 로 적었다)
 _BROWSER_ACTION = re.compile(
-    r"열|켜|들어가|접속|이동|띄워|검색|입력|클릭|눌러|틀어|가\s*줘"
+    r"열|" + _TURN_ON + r"|들어가|접속|이동|띄워|검색|입력|클릭|눌러|틀어|가\s*줘"
 )
 # 그중 검색 도구로는 대신할 수 없는 일(열기·접속·누르기)
-_BROWSER_OPEN = re.compile(r"열|켜|들어가|접속|이동|띄워|클릭|눌러|틀어")
+_BROWSER_OPEN = re.compile(r"열|" + _TURN_ON + r"|들어가|접속|이동|띄워|클릭|눌러|틀어")
 _YOUTUBE = re.compile(r"유튜브|youtube", re.IGNORECASE)
 _DRAW = re.compile(r"그려|그리고\s*싶|드로잉|스케치")
-_PLAY = re.compile(r"틀어|재생|플레이|들려|틀\s*수")
+_PLAY = re.compile(r"틀어|틀고|틀자|재생|플레이|들려|틀\s*수")
+# 끄기·닫기 ('꺼내' 는 아니다)
+_CLOSE = re.compile(
+    r"꺼(?!내)|끄|끈|종료|닫|alt\s*f4|털미네이트|terminate", re.IGNORECASE
+)
+_MEDIA_PLAYING = re.compile(r"영상|동영상|노래|음악")
+_AD_SKIP = re.compile(
+    r"광고.*(건너|스킵|넘기|넘겨|skip)|(건너|스킵).*광고", re.IGNORECASE
+)
+# 도구를 정하지 못한 브라우저 일: 아무 도구라도 반드시 부르게 한다(vLLM tool_choice)
+ANY_TOOL = "required"
 # MCP 데스크톱(서버__open_app · 서버__write_document)
 _PROGRAM = re.compile(r"메모장|노트패드|워드|엑셀|파워\s*포인트|피피티|계산기|그림판")
 _WRITE = re.compile(r"저장|작성|써|적어|만들어|기록")
@@ -355,11 +368,50 @@ _TYPE_INTENT = re.compile(r"입력|검색|써\s*줘|적어")
 _CLICK_INTENT = re.compile(r"클릭|눌러")
 
 
-def required_tools(question: str, offered) -> list:
+def _browser_plan(question: str, offered, browser_active: bool) -> list:
+    """
+    끄기·틀기·광고 건너뛰기, 그리고 브라우저를 쓰던 중 이어서 한 말
+    ('영상 재생해'·'꺼 줘'·'클릭해')의 도구.
+    정하지 않으면 모델이 도구 없이 '했습니다/하겠습니다' 라고만
+    했다(사용자 보고 2026-10-19).
+    """
+    named = bool(_BROWSER.search(question))
+    # 다른 프로그램(그림판 등)을 말했으면 이어서 한 말이라도 브라우저 일이 아니다
+    follow_up = browser_active and not named and not _PROGRAM.search(question)
+    close = _offered_tool("close_browser", offered)
+    if close and _CLOSE.search(question) and (
+        named or _MEDIA_PLAYING.search(question) or follow_up
+    ):
+        return [close]
+    plan = []
+    play = _offered_tool("play_youtube", offered)
+    if play and _PLAY.search(question) and (_YOUTUBE.search(question) or follow_up):
+        plan.append(play)
+    elif follow_up:
+        steps = ((_CLICK_INTENT, "browser_click"), (_TYPE_INTENT, "browser_type"))
+        for intent, name in steps:
+            tool = _offered_tool(name, offered)
+            snapshot = _offered_tool("browser_snapshot", offered)
+            if tool and snapshot and intent.search(question):
+                plan += [snapshot, tool]
+                break
+    skip = _offered_tool("skip_youtube_ad", offered)
+    if skip and _AD_SKIP.search(question):
+        plan.append(skip)
+    if not plan and follow_up and _BROWSER_ACTION.search(question):
+        plan = [ANY_TOOL]
+    return plan
+
+
+def required_tools(question: str, offered, browser_active: bool = False) -> list:
     """
     라운드마다 지정할 도구(첫 라운드부터). 브라우저는 열기 → 입력 → 클릭 순서.
     열기만 지정하면 모델이 입력하지 않고 '입력하고 검색했습니다' 라고 지어냈다(실측).
+    browser_active: 바로 앞에 브라우저를 썼다(이어서 한 말도 브라우저 일로 본다).
     """
+    plan = _browser_plan(question or "", offered, browser_active)
+    if plan:
+        return plan
     first = required_tool(question, offered)
     if not first:
         return []
@@ -388,6 +440,8 @@ def unavailable_action_reply(question: str, offered) -> Optional[str]:
         _ACTION.search(question) or _WRITE.search(question)
     ):
         return None if required_tool(question, offered) else CANNOT_DO_REPLY
+    if _BROWSER.search(question) and _CLOSE.search(question):
+        return None if _offered_tool("close_browser", offered) else CANNOT_DO_REPLY
     if _BROWSER.search(question) and _BROWSER_OPEN.search(question):
         return None if _offered_tool("browser_navigate", offered) else CANNOT_DO_REPLY
     if not _ACTION.search(question):

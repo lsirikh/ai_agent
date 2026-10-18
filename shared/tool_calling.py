@@ -21,7 +21,7 @@ import re
 from typing import Any, AsyncIterator, Awaitable, Callable, Optional, Sequence, Union
 
 from .context_builder import _truncate_to_tokens, estimate_tokens, prompt_tokens
-from .tools import TOOL_RESULT_MAX_TOKENS, Tool, ToolRegistry, ToolResult
+from .tools import ANY_TOOL, TOOL_RESULT_MAX_TOKENS, Tool, ToolRegistry, ToolResult
 
 # 브라우저 작업은 열기 → (요소 보기) → 입력 → 클릭 → 결과 확인처럼 여러 번 왕복한다
 # (3번 한도에서는 입력하기 전에 끝났다 — 실측)
@@ -122,9 +122,12 @@ def schema_tokens(tools: Optional[list]) -> int:
 
 
 def tool_choice_for(name: Optional[str]) -> Any:
-    """vLLM tool_choice: 이름이 있으면 그 도구를 반드시 부르게, 없으면 auto."""
+    """vLLM tool_choice: 이름이 있으면 그 도구를 반드시 부르게, 없으면 auto.
+    ANY_TOOL 이면 어느 도구든 하나는 부르게(required)."""
     if not name:
         return "auto"
+    if name == ANY_TOOL:
+        return "required"
     return {"type": "function", "function": {"name": name}}
 
 
@@ -185,7 +188,7 @@ async def stream_with_tools(
     tools = registry.schemas() if registry else None
     names = registry.names() if registry else []
     plan = [required] if isinstance(required, str) else list(required or [])
-    plan = [name for name in plan if name in names]
+    plan = [name for name in plan if name in names or name == ANY_TOOL]
     messages = list(messages)
     failures: list = []  # (도구, 오류) — 답이 성공했다고 하면 밝힌다
     for round_index in range(max_rounds + 1):
