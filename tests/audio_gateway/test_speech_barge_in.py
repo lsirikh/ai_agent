@@ -288,3 +288,47 @@ def test_user_voice_right_after_delay_is_learned_interrupts() -> None:
 
     assert echo_delay.known
     assert hit is not None and 3.3 < hit <= 3.9
+
+
+def test_voice_interrupts_when_there_is_no_echo_at_all() -> None:
+    # 끼어들기 시험(2026-10-18): 에코가 전혀 없으면(헤드셋) 시차를 익힐 수 없어 기본
+    # 비율(재생 크기의 1.8배)과 견주다 보니 보통 목소리로는 끝내 끊지 못했다
+    hit, _ = _play(20.0, delay=0.0, gain=0.0, voice_from=2.0, voice_rms=0.08)
+
+    assert hit is not None and 2.0 < hit <= 2.6
+
+
+def test_first_answer_can_be_interrupted_after_two_seconds() -> None:
+    # 끼어들기 시험: 처음 답에서 2초쯤 끼어들면 시차를 아직 못 익혀(3초 필요)
+    # 끊지 못했다
+    hit, _ = _play(20.0, delay=0.3, gain=0.2, voice_from=2.2, voice_rms=0.2)
+
+    assert hit is not None and 2.2 < hit <= 3.2
+
+
+def test_loud_late_echo_still_never_interrupts_with_faster_learning() -> None:
+    for seed in range(4):
+        for delay in (0.0, 0.6, 1.0):
+            hit, _ = _play(30.0, delay=delay, gain=0.8, seed=seed)
+            assert hit is None, (seed, delay)
+
+
+def test_echo_arriving_earlier_than_learned_delay_does_not_interrupt() -> None:
+    # 끼어들기 시험 C(2026-10-18): 끼어든 뒤 새 답('날씨를 확인해 볼게요')의 에코가 익힌
+    # 시차보다 일찍 들어오자 그 순간 재생 크기를 0 으로 봐 다시 끊었다 — 8번 되풀이했다
+    from app.speech_barge_in import EchoDelay, PlaybackTracker, SpeechBargeIn
+
+    clock = Clock()
+    tracker = PlaybackTracker(clock=clock)
+    echo_delay, barge = EchoDelay(), SpeechBargeIn()
+    echo_delay.delay = 0.6  # 앞 답에서 익힌 시차
+    for _ in range(30):
+        barge.feed(0.06, 0.9, 0.2, learn=True)  # 익힌 에코 비율 0.3
+    tracker.add(_tone(3.0, 0.3))  # 새 답 — 에코는 곧바로 들어온다(시차 0)
+    hits = []
+    for _ in range(25):
+        clock.now += 0.1
+        far = echo_delay.far_level(tracker)
+        hits.append(barge.feed(0.3 * 0.21, 0.95, far, learn=True))
+
+    assert not any(hits)

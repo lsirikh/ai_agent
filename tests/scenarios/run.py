@@ -201,6 +201,25 @@ class SessionPool:
 SESSIONS = SessionPool()
 
 
+def redis_client():
+    """시험용 Redis — 호스트↔도커 연결이 잠깐 끊겨도 다시 붙는다.
+
+    (끼어들기 4·5차 실행: 읽기 시간 초과로 멈췄다 — 짧게 세 번으로는 모자랐다)
+    """
+    import redis.asyncio as aioredis
+    from redis.asyncio.retry import Retry
+    from redis.backoff import ExponentialBackoff
+    from redis.exceptions import ConnectionError, TimeoutError
+
+    return aioredis.Redis(
+        host=REDIS[0],
+        port=REDIS[1],
+        retry=Retry(ExponentialBackoff(cap=10, base=1), 6),  # 30초쯤까지
+        socket_timeout=10,
+        retry_on_error=[ConnectionError, TimeoutError],
+    )
+
+
 # ── 실시간: 채팅 ────────────────────────────────────────────
 async def chat_once(
     client, message: str, session_id: str, use_rag: bool = False
@@ -818,7 +837,11 @@ class VoiceRunner:
     LONG = "한국의 사계절에 대해 자세히 설명해줘"
     BACKGROUND = "어제 뉴스에서는 내일 전국에 비가 온다고 했고 주말에는 맑겠다고 합니다"
 
-    def __init__(self, wake_wav: Path):
+    def __init__(
+        self, wake_wav: Path, echo_gain: float = 0.2, barge_after: float = 5.0
+    ):
+        self.echo_gain = echo_gain  # 스피커 → 마이크로 되돌아오는 에코 크기
+        self.barge_after = barge_after  # 답이 시작되고 몇 초 뒤 끼어드는지
         import numpy as np
 
         with wave.open(str(wake_wav), "rb") as w:
@@ -826,11 +849,10 @@ class VoiceRunner:
 
     async def run(self, s: dict) -> dict:
         import numpy as np
-        import redis.asyncio as aioredis
         import websockets
 
         expect = s["expect"]
-        r = aioredis.Redis(host=REDIS[0], port=REDIS[1])
+        r = redis_client()
         ps = r.pubsub()
         await ps.subscribe(
             "edgevoice:stt:result",
@@ -870,7 +892,9 @@ class VoiceRunner:
 
         listener = asyncio.create_task(listen())
         try:
-            async with websockets.connect(GATEWAY_WS, max_size=None) as ws:
+            async with websockets.connect(
+                GATEWAY_WS, max_size=None, open_timeout=30
+            ) as ws:
 
                 async def drain():
                     try:
@@ -887,7 +911,7 @@ class VoiceRunner:
                                     np.arange(0, len(f), 1.5), np.arange(len(f)), f
                                 )
                                 echo.extend(
-                                    (np.clip(x * 0.2, -1, 1) * 32767)
+                                    (np.clip(x * self.echo_gain, -1, 1) * 32767)
                                     .astype(np.int16)
                                     .tolist()
                                 )
@@ -925,7 +949,7 @@ class VoiceRunner:
                         await stream(sil(0.1))
                     # 답이 5초쯤 흐른 뒤 끼어든다(에코 시차를 익히는 데 3초쯤 걸린다 —
                     # 그 전에는 에코보다 크게 말해야 끊긴다)
-                    await stream(sil(5.0))
+                    await stream(sil(self.barge_after))
                     ready_after_answer.clear()
                     second = wav_of(s["input"])
                     if expect.get("wake_barge"):

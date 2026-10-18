@@ -342,7 +342,7 @@ async def orchestrator_state_subscriber() -> None:
         return
 
     pubsub = redis_client.pubsub()
-    await pubsub.subscribe(ORCHESTRATOR_STATE_CHANNEL)
+    await pubsub.subscribe(ORCHESTRATOR_STATE_CHANNEL, VOICE_STOP_CHANNEL)
 
     await _logger.info(
         "orchestrator_subscriber_started",
@@ -357,6 +357,14 @@ async def orchestrator_state_subscriber() -> None:
             try:
                 data = json.loads(message["data"])
                 msg_type = data.get("type")
+                channel = message.get("channel")
+                if isinstance(channel, bytes):
+                    channel = channel.decode()
+                if channel == VOICE_STOP_CHANNEL:
+                    await stop_answer()
+                    continue
+                if data.get("new_state") == "LISTENING":
+                    resume_answer_audio()  # 새 질문: 다음 답 음성은 보낸다
 
                 # 설정 업데이트 처리
                 settings = data.get("settings", {})
@@ -552,10 +560,36 @@ async def publish_for_wake_word(processed: np.ndarray) -> None:
         await _logger.warning("wake_publish_failed", f"Wake publish error: {e}")
 
 
+VOICE_STOP_CHANNEL = "edgevoice:voice:stop"  # 앱의 [중단] 버튼
+_answer_stopped = False  # 중단한 답의 남은 음성은 다음 턴까지 보내지 않는다
+
+
+async def stop_answer() -> None:
+    """
+    [중단] 버튼(사용자 요청 2026-10-18): 남은 답 음성을 버리고,
+    듣는 중이면 녹음을 끝낸다.
+    """
+    global _answer_stopped
+    _answer_stopped = True
+    playback_tracker.clear()
+    speech_barge.reset()
+    barge_in_detector.set_playback_state(PlaybackState.IDLE)
+    if _listening_mode:
+        audio_recorder.stop()
+        await reset_session()
+    await _logger.info("voice_stopped", "중단 버튼 — 남은 답 음성을 버린다")
+
+
+def resume_answer_audio() -> None:
+    """다음 턴(듣기 시작)부터 답 음성을 다시 보낸다."""
+    global _answer_stopped
+    _answer_stopped = False
+
+
 async def forward_tts_audio(audio_bytes: bytes) -> None:
     """TTS 오디오(float32 24kHz mono)를 연결된 클라이언트에 바이너리 프레임으로 보낸다."""
-    if _listening_mode:
-        return  # 끼어들어 듣는 중: 남은 답 음성은 틀지 않는다
+    if _listening_mode or _answer_stopped:
+        return  # 끼어들어 듣는 중·중단한 답: 남은 답 음성은 틀지 않는다
     usable = len(audio_bytes) - len(audio_bytes) % 4  # float32 단위만
     if _playback_clients and usable:
         playback_tracker.add(np.frombuffer(audio_bytes[:usable], dtype=np.float32))

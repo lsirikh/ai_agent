@@ -43,7 +43,7 @@ public sealed class TrayController : IDisposable
     private string? _lastNotice;
 
     public TrayController(Application app, VoiceStateMonitor monitor, MicrophoneStreamer mic, AlwaysOnMicrophone alwaysOn,
-        Action openMainWindow, Action exit)
+        Action openMainWindow, Action exit, Func<System.Threading.Tasks.Task>? stopVoice = null)
     {
         _mic = mic;
         _alwaysOn = alwaysOn;
@@ -77,6 +77,15 @@ public sealed class TrayController : IDisposable
         _orb = new VoiceOrbWindow();
         _orb.TalkRequested += ToggleMute;
         _orb.OpenRequested += openMainWindow;
+        // [중단]: 남은 답 음성을 곧바로 끊고 서버에 멈추라고 알린다(사용자 요청 2026-10-18)
+        _orb.StopRequested += () =>
+        {
+            _player.Stop();
+            if (stopVoice is not null)
+            {
+                _ = stopVoice();
+            }
+        };
         _orb.Show();
 
         monitor.StateChanged += s => Dispatcher.UIThread.Post(() =>

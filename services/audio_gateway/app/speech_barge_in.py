@@ -76,7 +76,8 @@ class PlaybackTracker:
         return level
 
     def clear(self) -> None:
-        self._until = self.clock()
+        """남은 재생을 지운다(끼어들기·중단 — 앱도 곧바로 재생을 멈춘다)."""
+        self._until = 0.0
         self._segments.clear()
         self._starts.clear()
 
@@ -84,6 +85,17 @@ class PlaybackTracker:
 def _chunk_middle(tracker: PlaybackTracker) -> float:
     """방금 들어온 마이크 조각(지금까지 100ms)의 가운데 시각."""
     return tracker.clock() - SEGMENT_SECONDS / 2
+
+
+# 시차를 셈하기 시작할 기록 수(1.5초). 3초였을 때 처음 답의 2초쯤 끼어들기를 놓쳤다
+MIN_HISTORY = 15
+AUDIBLE_RMS = 0.005
+MIN_AUDIBLE = 10
+COLD_HEADROOM = 1.5
+# 시차를 모를 때 비율을 쓰기 전 모을 조각 수(2초) — 에코가 늦게(최대 1.5초)
+# 들어오기 전의 0 만 보고 '에코 없음' 으로 잘못 보지 않게
+# (끼어들기 시험: 1초 늦은 큰 에코에 끊었다)
+COLD_MIN_SAMPLES = 20
 
 
 class EchoDelay:
@@ -99,7 +111,7 @@ class EchoDelay:
         max_delay: float = 1.5,
         history: int = 80,
         min_correlation: float = 0.6,
-        every: int = 10,
+        every: int = 5,
     ):
         self.max_delay = max_delay
         self.min_correlation = min_correlation
@@ -116,13 +128,22 @@ class EchoDelay:
         """지금 마이크에 들어오는 에코를 낸 재생 크기."""
         if self.delay is None:
             return tracker.level()
-        return tracker.around(_chunk_middle(tracker) - self.delay, 0.15)
+        # 익힌 시차보다 일찍 들어오는 에코도 덮는다: [지금 - 시차 - 0.15, 지금]
+        # (끼어들기 시험: 새 답의 에코가 일찍 들어오자 재생 크기를 0 으로 봐
+        #  다시 끊었다)
+        start = _chunk_middle(tracker) - self.delay - 0.15
+        end = tracker.clock()
+        return tracker.around((start + end) / 2, (end - start) / 2)
 
     def observe(self, mic_rms: float, tracker: PlaybackTracker) -> bool:
         """마이크 조각 하나를 기록한다. 시차를 새로 익혔거나 바꿨으면 True."""
         self._history.append((_chunk_middle(tracker), mic_rms))
         self._seen += 1
-        if self._seen % self.every or len(self._history) < 30:
+        if self._seen % self.every or len(self._history) < MIN_HISTORY:
+            return False
+        # 에코(들리는 소리)가 1초 넘게 쌓인 뒤에 셈한다 — 늦게(1초) 들어온 에코의
+        # 앞 0.5초만 보고 비율을 낮게 익혀 큰 에코에 끊었다(끼어들기 시험)
+        if sum(1 for _, rms in self._history if rms > AUDIBLE_RMS) < MIN_AUDIBLE:
             return False
         found = self._estimate(tracker)
         if found is None or (
@@ -137,7 +158,8 @@ class EchoDelay:
         if self.delay is None:
             return []
         pairs = [
-            (rms, tracker.around(t - self.delay, 0.15)) for t, rms in self._history
+            (rms, tracker.around(t - self.delay / 2 - 0.025, self.delay / 2 + 0.175))
+            for t, rms in self._history
         ]
         return [rms / far for rms, far in pairs if far >= min_far]
 
@@ -174,7 +196,9 @@ class SpeechBargeIn:
         self.need_chunks = need_chunks
         self.default_echo_ratio = default_echo_ratio
         self.min_far = min_far
-        self._ratios: deque = deque(maxlen=200)  # 끼어들지 않은 구간의 마이크/재생 비율
+        # 끼어들지 않은 구간의 마이크/재생 비율(시차를 알 때 · 모를 때)
+        self._ratios: deque = deque(maxlen=200)
+        self._cold: deque = deque(maxlen=200)
         self._streak = 0
         self.last: dict = {}
 
@@ -183,9 +207,16 @@ class SpeechBargeIn:
 
         (중앙값은 에코가 늦게 들어오기 전의 0 에 끌려 내려가 에코에 끊었다 — 실측)
         """
-        if len(self._ratios) < 10:
-            return self.default_echo_ratio
-        return float(np.percentile(list(self._ratios), 95))
+        if len(self._ratios) >= 10:
+            return float(np.percentile(list(self._ratios), 95))
+        if len(self._cold) >= COLD_MIN_SAMPLES:
+            # 시차를 아직 모를 때(처음 답 · 에코가 전혀 없는 헤드셋): 최근 1.2초
+            # 최대 재생
+            # 크기와 견준 비율을 넉넉히(1.5배) 쓴다 — 에코가 없으면 거의 0 이라 보통
+            # 목소리로 끊을 수 있다(끼어들기 시험: 헤드셋에서 끝내 끊지 못했다)
+            cold = COLD_HEADROOM * float(np.percentile(list(self._cold), 95))
+            return min(self.default_echo_ratio, cold)
+        return self.default_echo_ratio
 
     def forget_echo(self, ratios: Sequence[float] = ()) -> None:
         """재생 크기를 보는 방법이 바뀌었다(에코 시차를 익힘) — 비율을 다시 익힌다.
@@ -207,9 +238,9 @@ class SpeechBargeIn:
         expected_echo = self.echo_ratio() * far_level
         self.last = {"mic": mic_rms, "far": far_level, "ratio": self.echo_ratio()}
         loud = mic_rms > max(self.min_level, self.margin * expected_echo)
-        if learn and not loud and far_level >= self.min_far:
-            # 에코만 들리는 구간으로 비율을 익힌다
-            self._ratios.append(mic_rms / far_level)
+        if not loud and far_level >= self.min_far:
+            # 에코만 들리는 구간으로 비율을 익힌다(시차를 모르면 따로 넉넉히)
+            (self._ratios if learn else self._cold).append(mic_rms / far_level)
         if loud and vad_prob >= self.vad_threshold:
             self._streak += 1
         else:
