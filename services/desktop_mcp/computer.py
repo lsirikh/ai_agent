@@ -130,6 +130,19 @@ def _longest_run(indices: np.ndarray) -> np.ndarray:
     return max(runs, key=lambda run: run[-1] - run[0])
 
 
+BLANK_TITLES = ("제목 없음", "Untitled")
+
+
+def is_blank_paint(title: str) -> bool:
+    """
+    새 그림판 창인지('제목 없음 - 그림판'). 사용자가 연 그림 위에 그리거나 지우지 않도록
+    이런 창만 쓰고, 없으면 새로 연다(사용자 요청 2026-10-18: 만든 것만 고친다).
+    """
+    return title.startswith(BLANK_TITLES) and title.endswith(
+        tuple(f" - {name}" for name in PAINT_TITLES)
+    )
+
+
 def parse_keys(keys: str) -> list:
     """'ctrl+s' · 'alt+F4' · 'enter' → 가상 키 코드 목록."""
     codes = []
@@ -175,6 +188,15 @@ class WindowsScreen:
 
     # ── 창 ──────────────────────────────────────────────
     def find_window(self, titles) -> Optional[int]:
+        return self.find_window_where(
+            lambda title: any(title.endswith(t) or t in title for t in titles)
+        )
+
+    def find_blank_paint(self) -> Optional[int]:
+        """새로 연 빈 그림판 창(사용자가 연 그림 창은 쓰지 않는다)."""
+        return self.find_window_where(is_blank_paint)
+
+    def find_window_where(self, matches) -> Optional[int]:
         import ctypes
         from ctypes import wintypes
 
@@ -186,7 +208,7 @@ class WindowsScreen:
                 length = self.user32.GetWindowTextLengthW(hwnd)
                 buffer = ctypes.create_unicode_buffer(length + 1)
                 self.user32.GetWindowTextW(hwnd, buffer, length + 1)
-                if any(buffer.value.endswith(t) or t in buffer.value for t in titles):
+                if matches(buffer.value):
                     found.append(hwnd)
             return True
 
@@ -212,12 +234,12 @@ class WindowsScreen:
 
         from PIL import ImageGrab
 
-        hwnd = self.find_window(PAINT_TITLES)
+        hwnd = self.find_blank_paint()
         if hwnd is None:
             subprocess.Popen(["mspaint.exe"])
             for _ in range(40):
                 time.sleep(0.25)
-                hwnd = self.find_window(PAINT_TITLES)
+                hwnd = self.find_blank_paint()
                 if hwnd:
                     break
         if hwnd is None:

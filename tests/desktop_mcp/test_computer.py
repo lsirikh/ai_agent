@@ -128,3 +128,20 @@ def test_drawing_area_is_square_so_circles_stay_round() -> None:
 
     assert square_area((100, 100, 1100, 600)) == (350, 100, 850, 600)
     assert square_area((0, 0, 400, 800)) == (0, 200, 400, 600)
+
+
+@pytest.mark.parametrize(
+    "title, usable",
+    [
+        ("제목 없음 - 그림판", True),
+        ("Untitled - Paint", True),
+        # 사용자가 연 그림 위에는 그리지 않는다(사용자 요청: 만든 것만 고친다)
+        ("가족사진.png - 그림판", False),
+        ("diagram.bmp - Paint", False),
+        ("그림판 사용법 - Chrome", False),
+    ],
+)
+def test_only_blank_paint_window_is_used(title, usable) -> None:
+    from services.desktop_mcp.computer import is_blank_paint
+
+    assert is_blank_paint(title) is usable
