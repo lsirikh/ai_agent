@@ -461,14 +461,25 @@ async def stop_case(client, wake: Path) -> dict:
     }
 
 
+def save(parts: str, results: list) -> None:
+    """이번에 돌린 부분만 바꿔 쓴다 — 부분마다 불러 도중에 멈춰도 남는다."""
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    previous = json.loads(OUT.read_text(encoding="utf-8")) if OUT.exists() else []
+    keep = [x for x in previous if x["part"] not in parts]
+    OUT.write_text(
+        json.dumps(keep + results, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    from collections import Counter
+
+    print(Counter((x["part"], x["status"]) for x in keep + results), flush=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--parts", default="ABC")
     args = parser.parse_args()
-    results = []
     if "A" in args.parts:
-        results += part_a()
-        print("A done", len(results), flush=True)
+        save("A", part_a())
     if "B" in args.parts or "C" in args.parts:
         subprocess.run(
             ["taskkill", "/IM", "EdgeVoice.Agent.Desktop.exe", "/F"],
@@ -476,21 +487,12 @@ def main() -> None:
         )  # 앱의 마이크 소리가 섞이지 않게
         try:
             if "B" in args.parts:
-                results += asyncio.run(part_b())
+                save("B", asyncio.run(part_b()))
             if "C" in args.parts:
-                results += asyncio.run(part_c())
+                save("C", asyncio.run(part_c()))
         finally:
             if run.APP.exists():
                 subprocess.Popen([str(run.APP)], cwd=str(run.APP.parent))
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    previous = json.loads(OUT.read_text(encoding="utf-8")) if OUT.exists() else []
-    keep = [x for x in previous if x["part"] not in args.parts]
-    OUT.write_text(
-        json.dumps(keep + results, ensure_ascii=False, indent=1), encoding="utf-8"
-    )
-    from collections import Counter
-
-    print(Counter((x["part"], x["status"]) for x in keep + results))
 
 
 if __name__ == "__main__":

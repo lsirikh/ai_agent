@@ -874,7 +874,9 @@ class VoiceRunner:
 
         listener = asyncio.create_task(listen())
         try:
-            async with websockets.connect(GATEWAY_WS, max_size=None) as ws:
+            async with websockets.connect(
+                GATEWAY_WS, max_size=None, open_timeout=30
+            ) as ws:
 
                 async def drain():
                     try:
