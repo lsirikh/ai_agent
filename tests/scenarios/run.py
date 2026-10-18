@@ -36,7 +36,11 @@ REDIS = ("127.0.0.1", 26379)
 HOME_TESTS = Path.home() / "Downloads" / "Tests" / "scenarios"
 OUT = HOME_TESTS / "results"
 AUDIO = HOME_TESTS / "audio"
-MARKER = "시나리오 시험"  # 이 실행이 지식 베이스에 넣는 것에는 모두 이 말을 넣는다
+MARKER = "시나리오 시험"
+# 시험 창(그림판·MCP 크롬)은 보조 모니터에 띄운다(사용자 요청 2026-10-18)
+os.environ.setdefault(
+    "DESKTOP_MCP_MONITOR", "secondary"
+)  # 이 실행이 지식 베이스에 넣는 것에는 모두 이 말을 넣는다
 SCREEN_WAIT_SECONDS = 20 * 60
 APP = (
     ROOT
@@ -308,6 +312,64 @@ def paint_ink() -> int:
     return int((area.max(axis=2) < 120).sum())
 
 
+def prepare_paint() -> None:
+    """시험용 새 그림판 창을 보조 모니터에 띄워 둔다(MCP 가 이 창에 그린다)."""
+    from services.desktop_mcp import computer
+
+    screen = computer.WindowsScreen()
+    hwnd = screen.find_blank_paint()
+    if hwnd is None:
+        subprocess.Popen(["mspaint.exe"])
+        for _ in range(40):
+            time.sleep(0.25)
+            hwnd = screen.find_blank_paint()
+            if hwnd:
+                break
+    if hwnd:
+        screen.focus(hwnd)  # DESKTOP_MCP_MONITOR 모니터로 옮겨 최대화
+
+
+def move_mcp_chrome() -> None:
+    """브라우저 MCP 가 띄운 크롬 창만 보조 모니터로 옮긴다(사용자 크롬은 그대로)."""
+    import ctypes
+    from ctypes import wintypes
+
+    from services.desktop_mcp import computer
+
+    found = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+            "Where-Object { $_.CommandLine -match 'ms-playwright-mcp' } | "
+            "ForEach-Object { $_.ProcessId }",
+        ],
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+    pids = {int(p) for p in found if p.isdigit()}
+    if not pids:
+        return
+    screen = computer.WindowsScreen()
+    user32 = screen.user32
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def visit(hwnd, _):
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if (
+            pid.value in pids
+            and user32.IsWindowVisible(hwnd)
+            and user32.GetWindowTextLengthW(hwnd)
+        ):
+            screen.move_to_work_monitor(hwnd)
+            user32.ShowWindow(hwnd, 3)
+        return True
+
+    user32.EnumWindows(visit, 0)
+
+
 def clear_paint() -> None:
     from services.desktop_mcp import computer
 
@@ -350,6 +412,8 @@ async def run_desktop(s: dict, client) -> dict:
     if not await wait_for_screen():
         return skipped("화면이 잠겨 있어 건너뜀(원격 데스크톱 끊김)")
     ink_check = s["expect"].get("canvas_ink")
+    if ink_check:
+        prepare_paint()
     if ink_check:
         clear_paint()
     result = await run_chat(s, client)
@@ -455,6 +519,7 @@ class SettingsRunner:
         if name == "mcp_reenabled_draws":
             if not await wait_for_screen():
                 return None, "화면이 잠겨 있어 건너뜀(원격 데스크톱 끊김)"
+            prepare_paint()
             clear_paint()
             turn = await self.ask("그림판에 웃는 얼굴 그려줘")
             return "draw_picture" in turn["tools"], {
@@ -991,6 +1056,8 @@ async def run_text_kinds(by_kind: dict, client, results: dict, save) -> None:
         started = time.perf_counter()
         try:
             run = run_desktop if s["kind"] == "desktop" else run_chat
+            if s["kind"] == "browser" and screen_ready():
+                move_mcp_chrome()
             results[s["id"]] = await run(s, client)
         except Exception as e:
             results[s["id"]] = _result(False, None, f"예외: {e!r}")
