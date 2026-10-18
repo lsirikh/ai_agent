@@ -90,8 +90,9 @@ def _chunk_middle(tracker: PlaybackTracker) -> float:
 # 시차를 셈하기 시작할 기록 수(1.5초). 3초였을 때 처음 답의 2초쯤 끼어들기를 놓쳤다
 MIN_HISTORY = 15
 COLD_HEADROOM = 1.5
-# 시차를 모를 때 비율을 쓰기 전 모을 조각 수(2초) — 에코가 늦게(최대 1.5초) 들어오기 전의
-# 0 만 보고 '에코 없음' 으로 잘못 보지 않게(끼어들기 시험: 1초 늦은 큰 에코에 끊었다)
+# 시차를 모를 때 비율을 쓰기 전 모을 조각 수(2초) — 에코가 늦게(최대 1.5초)
+# 들어오기 전의 0 만 보고 '에코 없음' 으로 잘못 보지 않게
+# (끼어들기 시험: 1초 늦은 큰 에코에 끊었다)
 COLD_MIN_SAMPLES = 20
 
 
@@ -197,7 +198,8 @@ class SpeechBargeIn:
         if len(self._ratios) >= 10:
             return float(np.percentile(list(self._ratios), 95))
         if len(self._cold) >= COLD_MIN_SAMPLES:
-            # 시차를 아직 모를 때(처음 답 · 에코가 전혀 없는 헤드셋): 최근 1.2초 최대 재생
+            # 시차를 아직 모를 때(처음 답 · 에코가 전혀 없는 헤드셋): 최근 1.2초
+            # 최대 재생
             # 크기와 견준 비율을 넉넉히(1.5배) 쓴다 — 에코가 없으면 거의 0 이라 보통
             # 목소리로 끊을 수 있다(끼어들기 시험: 헤드셋에서 끝내 끊지 못했다)
             cold = COLD_HEADROOM * float(np.percentile(list(self._cold), 95))

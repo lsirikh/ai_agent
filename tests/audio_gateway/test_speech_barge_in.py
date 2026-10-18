@@ -299,7 +299,8 @@ def test_voice_interrupts_when_there_is_no_echo_at_all() -> None:
 
 
 def test_first_answer_can_be_interrupted_after_two_seconds() -> None:
-    # 끼어들기 시험: 처음 답에서 2초쯤 끼어들면 시차를 아직 못 익혀(3초 필요) 끊지 못했다
+    # 끼어들기 시험: 처음 답에서 2초쯤 끼어들면 시차를 아직 못 익혀(3초 필요)
+    # 끊지 못했다
     hit, _ = _play(20.0, delay=0.3, gain=0.2, voice_from=2.2, voice_rms=0.2)
 
     assert hit is not None and 2.2 < hit <= 3.2
