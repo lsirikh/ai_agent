@@ -276,11 +276,15 @@ function childEnv(binDir) {
   return env;
 }
 const winQuote = a => /^[A-Za-z0-9_.,:=+\/\\@-]+$/.test(a) ? a : `"${String(a).replace(/"/g, '\\"')}"`;
+// Windows cmd 는 실행 파일 경로의 '/' 를 스위치로 읽는다('tools/bin/ok.cmd' → 'tools' + '/bin…') — 명령마다 첫 단어의 '/' 를 '\' 로.
+//   [2026-10-18 자동 이슈 #18] --check '.venv/Scripts/python -m pytest' 가 매번 실패해 정체됐다. 인자(경로 · URL)는 건드리지 않는다.
+const winProg = tok => (/\//.test(tok) && !/^[a-z][a-z0-9+.-]*:\/\//i.test(tok) && !/^-/.test(tok) ? tok.replace(/\//g, '\\') : tok);
+const winShell = s => String(s).replace(/(^|&&|\|\||\||;)(\s*)("[^"]*"|[^\s"&|;]+)/g, (m, op, sp, tok) => op + sp + winProg(tok));
 function spawnSpec(argv, forceShell) {
-  if (forceShell || isShellString(argv)) return { cmd: argv.join(' '), args: [], shell: true };
+  if (forceShell || isShellString(argv)) return { cmd: IS_WIN ? winShell(argv.join(' ')) : argv.join(' '), args: [], shell: true };
   if (/^node(\.exe)?$/i.test(argv[0])) return { cmd: process.execPath, args: argv.slice(1), shell: false };
   // Windows: npm·npx 등은 .cmd — 셸 없이 띄울 수 없다.
-  if (IS_WIN) return { cmd: argv.map(winQuote).join(' '), args: [], shell: true };
+  if (IS_WIN) return { cmd: [winProg(argv[0]), ...argv.slice(1)].map(winQuote).join(' '), args: [], shell: true };
   return { cmd: argv[0], args: argv.slice(1), shell: false };
 }
 
