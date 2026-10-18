@@ -8,6 +8,7 @@
 """
 
 import math
+import os
 import time
 from typing import Optional
 
@@ -20,11 +21,28 @@ PAINT_TITLES = ("그림판", "Paint")
 PENCIL_ID = "PencilTool"  # 그림판 연필 도구의 UI Automation Id
 
 _VK_NAMES = {
-    "ctrl": 0x11, "control": 0x11, "alt": 0x12, "shift": 0x10, "win": 0x5B,
-    "enter": 0x0D, "return": 0x0D, "tab": 0x09, "esc": 0x1B, "escape": 0x1B,
-    "space": 0x20, "backspace": 0x08, "delete": 0x2E, "del": 0x2E,
-    "home": 0x24, "end": 0x23, "pageup": 0x21, "pagedown": 0x22,
-    "left": 0x25, "up": 0x26, "right": 0x27, "down": 0x28,
+    "ctrl": 0x11,
+    "control": 0x11,
+    "alt": 0x12,
+    "shift": 0x10,
+    "win": 0x5B,
+    "enter": 0x0D,
+    "return": 0x0D,
+    "tab": 0x09,
+    "esc": 0x1B,
+    "escape": 0x1B,
+    "space": 0x20,
+    "backspace": 0x08,
+    "delete": 0x2E,
+    "del": 0x2E,
+    "home": 0x24,
+    "end": 0x23,
+    "pageup": 0x21,
+    "pagedown": 0x22,
+    "left": 0x25,
+    "up": 0x26,
+    "right": 0x27,
+    "down": 0x28,
 }
 
 
@@ -50,21 +68,33 @@ def shape_strokes(shape: dict) -> list:
             r = _number(shape, "r")
             return [_ellipse(_number(shape, "x"), _number(shape, "y"), r, r)]
         if kind == "ellipse":
-            return [_ellipse(
-                _number(shape, "x"), _number(shape, "y"),
-                _number(shape, "rx"), _number(shape, "ry"),
-            )]
+            return [
+                _ellipse(
+                    _number(shape, "x"),
+                    _number(shape, "y"),
+                    _number(shape, "rx"),
+                    _number(shape, "ry"),
+                )
+            ]
         if kind == "arc":
             r = _number(shape, "r")
-            return [_ellipse(
-                _number(shape, "x"), _number(shape, "y"), r, r,
-                _number(shape, "start"), _number(shape, "end"),
-            )]
+            return [
+                _ellipse(
+                    _number(shape, "x"),
+                    _number(shape, "y"),
+                    r,
+                    r,
+                    _number(shape, "start"),
+                    _number(shape, "end"),
+                )
+            ]
         if kind == "line":
-            return [[
-                (round(_number(shape, "x1")), round(_number(shape, "y1"))),
-                (round(_number(shape, "x2")), round(_number(shape, "y2"))),
-            ]]
+            return [
+                [
+                    (round(_number(shape, "x1")), round(_number(shape, "y1"))),
+                    (round(_number(shape, "x2")), round(_number(shape, "y2"))),
+                ]
+            ]
         if kind == "rect":
             x, y = _number(shape, "x"), _number(shape, "y")
             w, h = _number(shape, "w"), _number(shape, "h")
@@ -128,6 +158,28 @@ def _longest_run(indices: np.ndarray) -> np.ndarray:
         return indices
     runs = np.split(indices, np.where(np.diff(indices) > RUN_GAP)[0] + 1)
     return max(runs, key=lambda run: run[-1] - run[0])
+
+
+# 창을 띄울 모니터: '' (옮기지 않음) · primary · secondary · 번호(0부터)
+# 사용자 요청(2026-10-18): 시험은 보조 모니터에서 한다 → DESKTOP_MCP_MONITOR=secondary
+WORK_MONITOR = os.getenv("DESKTOP_MCP_MONITOR", "")
+
+
+def pick_monitor(monitors: list, choice: str) -> Optional[tuple]:
+    """
+    monitors: [((왼, 위, 오른, 아래) 작업 영역, 주 모니터인지), …] 에서 고른 작업 영역.
+    정하지 않았거나 없는 모니터면 None(창을 옮기지 않는다).
+    """
+    choice = (choice or "").strip().lower()
+    if not choice:
+        return None
+    if choice == "primary":
+        return next((area for area, primary in monitors if primary), None)
+    if choice == "secondary":
+        return next((area for area, primary in monitors if not primary), None)
+    if choice.isdigit() and int(choice) < len(monitors):
+        return monitors[int(choice)][0]
+    return None
 
 
 BLANK_TITLES = ("제목 없음", "Untitled")
@@ -215,7 +267,52 @@ class WindowsScreen:
         self.user32.EnumWindows(visit, 0)
         return found[0] if found else None
 
+    def monitors(self) -> list:
+        """[((왼, 위, 오른, 아래) 작업 영역, 주 모니터인지), …]"""
+        import ctypes
+        from ctypes import wintypes
+
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", wintypes.DWORD),
+                ("rcMonitor", wintypes.RECT),
+                ("rcWork", wintypes.RECT),
+                ("dwFlags", wintypes.DWORD),
+            ]
+
+        found = []
+
+        @ctypes.WINFUNCTYPE(
+            ctypes.c_int,
+            wintypes.HMONITOR,
+            wintypes.HDC,
+            ctypes.POINTER(wintypes.RECT),
+            wintypes.LPARAM,
+        )
+        def visit(monitor, _dc, _rect, _data):
+            info = MONITORINFO()
+            info.cbSize = ctypes.sizeof(MONITORINFO)
+            self.user32.GetMonitorInfoW(monitor, ctypes.byref(info))
+            work = info.rcWork
+            found.append(
+                ((work.left, work.top, work.right, work.bottom), bool(info.dwFlags & 1))
+            )
+            return 1
+
+        self.user32.EnumDisplayMonitors(None, None, visit, 0)
+        return found
+
+    def move_to_work_monitor(self, hwnd: int) -> None:
+        """설정한 모니터로 창을 옮긴다(최대화는 그 모니터에서 된다)."""
+        area = pick_monitor(self.monitors(), WORK_MONITOR)
+        if area is None:
+            return
+        left, top, right, bottom = area
+        self.user32.ShowWindow(hwnd, 9)  # SW_RESTORE — 최대화된 창은 옮겨지지 않는다
+        self.user32.MoveWindow(hwnd, left, top, right - left, bottom - top, True)
+
     def focus(self, hwnd: int) -> None:
+        self.move_to_work_monitor(hwnd)
         self.user32.ShowWindow(hwnd, 3)  # SW_MAXIMIZE
         self.user32.SetForegroundWindow(hwnd)
         time.sleep(0.8)
@@ -259,10 +356,14 @@ class WindowsScreen:
         self.click(left + cl + 2, top + ct + 2, button="right")
         time.sleep(0.2)
         mx, my = (cr - cl) * CANVAS_MARGIN, (cb - ct) * CANVAS_MARGIN
-        return square_area((
-            round(left + cl + mx), round(top + ct + my),
-            round(left + cr - mx), round(top + cb - my),
-        ))
+        return square_area(
+            (
+                round(left + cl + mx),
+                round(top + ct + my),
+                round(left + cr - mx),
+                round(top + cb - my),
+            )
+        )
 
     def select_pencil(self, hwnd: int) -> None:
         """
@@ -335,8 +436,10 @@ class WindowsScreen:
 
         class KEYBDINPUT(ctypes.Structure):
             _fields_ = [
-                ("wVk", wintypes.WORD), ("wScan", wintypes.WORD),
-                ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD),
+                ("wVk", wintypes.WORD),
+                ("wScan", wintypes.WORD),
+                ("dwFlags", wintypes.DWORD),
+                ("time", wintypes.DWORD),
                 ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
             ]
 

@@ -145,3 +145,29 @@ def test_only_blank_paint_window_is_used(title, usable) -> None:
     from services.desktop_mcp.computer import is_blank_paint
 
     assert is_blank_paint(title) is usable
+
+
+@pytest.mark.parametrize(
+    "choice, expected",
+    [
+        ("", None),  # 정하지 않으면 옮기지 않는다
+        ("primary", (0, 0, 1920, 1032)),
+        ("secondary", (1920, 0, 3840, 1032)),
+        ("1", (1920, 0, 3840, 1032)),
+        ("0", (0, 0, 1920, 1032)),
+        ("secondary-but-missing", None),
+    ],
+)
+def test_work_monitor_is_picked_from_setting(choice, expected) -> None:
+    # 사용자 요청(2026-10-18): 시험은 보조 모니터에서 한다
+    from services.desktop_mcp.computer import pick_monitor
+
+    monitors = [((0, 0, 1920, 1032), True), ((1920, 0, 3840, 1032), False)]
+
+    assert pick_monitor(monitors, choice) == expected
+
+
+def test_secondary_falls_back_when_only_one_monitor() -> None:
+    from services.desktop_mcp.computer import pick_monitor
+
+    assert pick_monitor([((0, 0, 1920, 1032), True)], "secondary") is None
