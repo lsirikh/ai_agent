@@ -72,6 +72,23 @@ PROGRAM_NAMES = {
 }
 # TTS 음성: float32(4바이트) · 24kHz mono
 TTS_BYTES_PER_SECOND = 4 * 24000
+# 브라우저를 쓰고 이만큼 안에 한 말은 이어지는 브라우저 일로 본다('영상 재생해'·'꺼 줘')
+BROWSER_FOLLOW_UP_SECONDS = 600
+# 도구 없이 '했다/하겠다' 고 한 답(사용자 보고 2026-10-19: 하겠다고만 하고 하지 않았다)
+ACTION_WORD = re.compile(
+    r"종료|닫|껐|꺼졌|재생|틀었|틀어|열었|열어|클릭|눌렀|눌러|건너뛰|이동|입력|그렸"
+)
+DONE_OR_PROMISE = re.compile(
+    r"했습니다|했어요|었습니다|었어요|됐습니다|되었습니다|되고\s*있|하겠습니다|"
+    r"할게요|드릴게요|겠습니다|드렸|주겠"
+)
+
+
+def claims_action(answer: str) -> bool:
+    """답이 무언가를 했다(하겠다)고 말하는지."""
+    return bool(ACTION_WORD.search(answer or "")) and bool(
+        DONE_OR_PROMISE.search(answer or "")
+    )
 
 
 def confirm_question(name: str, arguments: Any) -> str:
@@ -290,6 +307,9 @@ class Orchestrator:
         # 음성으로 "실행할까요?" 라고 물은 뒤 답을 기다리는 도구 호출
         self.mcp: Optional[Any] = None
         self._pending_confirm: Optional[dict] = None
+        # 마지막으로 브라우저 도구를 부른 시각(time.monotonic)
+        # — 이어서 한 말을 브라우저 일로 본다
+        self._browser_used_at: Optional[float] = None
 
         # TTS 설정 (Phase 8.3)
         self._current_session_id: Optional[str] = None
@@ -647,6 +667,7 @@ class Orchestrator:
         llm_start_time = time.time()
         web_sources: list = []
         announced = False
+        called: list = []  # 이번 턴에 부른 도구
 
         # 채팅과 같은 활성 세션의 히스토리로 답한다
         # (인식 문장은 히스토리를 읽은 뒤 저장)
@@ -716,8 +737,11 @@ class Orchestrator:
                 ]
             async for token in self.llm_client.generate_stream(
                 text, history=history, summary=summary, rag_context=rag_context,
-                tools=registry, confirm=self._defer_confirm
+                tools=registry, confirm=self._defer_confirm,
+                browser_active=self._browser_recently_used(),
             ):
+                if isinstance(token, dict):
+                    await self._log_tool_event(token, called)
                 if isinstance(token, dict) and token["type"] == "tool_confirm":
                     # 실행 전 확인: 정해진 질문을 말하고 다음 턴의 예/아니오를 기다린다.
                     # 모델의 이어지는 말은 쓰지 않는다(했다고 지어낸다)
@@ -759,6 +783,8 @@ class Orchestrator:
             # 침묵 대신 안내한다
             if full_response.strip() and self._spoken_this_turn == 0:
                 await speak_sentence(self.NOTHING_SPOKEN_REPLY)
+
+            await self._log_turn_tools(text, full_response, called)
 
             # 어시스턴트 응답을 컨텍스트에 추가
             if hasattr(self.llm_client, 'add_to_context') and full_response:
@@ -811,6 +837,64 @@ class Orchestrator:
             )
             # 에러 시 IDLE로 복귀
             self.state_machine.reset()
+
+    def _browser_recently_used(self) -> bool:
+        used = self._browser_used_at
+        return used is not None and time.monotonic() - used < BROWSER_FOLLOW_UP_SECONDS
+
+    async def _log_tool_event(self, token: dict, called: list) -> None:
+        """도구 호출·결과를 단계별로 남긴다(무엇을 어떤 인자로 불러 어떻게 됐는지)."""
+        name = token["name"]
+        if token["type"] in ("tool_call", "tool_confirm"):
+            called.append(name)
+            if "browser" in name:
+                self._browser_used_at = time.monotonic()
+            await self._logger.log(
+                event="tool_call",
+                session_id=self._current_session_id,
+                data={
+                    "message": f"{name} {token['arguments'][:120]}"
+                    + (" (확인 필요)" if token["type"] == "tool_confirm" else ""),
+                    "name": name,
+                    "arguments": token["arguments"][:500],
+                    "needs_confirm": token["type"] == "tool_confirm",
+                },
+            )
+        elif token["type"] == "tool_result":
+            first = next(
+                (ln.strip() for ln in token["content"].splitlines() if ln.strip()), ""
+            )
+            await self._logger.log(
+                event="tool_result",
+                session_id=self._current_session_id,
+                data={
+                    "message": f"{name} {'실패' if token['is_error'] else '성공'}: "
+                    f"{first[:150]}",
+                    "name": name,
+                    "is_error": token["is_error"],
+                    "content": token["content"][:500],
+                },
+                level="warning" if token["is_error"] else "info",
+            )
+
+    async def _log_turn_tools(self, question: str, answer: str, called: list) -> None:
+        """턴 요약: 부른 도구. 도구 없이 '했다/하겠다' 고 답했으면 경고로 남긴다."""
+        await self._logger.log(
+            event="turn_tools",
+            session_id=self._current_session_id,
+            data={"message": f"부른 도구: {called or '없음'}", "called": called},
+        )
+        if not called and claims_action(answer):
+            await self._logger.log(
+                event="action_claim_without_tool",
+                session_id=self._current_session_id,
+                data={
+                    "message": f"도구 없이 했다고 답함: {answer[:80]}",
+                    "question": question[:200],
+                    "answer": answer[:300],
+                },
+                level="warning",
+            )
 
     async def _load_session_context(self) -> tuple[Optional[list], Optional[str]]:
         """

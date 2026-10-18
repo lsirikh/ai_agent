@@ -411,6 +411,7 @@ class LLMClient:
         summary: Optional[str] = None,
         tools: Optional[ToolRegistry] = None,
         confirm: Optional[Confirm] = None,
+        browser_active: bool = False,
         **kwargs
     ) -> AsyncGenerator[Any, None]:
         """
@@ -425,6 +426,7 @@ class LLMClient:
             summary: 세션 요약
             tools: 이번 턴에 쓸 도구 (모델에 맞는 tool parser 가 없으면 쓰지 않는다)
             confirm: 확인이 필요한 도구를 실행해도 되는지 묻는 콜백
+            browser_active: 바로 앞에 브라우저를 썼다(이어서 한 말도 브라우저 일로 본다)
             **kwargs: 추가 생성 파라미터
 
         Yields:
@@ -438,6 +440,28 @@ class LLMClient:
             tools = None
         # 열기·접속을 할 도구가 없으면 모델에 맡기지 않는다(했다고 지어낸다 — 실측)
         cannot = tools and unavailable_action_reply(user_message or "", tools.names())
+        plan = (
+            required_tools(user_message, tools.names(), browser_active)
+            if tools and not cannot
+            else []
+        )
+        # 어떤 도구를 내놓고 무엇을 강제했는지 — 말만 하고 하지 않은 턴을 가려내려고
+        # (사용자 보고 2026-10-19: 로그로는 도구를 불렀는지 알 수 없었다)
+        await self._logger.log(
+            event="tool_plan",
+            session_id=session_id,
+            data={
+                "message": (
+                    f"도구 {len(tools.names()) if tools else 0}개 · "
+                    f"강제 {plan or '없음'}" + (" · 할 수 없음 답" if cannot else "")
+                ),
+                "question": (user_message or "")[:200],
+                "offered": tools.names() if tools else [],
+                "plan": plan,
+                "browser_active": browser_active,
+                "cannot": bool(cannot),
+            },
+        )
         if cannot:
             yield cannot
             return
@@ -510,9 +534,7 @@ class LLMClient:
                 tools,
                 input_budget=input_budget(self.max_model_len, max_tokens),
                 confirm=confirm,
-                required=(
-                    required_tools(user_message, tools.names()) if tools else None
-                ),
+                required=plan or None,
             ):
                 if isinstance(item, str):
                     total_tokens += 1
