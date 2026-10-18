@@ -89,6 +89,8 @@ def _chunk_middle(tracker: PlaybackTracker) -> float:
 
 # 시차를 셈하기 시작할 기록 수(1.5초). 3초였을 때 처음 답의 2초쯤 끼어들기를 놓쳤다
 MIN_HISTORY = 15
+AUDIBLE_RMS = 0.005
+MIN_AUDIBLE = 10
 COLD_HEADROOM = 1.5
 # 시차를 모를 때 비율을 쓰기 전 모을 조각 수(2초) — 에코가 늦게(최대 1.5초)
 # 들어오기 전의 0 만 보고 '에코 없음' 으로 잘못 보지 않게
@@ -126,13 +128,22 @@ class EchoDelay:
         """지금 마이크에 들어오는 에코를 낸 재생 크기."""
         if self.delay is None:
             return tracker.level()
-        return tracker.around(_chunk_middle(tracker) - self.delay, 0.15)
+        # 익힌 시차보다 일찍 들어오는 에코도 덮는다: [지금 - 시차 - 0.15, 지금]
+        # (끼어들기 시험: 새 답의 에코가 일찍 들어오자 재생 크기를 0 으로 봐
+        #  다시 끊었다)
+        start = _chunk_middle(tracker) - self.delay - 0.15
+        end = tracker.clock()
+        return tracker.around((start + end) / 2, (end - start) / 2)
 
     def observe(self, mic_rms: float, tracker: PlaybackTracker) -> bool:
         """마이크 조각 하나를 기록한다. 시차를 새로 익혔거나 바꿨으면 True."""
         self._history.append((_chunk_middle(tracker), mic_rms))
         self._seen += 1
         if self._seen % self.every or len(self._history) < MIN_HISTORY:
+            return False
+        # 에코(들리는 소리)가 1초 넘게 쌓인 뒤에 셈한다 — 늦게(1초) 들어온 에코의
+        # 앞 0.5초만 보고 비율을 낮게 익혀 큰 에코에 끊었다(끼어들기 시험)
+        if sum(1 for _, rms in self._history if rms > AUDIBLE_RMS) < MIN_AUDIBLE:
             return False
         found = self._estimate(tracker)
         if found is None or (
@@ -147,7 +158,8 @@ class EchoDelay:
         if self.delay is None:
             return []
         pairs = [
-            (rms, tracker.around(t - self.delay, 0.15)) for t, rms in self._history
+            (rms, tracker.around(t - self.delay / 2 - 0.025, self.delay / 2 + 0.175))
+            for t, rms in self._history
         ]
         return [rms / far for rms, far in pairs if far >= min_far]
 
