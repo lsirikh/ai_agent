@@ -30,6 +30,54 @@ WAKE_WORD_MODELS = {
 # STT 로 받아 적은 글에 호출어가 있는지 ('헤이 자비스!' · '헤이자비스' · 'Hey Jarvis')
 WAKE_TEXT = re.compile(r"[자쟈재저제]\s*[비삐]\s*[스즈쓰]|jarvis", re.IGNORECASE)
 VERIFY_SECONDS = 2.5  # STT 로 확인할 최근 소리 길이
+# 짧은 말을 STT 로 받아 적었을 때 호출어로 보는 꼴: '헤이 자비스' 로 시작해야 한다
+# (답이나 대화 속 '자비스' 로는 깨지 않게)
+WAKE_START = re.compile(
+    r"^\W*(헤이|해이|에이|하이|hey|hi)\W*([자쟈재저제]\s*[비삐]\s*[스즈쓰]|jarvis)",
+    re.IGNORECASE,
+)
+
+
+class UtteranceSpotter:
+    """
+    짧은 말(0.6~2.5초)을 소리 크기로 찾는다 — 끝나면(0.4초 조용) 그 소리를 돌려준다.
+    한국어 발음 '헤이 자비스' 는 openwakeword 점수가 0~10% 라(끼어들기 시험 2026-10-18)
+    이렇게 찾은 짧은 말을 STT 로 확인한다. 긴 말(TV·대화)은 건너뛴다.
+    """
+
+    def __init__(self, sample_rate: int = 16000, min_seconds: float = 0.6,
+                 max_seconds: float = 2.5, end_silence: float = 0.4):
+        self.sample_rate = sample_rate
+        self.min_seconds, self.max_seconds = min_seconds, max_seconds
+        self.end_silence = end_silence
+        # 최근 10초 소리 크기 — 그중 조용한 쪽(10%)을 바탕 소음으로 본다
+        # (가운데 값이면 긴 말 도중에 바탕이 말소리만큼 올라가 말이 끝난 것으로 봤다)
+        self._recent: deque = deque(maxlen=100)
+        self._buffer: list = []
+        self._silent = 0.0
+        self._speaking = False
+
+    def feed(self, chunk: np.ndarray) -> Optional[np.ndarray]:
+        rms = float(np.sqrt(np.mean(chunk ** 2))) if len(chunk) else 0.0
+        floor = float(np.percentile(self._recent, 10)) if self._recent else 0.0
+        self._recent.append(rms)
+        loud = rms > max(0.01, 3 * floor)
+        seconds = len(chunk) / self.sample_rate
+        if loud:
+            self._speaking = True
+            self._silent = 0.0
+            self._buffer.append(chunk)
+            return None
+        if not self._speaking:
+            return None
+        self._buffer.append(chunk)
+        self._silent += seconds
+        if self._silent < self.end_silence:
+            return None
+        audio = np.concatenate(self._buffer)
+        self._buffer, self._speaking, self._silent = [], False, 0.0
+        spoken = len(audio) / self.sample_rate - self.end_silence
+        return audio if self.min_seconds <= spoken <= self.max_seconds else None
 
 
 class WakeWordDetector:
@@ -108,6 +156,7 @@ class WakeWordDetector:
         self._recent_samples = 0
         self._verify_task: Optional[asyncio.Task] = None
         self._verify_quiet_until = 0.0
+        self._spotter = UtteranceSpotter(sample_rate=sample_rate)
 
         # Pipeline logger
         self._logger = get_logger("wake_word")
@@ -215,6 +264,12 @@ class WakeWordDetector:
             - cooldown: 쿨다운 상태 여부 (쿨다운 중일 때)
         """
         self._remember(audio_chunk)
+        utterance = self._spotter.feed(audio_chunk)
+        if utterance is not None and not self._is_in_cooldown:
+            self._start_verify(
+                {"wake_word": self.wake_word, "confidence": 0.0},
+                audio=utterance, strict=True,
+            )
 
         # 쿨다운 체크
         if self._is_in_cooldown:
@@ -289,19 +344,33 @@ class WakeWordDetector:
         self._recent.clear()
         self._recent_samples = 0
 
-    def _start_verify(self, result: Dict[str, Any]) -> None:
+    def _start_verify(
+        self, result: Dict[str, Any], audio: Optional[np.ndarray] = None,
+        strict: bool = False,
+    ) -> None:
         busy = self._verify_task is not None and not self._verify_task.done()
         if busy or self.verifier is None or time.time() < self._verify_quiet_until:
             return
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return  # 이벤트 루프 밖(동기 detect 시험)에서는 확인하지 않는다
         wake_word = result.get("wake_word") or self.wake_word
         self._verify_task = asyncio.create_task(
-            self._verify(wake_word, result["confidence"])
+            self._verify(wake_word, result["confidence"], audio, strict)
         )
 
-    async def _verify(self, wake_word: str, confidence: float) -> None:
-        """애매한 점수: 최근 소리를 받아 적어 '자비스' 가 있으면 감지로 본다."""
-        await asyncio.sleep(self.verify_delay)
-        audio = np.concatenate(list(self._recent)) if self._recent else np.zeros(0)
+    async def _verify(
+        self, wake_word: str, confidence: float,
+        audio: Optional[np.ndarray] = None, strict: bool = False,
+    ) -> None:
+        """
+        애매한 점수: 최근 소리를 받아 적어 '자비스' 가 있으면 감지로 본다.
+        strict(짧은 말로 찾은 것): '헤이 자비스' 로 시작할 때만.
+        """
+        if audio is None:
+            await asyncio.sleep(self.verify_delay)
+            audio = np.concatenate(list(self._recent)) if self._recent else np.zeros(0)
         try:
             text = await self.verifier(audio) or ""
         except Exception as e:
@@ -313,7 +382,8 @@ class WakeWordDetector:
             data={"message": f"{confidence:.1%} → STT '{text[:40]}'", "text": text},
             level="debug",
         )
-        if self._is_in_cooldown or not WAKE_TEXT.search(text):
+        pattern = WAKE_START if strict else WAKE_TEXT
+        if self._is_in_cooldown or not pattern.search(text):
             return
         self._last_detection_time = time.time()
         self._is_in_cooldown = True
