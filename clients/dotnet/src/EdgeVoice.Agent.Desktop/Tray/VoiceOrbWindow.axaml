@@ -2,7 +2,7 @@
         xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:tray="clr-namespace:EdgeVoice.Agent.Desktop.Tray"
-        Width="151" Height="157"
+        Width="151" Height="127"
         SystemDecorations="None" TransparencyLevelHint="Transparent" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" CanResize="False" ShowActivated="False"
         ToolTip.Tip="&quot;Hey Jarvis&quot; 로 깨우기 · 파형 클릭: 듣기 시작 / 한 번 더 누르면 정지 · 오른쪽 클릭: EdgeVoice 창 열기 · 드래그: 원하는 곳으로 이동(자리 기억)">
@@ -40,26 +40,6 @@
         <Style Selector="Border.stage.done PathIcon, Border.stage.active PathIcon">
             <Setter Property="Foreground" Value="#FFFFFFFF" />
         </Style>
-        <!-- 오른쪽 아래 버튼 줄(중단 · 음소거) — 사용자 요청 2026-10-18 -->
-        <Style Selector="Button.orb">
-            <Setter Property="Width" Value="30" />
-            <Setter Property="Height" Value="24" />
-            <Setter Property="Padding" Value="0" />
-            <Setter Property="CornerRadius" Value="5" />
-            <Setter Property="Background" Value="#B318181B" />
-            <Setter Property="BorderBrush" Value="#3FFFFFFF" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="HorizontalContentAlignment" Value="Center" />
-            <Setter Property="VerticalContentAlignment" Value="Center" />
-        </Style>
-        <Style Selector="Button.orb PathIcon">
-            <Setter Property="Width" Value="11" />
-            <Setter Property="Height" Value="11" />
-            <Setter Property="Foreground" Value="#E4E4E7" />
-        </Style>
-        <Style Selector="Button.orb.stop PathIcon">
-            <Setter Property="Foreground" Value="#FCA5A5" />
-        </Style>
     </Window.Styles>
 
     <StackPanel HorizontalAlignment="Center" Spacing="4">
@@ -82,14 +62,6 @@
             </Border>
         </StackPanel>
 
-        <StackPanel x:Name="Buttons" Orientation="Horizontal" Spacing="3" HorizontalAlignment="Right">
-            <Button x:Name="MuteButton" Classes="orb" ToolTip.Tip="마이크 음소거 / 해제">
-                <PathIcon Data="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0h-2a5 5 0 0 1-10 0zM11 18h2v4h-2z" />
-            </Button>
-            <Button x:Name="StopButton" Classes="orb stop" ToolTip.Tip="중단: 말하던 답을 멈추고 대기로">
-                <PathIcon Data="M6 6h12v12H6z" />
-            </Button>
-        </StackPanel>
 
         <TextBlock x:Name="StateLabel" HorizontalAlignment="Center" Foreground="#FCA5A5"
                    FontSize="9" TextWrapping="Wrap" MaxWidth="146" IsVisible="False" />

@@ -38,8 +38,6 @@ public partial class VoiceOrbWindow : Window
     {
         _placementFile = placementFile;
         InitializeComponent();
-        StopButton.Click += (_, _) => StopRequested?.Invoke();
-        MuteButton.Click += (_, _) => TalkRequested?.Invoke();
         if (Screens.Primary is { } screen)
         {
             var area = screen.WorkingArea;
@@ -58,16 +56,10 @@ public partial class VoiceOrbWindow : Window
         }
     }
 
-    /// <summary>마이크 버튼: 음소거 / 해제.</summary>
-    public event Action? TalkRequested;
-
     /// <summary>파형을 짧게 눌렀다: 대기면 듣기, 듣거나 답하는 중이면 멈춤(사용자 요청 2026-10-19).</summary>
     public event Action? OrbClicked;
 
     public event Action? OpenRequested;
-
-    /// <summary>[중단] 버튼: 말하던 답을 멈추고 대기로(사용자 요청 2026-10-18).</summary>
-    public event Action? StopRequested;
 
     private static readonly (PipelineStage Stage, Color Accent)[] StageAccents =
     {

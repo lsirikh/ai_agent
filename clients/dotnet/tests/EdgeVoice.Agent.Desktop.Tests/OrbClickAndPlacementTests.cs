@@ -32,7 +32,7 @@ public class OrbClickAndPlacementTests
     [Fact]
     public void 옮겨_둔_자리가_화면_안이면_그_자리에_띄운다()
     {
-        var size = new PixelSize(151, 157);
+        var size = new PixelSize(151, 127);
 
         Assert.Equal(new PixelPoint(2500, 300), OrbPlacement.Fit(new PixelPoint(2500, 300), TwoScreens, size));
         Assert.Equal(new PixelPoint(100, 100), OrbPlacement.Fit(new PixelPoint(100, 100), TwoScreens, size));
@@ -41,7 +41,7 @@ public class OrbClickAndPlacementTests
     [Fact]
     public void 화면이_없어졌거나_저장한_자리가_없으면_기본_자리에_띄운다()
     {
-        var size = new PixelSize(151, 157);
+        var size = new PixelSize(151, 127);
 
         Assert.Null(OrbPlacement.Fit(new PixelPoint(5000, 300), TwoScreens, size)); // 떼어 낸 모니터
         Assert.Null(OrbPlacement.Fit(null, TwoScreens, size));
