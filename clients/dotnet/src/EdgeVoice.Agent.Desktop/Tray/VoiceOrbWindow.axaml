@@ -5,7 +5,7 @@
         Width="151" Height="157"
         SystemDecorations="None" TransparencyLevelHint="Transparent" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" CanResize="False" ShowActivated="False"
-        ToolTip.Tip="&quot;Hey Jarvis&quot; 로 깨우기 · 왼쪽 클릭: 마이크 음소거/해제 · 오른쪽 클릭: EdgeVoice 창 열기 · 드래그: 이동">
+        ToolTip.Tip="&quot;Hey Jarvis&quot; 로 깨우기 · 파형 클릭: 듣기 시작 / 한 번 더 누르면 정지 · 오른쪽 클릭: EdgeVoice 창 열기 · 드래그: 원하는 곳으로 이동(자리 기억)">
     <Window.Styles>
         <!-- 단계 칸(아이콘만, 이름은 툴팁): 대기는 흐림, 지나간 단계는 반투명 색, 지금 단계는 불 들어온 색.
              크기는 예전(창 232×196·칸 52×40)의 65% (사용자 요청) -->

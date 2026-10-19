@@ -81,6 +81,26 @@ async def stop_voice():
     return {"status": "stopping"}
 
 
+# '헤이 자비스' 감지와 같은 채널 — 오케스트레이터는 듣기로, 게이트웨이는 녹음을 시작한다
+WAKE_WORD_CHANNEL = "edgevoice:wake_word:detected"
+
+
+@router.post("/listen")
+async def start_listening():
+    """앱의 파형을 눌러 듣기 시작(사용자 요청 2026-10-19: 호출어 없이 누르면 입력)."""
+    from ..services import conversation
+
+    event = {
+        "type": "wake_word_detected",
+        "wake_word": "button",
+        "confidence": 1.0,
+        "source": "button",
+        "timestamp": time.time(),
+    }
+    await conversation._get_redis().publish(WAKE_WORD_CHANNEL, json.dumps(event))
+    return {"status": "listening"}
+
+
 @router.post("/state", response_model=StateUpdateResponse)
 async def update_orchestrator_state(request: StateUpdateRequest):
     """

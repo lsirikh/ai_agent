@@ -12,8 +12,15 @@ namespace EdgeVoice.Agent.Desktop.Tray;
 /// <summary>
 /// 시스템 트레이 아이콘(Avalonia TrayIcon). 음성 상태에 따라 아이콘 자체가 파형 애니메이션을 그린다.
 /// 마이크는 앱이 켜지면 상시 스트리밍되어 "Hey Jarvis" 만으로 바로 깨어난다.
-/// 트레이·오버레이 클릭은 음소거를 켜고 끈다.
+/// 트레이 클릭·파형 창의 마이크 버튼은 음소거를 켜고 끈다. 파형을 누르면 듣기 시작 / 멈춤.
 /// </summary>
+/// <summary>파형을 눌렀을 때 할 일.</summary>
+public enum OrbAction
+{
+    Listen,
+    Stop,
+}
+
 public sealed class TrayController : IDisposable
 {
     private const int IconSize = 32;
@@ -43,7 +50,8 @@ public sealed class TrayController : IDisposable
     private string? _lastNotice;
 
     public TrayController(Application app, VoiceStateMonitor monitor, MicrophoneStreamer mic, AlwaysOnMicrophone alwaysOn,
-        Action openMainWindow, Action exit, Func<System.Threading.Tasks.Task>? stopVoice = null)
+        Action openMainWindow, Action exit, Func<System.Threading.Tasks.Task>? stopVoice = null,
+        Func<System.Threading.Tasks.Task>? listenVoice = null)
     {
         _mic = mic;
         _alwaysOn = alwaysOn;
@@ -74,16 +82,33 @@ public sealed class TrayController : IDisposable
         _trayIcon.Clicked += (_, _) => ToggleMute();
         TrayIcon.SetIcons(app, new TrayIcons { _trayIcon });
 
-        _orb = new VoiceOrbWindow();
+        _orb = new VoiceOrbWindow(OrbPlacement.DefaultPath);
         _orb.TalkRequested += ToggleMute;
         _orb.OpenRequested += openMainWindow;
         // [중단]: 남은 답 음성을 곧바로 끊고 서버에 멈추라고 알린다(사용자 요청 2026-10-18)
-        _orb.StopRequested += () =>
+        void Stop()
         {
             _player.Stop();
             if (stopVoice is not null)
             {
                 _ = stopVoice();
+            }
+        }
+
+        _orb.StopRequested += Stop;
+        // 파형 클릭: 대기면 듣기 시작(호출어 없이), 듣거나 답하는 중이면 멈춤(사용자 요청 2026-10-19)
+        _orb.OrbClicked += () =>
+        {
+            if (ActionFor(_serverState) == OrbAction.Stop)
+            {
+                Stop();
+                return;
+            }
+
+            _alwaysOn.IsMuted = false; // 음소거면 들을 소리가 없다
+            if (listenVoice is not null)
+            {
+                _ = listenVoice();
             }
         };
         _orb.Show();
@@ -171,6 +196,11 @@ public sealed class TrayController : IDisposable
         VoiceState.Error => "오류",
         _ => "\"Hey Jarvis\" 대기",
     };
+
+    public static OrbAction ActionFor(VoiceState state) =>
+        state is VoiceState.Listening or VoiceState.Thinking or VoiceState.Speaking
+            ? OrbAction.Stop
+            : OrbAction.Listen;
 
     private void ToggleMute() => _alwaysOn.IsMuted = !_alwaysOn.IsMuted;
 

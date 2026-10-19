@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -25,9 +26,17 @@ public partial class VoiceOrbWindow : Window
 {
     private PointerPressedEventArgs? _press;
     private Point? _pressPoint;
+    private readonly string? _placementFile;
 
     public VoiceOrbWindow()
+        : this(null)
     {
+    }
+
+    /// <param name="placementFile">옮긴 자리를 적어 둘 파일(없으면 기억하지 않는다)</param>
+    public VoiceOrbWindow(string? placementFile)
+    {
+        _placementFile = placementFile;
         InitializeComponent();
         StopButton.Click += (_, _) => StopRequested?.Invoke();
         MuteButton.Click += (_, _) => TalkRequested?.Invoke();
@@ -35,13 +44,25 @@ public partial class VoiceOrbWindow : Window
         {
             var area = screen.WorkingArea;
             var scale = screen.Scaling;
-            Position = new PixelPoint(
-                area.Right - (int)((Width + 16) * scale),
-                area.Bottom - (int)((Height + 16) * scale));
+            var size = new PixelSize((int)(Width * scale), (int)(Height * scale));
+            var saved = placementFile is null ? null : OrbPlacement.Load(placementFile);
+            Position = OrbPlacement.Fit(saved, Screens.All.Select(s => s.WorkingArea), size)
+                ?? new PixelPoint(
+                    area.Right - (int)((Width + 16) * scale),
+                    area.Bottom - (int)((Height + 16) * scale));
+        }
+
+        if (placementFile is not null)
+        {
+            PositionChanged += (_, e) => OrbPlacement.Save(placementFile, e.Point);
         }
     }
 
+    /// <summary>마이크 버튼: 음소거 / 해제.</summary>
     public event Action? TalkRequested;
+
+    /// <summary>파형을 짧게 눌렀다: 대기면 듣기, 듣거나 답하는 중이면 멈춤(사용자 요청 2026-10-19).</summary>
+    public event Action? OrbClicked;
 
     public event Action? OpenRequested;
 
@@ -83,7 +104,7 @@ public partial class VoiceOrbWindow : Window
         StateLabel.IsVisible = text.Length > 0;
     }
 
-    // 짧게 누르고 떼면 말하기 토글, 누른 채 움직이면 창 이동
+    // 짧게 누르고 떼면 듣기/멈춤, 누른 채 움직이면 창 이동(옮긴 자리는 기억한다)
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
@@ -119,7 +140,7 @@ public partial class VoiceOrbWindow : Window
         }
         else if (_pressPoint is not null)
         {
-            TalkRequested?.Invoke();
+            OrbClicked?.Invoke();
         }
 
         _press = null;

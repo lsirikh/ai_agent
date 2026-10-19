@@ -41,7 +41,9 @@ public partial class App : Application
                 OpenMainWindow,
                 () => desktop.Shutdown(),
                 () => _container.Resolve<EdgeVoiceApiClient>()
-                    .SendAsync(System.Net.Http.HttpMethod.Post, "api/orchestrator/stop", null));
+                    .SendAsync(System.Net.Http.HttpMethod.Post, "api/orchestrator/stop", null),
+                () => _container.Resolve<EdgeVoiceApiClient>()
+                    .SendAsync(System.Net.Http.HttpMethod.Post, "api/orchestrator/listen", null));
 
             desktop.Exit += (_, _) =>
             {
